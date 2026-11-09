@@ -69,7 +69,7 @@ fn bad(msg: &str) -> Result<Response> {
 /// 1000 kun (ARUDRIVE `LIST_TTL`/`CHUNK_CACHE_SECONDS` bilan bir xil). `META_V` — kesh kalitining versiyasi: o'zgartirib qayta deploy qilinsa
 /// eski yozuvlarning hammasi ko'rinmay qoladi (masalan, bazani noldan boshlaganda).
 const META_TTL: u64 = 1000 * 24 * 3600;
-const META_V: &str = "1";
+const META_V: &str = "2";
 
 fn meta_url(name: &str) -> String {
     cache_key_url(&format!("vd~{name}"), &format!("meta{META_V}"))
@@ -278,7 +278,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
@@ -436,6 +436,19 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let r = first_row(&r).unwrap_or(json!({}));
             ok(json!({"store": jint(&r, "store"), "mig": jint(&r, "mig"), "full": staged_bytes(env).await >= cap_bytes(env)}))
         }
+        // ── NOLDAN BOSHLASH (foydalanuvchi talabi): kanal postlari va R2 obyektlarini o'chirish. Jadvallarni Actions (`vd-wipe.yml`) tozalaydi. ──
+        "/api/vd/wipe" => match b["stage"].as_str().unwrap_or("") {
+            "cancel" => ok(json!({"cancelled": cancel_runs(env).await})),
+            "files" => ok(wipe_files(env, &bk).await?),
+            // Baza Actions orqali to'g'ridan-to'g'ri tozalangach: "o'zgarish bormi?" belgilari yangilanadi (ilova/Mini App eski ro'yxatni ushlab qolmasin).
+            "marks" => {
+                let t: Vec<String> = b["tables"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+                marks_bump(env, &t).await;
+                free_seasons_forget().await;
+                ok(json!({"ok": true, "tables": t.len()}))
+            }
+            _ => bad("stage"),
+        },
         // Tekshiruv (ENCODE_TOKEN): tayyor faylning 0-bo'lagini Telegram'dan olib, boshidagi 64 baytni (shifrlangan) va kalitni qaytaradi —
         // Actions shifr ochilib MP4 chiqishini tekshiradi (kalit logga chiqmaydi). `name` berilmasa — eng so'nggi tayyor fayl.
         "/api/vd/verify" => {
@@ -542,6 +555,110 @@ impl PipeFirst for Value {
     fn pipe_first(&self) -> Option<Value> {
         first_row(self)
     }
+}
+
+/// Saqlash va migratsiya workflow'larining ishlab turgan (yoki navbatdagi) run'larini bekor qiladi (noldan boshlashdan oldin).
+async fn cancel_runs(env: &Env) -> i64 {
+    let repo = tg_secret(env, "GH_REPO");
+    if !repo.contains('/') {
+        return 0;
+    }
+    let mut n = 0;
+    for wf in [WORKFLOW, MIG_WORKFLOW] {
+        if let Ok((200, v)) = gh_api(env, Method::Get, &format!("/repos/{repo}/actions/workflows/{wf}/runs?per_page=20"), None).await {
+            for r in v["workflow_runs"].as_array().cloned().unwrap_or_default() {
+                if matches!(r["status"].as_str(), Some("in_progress") | Some("queued") | Some("waiting")) {
+                    if let Some(id) = r["id"].as_i64() {
+                        if matches!(gh_api(env, Method::Post, &format!("/repos/{repo}/actions/runs/{id}/cancel"), None).await, Ok((202, _))) {
+                            n += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    n
+}
+
+/// Kanaldan xabarlarni o'chiradi (asosiy bot, bo'lmasa kodlash boti). `true` — so'rov muvaffaqiyatli.
+async fn del_msgs(env: &Env, channel: i64, msgs: &[i64]) -> bool {
+    if msgs.is_empty() || channel == 0 {
+        return true;
+    }
+    let body = json!({"chat_id": channel, "message_ids": msgs});
+    if tg_api(env, "deleteMessages", body.clone()).await.is_ok() {
+        return true;
+    }
+    !encbot_token(env).is_empty() && encbot_api(env, "deleteMessages", body).await.is_ok()
+}
+
+/// Bir chaqiruvda cheklangan ish (worker so'rovlar chegarasi): `tg_files` / `vd_files` dagi kanal xabarlari o'chadi, qatorlar olib tashlanadi,
+/// R2 dagi `vd/` va `r2_files` obyektlari o'chadi. Qolgan ish soni qaytadi — Actions `left == 0` bo'lguncha qayta chaqiradi.
+/// `bd/` (ARUDRIVE) prefiksi va boshqa kalitlarga TEGILMAYDI.
+async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
+    ensure(env).await?;
+    let channel = tg_channel_id(env);
+    let (mut deleted, mut failed) = (0i64, 0i64);
+    for _ in 0..10 {
+        let r = turso_exec(env, "SELECT file_name,msg_id FROM tg_files LIMIT 100", vec![]).await?;
+        let rows = rows_of(&r);
+        if rows.is_empty() {
+            break;
+        }
+        let msgs: Vec<i64> = rows.iter().map(|x| jint(x, "msg_id")).filter(|m| *m > 0).collect();
+        if del_msgs(env, channel, &msgs).await { deleted += msgs.len() as i64 } else { failed += msgs.len() as i64 }
+        let names: Vec<String> = rows.iter().filter_map(|x| x["file_name"].as_str().map(String::from)).collect();
+        let marks = vec!["?"; names.len()].join(",");
+        turso_exec(env, &format!("DELETE FROM tg_files WHERE file_name IN ({marks})"), names.iter().map(|n| TursoArg::text(n)).collect()).await?;
+    }
+    for _ in 0..5 {
+        let r = turso_exec(env, "SELECT name,msg_ids FROM vd_files LIMIT 1", vec![]).await?;
+        let Some(row) = first_row(&r) else { break };
+        let name = row["name"].as_str().unwrap_or("").to_string();
+        let msgs: Vec<i64> = ids(row["msg_ids"].as_str().unwrap_or("")).iter().filter_map(|x| x.parse().ok()).collect();
+        for part in msgs.chunks(100) {
+            if del_msgs(env, channel, part).await { deleted += part.len() as i64 } else { failed += part.len() as i64 }
+        }
+        r2_delete_all(bk, &name).await;
+        meta_drop(&name).await;
+        turso_exec(env, "DELETE FROM vd_files WHERE name=?", vec![TursoArg::text(&name)]).await?;
+    }
+    // Yetkazilgan (anibla/to'plam) fayllarning kanal xabarlari: `dlv_msg_<nom>` -> xabar raqami.
+    let r = turso_exec(env, "SELECT cfg_key,cfg_value FROM app_config WHERE cfg_key LIKE 'dlv\\_msg\\_%' ESCAPE '\\' LIMIT 100", vec![]).await?;
+    let rows = rows_of(&r);
+    if !rows.is_empty() {
+        let msgs: Vec<i64> = rows.iter().filter_map(|x| x["cfg_value"].as_str().and_then(|v| v.parse().ok())).collect();
+        if del_msgs(env, channel, &msgs).await { deleted += msgs.len() as i64 } else { failed += msgs.len() as i64 }
+        let keys: Vec<String> = rows.iter().filter_map(|x| x["cfg_key"].as_str().map(String::from)).collect();
+        let marks = vec!["?"; keys.len()].join(",");
+        turso_exec(env, &format!("DELETE FROM app_config WHERE cfg_key IN ({marks})"), keys.iter().map(|n| TursoArg::text(n)).collect()).await?;
+    }
+    // R2: `vd/` prefiksi (yarim yuklangan bo'laklar) va eski oraliq ombor (`r2_files`).
+    if let Ok(list) = bk.list().prefix("vd/".to_string()).limit(500).execute().await {
+        for o in list.objects() {
+            let _ = bk.delete(o.key()).await;
+        }
+    }
+    let r = turso_exec(env, "SELECT file_name FROM r2_files LIMIT 100", vec![]).await?;
+    let rows = rows_of(&r);
+    for x in &rows {
+        if let Some(f) = x["file_name"].as_str() {
+            if tg_safe_name(f) {
+                let _ = bk.delete(f.to_string()).await;
+            }
+        }
+    }
+    if !rows.is_empty() {
+        let names: Vec<String> = rows.iter().filter_map(|x| x["file_name"].as_str().map(String::from)).collect();
+        let marks = vec!["?"; names.len()].join(",");
+        turso_exec(env, &format!("DELETE FROM r2_files WHERE file_name IN ({marks})"), names.iter().map(|n| TursoArg::text(n)).collect()).await?;
+    }
+    let left = turso_exec(env,
+        "SELECT (SELECT COUNT(*) FROM tg_files) AS tg, (SELECT COUNT(*) FROM vd_files) AS vd, (SELECT COUNT(*) FROM r2_files) AS r2,
+                (SELECT COUNT(*) FROM app_config WHERE cfg_key LIKE 'dlv\\_msg\\_%' ESCAPE '\\') AS dlv", vec![]).await?;
+    let l = first_row(&left).unwrap_or(json!({}));
+    let total = jint(&l, "tg") + jint(&l, "vd") + jint(&l, "r2") + jint(&l, "dlv");
+    Ok(json!({"deleted": deleted, "failed": failed, "left": total, "tg_files": l["tg"], "vd_files": l["vd"], "r2_files": l["r2"]}))
 }
 
 // ── Foydalanuvchi yo'llari (sessiya bilan) ───────────────────

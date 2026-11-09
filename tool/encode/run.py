@@ -394,15 +394,17 @@ def put_direct(url: str, path: Path, label: str):
 
 def vd_stage(path: Path, name: str, key_hex: str, label: str):
     """Video ombori (`vd`): tayyor shifrlangan faylni 18 MiB bo'laklarga bo'lib R2 ga yozadi (kalit shu fayl uchun yangi, bitta). Bo'laklarni
-    Telegram'ga `vdstore.yml` saqlaydi. Xato yoki R2 da joy yo'q bo'lsa — jim o'tadi (fayl baribir eski yo'l bilan yuklanadi, keyin migratsiya oladi)."""
+    Telegram'ga `vdstore.yml` saqlaydi. Qaytadi: `ok` / `ready` (yangi tizimda), `wait` (R2 da joy yo'q) yoki `None` (xato — eski yo'l)."""
     try:
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "vd"))
         import vdlib  # noqa: PLC0415
         vdlib.API, vdlib.TOKEN = API, "".join(TOKEN.split())
         st = vdlib.stage_file(path, name, key_hex, progress=lambda c, t: log(f"  {label}: yangi tizim: bo'lak {c}/{t}") if c % 10 == 0 or c == t else None)
         log(f"  {label}: yangi tizim (vd) — {st}")
+        return st
     except Exception as ex:  # noqa: BLE001
-        log(f"  {label}: yangi tizimga (vd) yozilmadi ({ex}) — keyinroq migratsiya o'tkazadi")
+        log(f"  {label}: yangi tizimga (vd) yozilmadi ({ex})")
+        return None
 
 
 async def upload_r2(ident: dict, path: Path, name: str, kind: str, key: str, label: str) -> bool:
@@ -1278,9 +1280,27 @@ async def process(app: Client, channel: int, job: dict):
             r2_used = False
             if QUALITY and R2:
                 qa = ident["queued_at"]
-                # Yangi tizim: shifrlangan fayl 18 MiB bo'laklarga bo'linib R2 ga yoziladi (sifat-run o'zi bloklaydi/shifrlaydi/yuklaydi).
-                await asyncio.to_thread(vd_stage, sealed, name, k.hex(), label)
-                r2_used = await upload_r2(ident, sealed, name, "mp4", k.hex(), label)
+                # YANGI TIZIM (vd): shifrlangan fayl 18 MiB bo'laklarga bo'linib R2 ga yoziladi, `vdstore.yml` Telegram'ga saqlaydi; sifat jurnalga
+                # (`quality`, msg_id=0 — kanal posti yo'q) shu yerda yoziladi. R2 da joy bo'lmasa bo'shaguncha kutiladi (8 soatgacha).
+                st, waited = None, 0
+                while True:
+                    st = await asyncio.to_thread(vd_stage, sealed, name, k.hex(), label)
+                    if st != "wait" or waited > 8 * 3600:
+                        break
+                    if not waited:
+                        log(f"  {label}: R2 da joy yo'q — bo'shashi kutilmoqda...")
+                    waited += 60
+                    await asyncio.sleep(60)
+                if st in ("ok", "ready"):
+                    await asyncio.to_thread(api, "quality", {**ident, "quality": label, "file": name, "size": size,
+                                                             "key": k.hex(), "msg_id": 0})
+                    r2_used = True
+                    if frag is not None:      # Mini App uchun fMP4 nusxasi eski tizimda edi — yangi tizimda yaratilmaydi
+                        frag[0].unlink(missing_ok=True)
+                        frag = None
+                else:
+                    log(f"  {label}: yangi tizim ishlamadi — eski yo'l bilan yuklanadi")
+                    r2_used = await upload_r2(ident, sealed, name, "mp4", k.hex(), label)
                 if r2_used:
                     sealed.unlink(missing_ok=True)
                     if frag is not None:

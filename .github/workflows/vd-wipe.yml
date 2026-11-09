@@ -1,0 +1,52 @@
+name: Baza noldan (vd) — BIR MARTA
+
+# `ci/VD_WIPE_ONCE` fayli o'zgarganda ishlaydi (belgi bazaga yoziladi — bir belgi bilan faqat BIR MARTA). Foydalanuvchi talabi (2026-11): Turso'da faqat
+# anime/bo'lim ma'lumotlari qoladi, qolgani (fayllar, rasmlar, hisoblar, to'lovlar, sozlamalar...) o'chadi; kanal postlari va R2 obyektlari ham.
+# Avval ZAXIRA (ENCODE_TOKEN bilan shifrlangan artifact, 14 kun) — u yozilmasa hech narsa o'chmaydi. `ci/vd_wipe.py`.
+
+on:
+  push:
+    branches: [main]
+    paths: ['ci/VD_WIPE_ONCE']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vd-wipe
+  cancel-in-progress: false
+
+jobs:
+  wipe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: secret
+    env:
+      TURSO_URL: ${{ secrets.TURSO_URL }}
+      TURSO_TOKEN: ${{ secrets.TURSO_TOKEN }}
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Zaxira nusxa (jadvallar -> JSONL)
+        id: backup
+        run: python3 ci/vd_wipe.py backup
+      - name: Zaxirani shifrlash
+        if: steps.backup.outputs.ok == '1'
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          gzip -c "$RUNNER_TEMP/turso_backup.jsonl" | K="$K" openssl enc -aes-256-cbc -pbkdf2 -iter 200000 -salt -pass env:K -out "$RUNNER_TEMP/turso_backup.jsonl.gz.enc"
+          rm -f "$RUNNER_TEMP/turso_backup.jsonl"
+          ls -la "$RUNNER_TEMP/turso_backup.jsonl.gz.enc"
+      - name: Zaxirani saqlash (artifact)
+        if: steps.backup.outputs.ok == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: turso-zaxira-shifrlangan
+          path: ${{ runner.temp }}/turso_backup.jsonl.gz.enc
+          retention-days: 14
+          if-no-files-found: error
+      - name: Noldan boshlash
+        if: steps.backup.outputs.ok == '1'
+        run: python3 ci/vd_wipe.py wipe
