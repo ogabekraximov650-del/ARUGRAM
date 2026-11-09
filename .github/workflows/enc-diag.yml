@@ -33,3 +33,10 @@ jobs:
           echo "TURSO_URL=$U" >> "$GITHUB_ENV"; echo "TURSO_TOKEN=$T" >> "$GITHUB_ENV"
       - name: Tashxis
         run: python3 ci/enc_diag.py
+      - name: Jonli holat (qdiag, faqat o'qish)
+        env:
+          API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+        run: |
+          T=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          curl -sS -m 60 -X POST -H "X-Encode-Token: $T" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/encode/qdiag" \
+            | python3 -c 'import json,sys,time; d=json.load(sys.stdin); print("live_keys:", d.get("live_keys")); print("now:", d.get("now")); print("q_states:", d.get("q_states")); print("pending:", d.get("pending")); print("holat:", (d.get("holat") or "")[:2500])'

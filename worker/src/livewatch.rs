@@ -471,9 +471,19 @@ pub(crate) async fn app_all_html(env: &Env) -> String {
             let st = all.get(*q).and_then(|e| parse_status_pin(e["t"].as_str().unwrap_or("")));
             let live = st.as_ref().filter(|s| now - jint(s, "updated_at") < 3 * 60 * 1000
                 && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
+            // Holat 3 daqiqadan eski, lekin run hali ishlayapti (ijara bor): oxirgi ma'lum holat ESKIRGANI belgisi bilan ko'rsatiladi (15 daqiqagacha) —
+            // aks holda blok bir ko'rinadi, bir "ishlayapti (jonli log...)" ga almashib miltillardi (bitta push kechiksa).
+            let stale = st.as_ref().filter(|s| running[i] && live.is_none() && now - jint(s, "updated_at") < 15 * 60 * 1000
+                && s["progress"].as_str().unwrap_or("idle") != "idle" && jint(s, "anime_id") > 0);
             match live {
                 // Sifat bloklarida faqat MUHIM log qatorlari (xato, R2, yuklash natijasi) — progress/boshlanish qatorlari takrorlanadi va olib tashlangan.
                 Some(s) => blocks.push(q_block(env, q, s, pend[i], 2).await),
+                None if stale.is_some() => {
+                    let s = stale.unwrap();
+                    let mut b = q_block(env, q, s, pend[i], 2).await;
+                    b.push_str(&format!("\n\u{23F3} holat {} daqiqa oldin yangilangan (run ishlayapti)", (now - jint(s, "updated_at")) / 60_000));
+                    blocks.push(b);
+                }
                 None if running[i] => blocks.push(format!("\u{2699}\u{FE0F} <b>{q}</b>: ishlayapti (jonli log kodlash log kanalida) \u{00B7} kutayotgan: {}", pend[i])),
                 None => blocks.push(format!("\u{1F4A4} <b>{q}</b>: hozir ishlamayapti \u{00B7} kutayotgan: {}", pend[i])),
             }
