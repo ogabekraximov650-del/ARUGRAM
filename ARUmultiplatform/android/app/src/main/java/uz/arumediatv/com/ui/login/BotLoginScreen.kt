@@ -1,7 +1,5 @@
 package uz.arumediatv.com.ui.login
 
-import android.content.Intent
-import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -53,6 +51,8 @@ fun BotLoginScreen(onDone: () -> Unit, onBack: () -> Unit) {
     var req by remember { mutableStateOf<LoginRequest?>(null) }
     var left by remember { mutableIntStateOf(0) }
     var attempt by remember { mutableIntStateOf(0) }
+    var picker by remember { mutableStateOf(false) }
+    var askedOnce by remember { mutableStateOf(false) }
     BackHandler(onBack = onBack)
 
     LaunchedEffect(attempt) {
@@ -66,6 +66,8 @@ fun BotLoginScreen(onDone: () -> Unit, onBack: () -> Unit) {
         req = r
         left = r.expiresIn
         stage = Stage.WAITING
+        // Token tayyor: ilova qaysi Telegram orqali kirishni so'raydi (foydalanuvchi tanlaydi, keyin botda «Start» bosadi).
+        if (!askedOnce) { askedOnce = true; picker = true }
         var tick = 0
         while (left > 0) {
             when (auth.check(r.token)) {
@@ -80,30 +82,34 @@ fun BotLoginScreen(onDone: () -> Unit, onBack: () -> Unit) {
         stage = Stage.EXPIRED
     }
 
-    fun openTelegram() {
+    fun openTelegram(c: uz.arumediatv.com.ui.login.TgClient?) {
         val link = req?.deepLink ?: return
-        try {
-            ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(link)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-        } catch (_: Exception) {
+        picker = false
+        if (!TgClients.open(ctx, link, c?.pkg)) {
             stage = Stage.ERROR
             message = "Telegram ochilmadi. Telegram ilovasi o'rnatilganini tekshiring."
         }
+    }
+
+    if (picker && stage == Stage.WAITING) {
+        val clients = remember { TgClients.installed(ctx) }
+        TgClientPicker(clients, onPick = ::openTelegram, onDismiss = { picker = false })
     }
 
     Column(
         Modifier.fillMaxSize().background(AruColors.Bg).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Text("Bot orqali kirish", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text("Telegram orqali kirish", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(10.dp))
         when (stage) {
             Stage.PREPARING -> CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(32.dp))
             Stage.WAITING -> {
-                Text("Telegram'ni oching, botda «Start» tugmasini bosing. Tasdiqlangach ilova o'zi kiradi.", color = AruColors.TextDim, fontSize = 14.sp, textAlign = TextAlign.Center)
+                Text("Telegram ilovasini tanlang, botda «Start» tugmasini bosib hisobingizni tasdiqlang. Tasdiqlangach ilova o'zi kiradi.", color = AruColors.TextDim, fontSize = 14.sp, textAlign = TextAlign.Center)
                 Spacer(Modifier.height(20.dp))
                 Text(
-                    "Telegram'ni ochish", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp,
-                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(AruColors.Accent).clickable(onClick = ::openTelegram).padding(vertical = 15.dp),
+                    "Telegram ilovasini tanlash", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp,
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(AruColors.Accent).clickable { picker = true }.padding(vertical = 15.dp),
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(10.dp))

@@ -78,7 +78,7 @@ import uz.arumediatv.com.ui.theme.AruColors
  * hisobni o'chirish va chiqish. Chiqishda navbatdagi yozuvlar avval serverga saqlanadi (`SyncQueue`).
  */
 @Composable
-fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit, onStorage: () -> Unit, onSupport: () -> Unit, onAdmin: () -> Unit, onPacks: () -> Unit) {
+fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Unit, onSettings: () -> Unit, onBilling: () -> Unit, onOpenStat: (StatKind) -> Unit, onStorage: () -> Unit, onSupport: () -> Unit, onAdmin: () -> Unit, onPacks: () -> Unit) {
     val auth = AppServices.auth
     val tg = AppServices.telegram
     val user by auth.user.collectAsStateWithLifecycle()
@@ -131,7 +131,7 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
         Spacer(Modifier.height(8.dp))
         val u = user
         if (u == null) {
-            GuestCard(onLogin)
+            GuestCard(onBotLogin)
         } else {
             HeroCard(u, onEdit = onEdit, avatarBusy = avatarBusy, onAvatar = { pickAvatar.launch("image/*") }, onCopyId = {
                 (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("ID", u.id.toString()))
@@ -150,17 +150,21 @@ fun ProfileScreen(onLogin: () -> Unit, onEdit: () -> Unit, onSessions: () -> Uni
         Group {
             Tile(Icons.Filled.Notifications, "Bildirishnoma", onClick = { toast("«Bildirishnoma» bo'limi tez orada qo'shiladi") })
             Divider2()
-            Tile(Icons.Filled.Settings, "Sozlamalar", onClick = { if (u == null) onLogin() else onSettings() })
+            Tile(Icons.Filled.Settings, "Sozlamalar", onClick = { if (u == null) onBotLogin() else onSettings() })
             Divider2()
-            if (!tgState.authorized) {
-                Tile(Icons.AutoMirrored.Filled.Send, "Telegram'ni ulash", onClick = onLogin)
+            if (u == null) {
+                Tile(Icons.AutoMirrored.Filled.Send, "Telegram orqali kirish", onClick = onBotLogin)
                 Divider2()
             }
-            Tile(AruIcons.Devices, "Qurilmalar", onClick = { if (u == null) onLogin() else onSessions() })
+            if (!tgState.authorized) {
+                Tile(Icons.AutoMirrored.Filled.Send, "Telegram accountni ulash", onClick = onLogin)
+                Divider2()
+            }
+            Tile(AruIcons.Devices, "Qurilmalar", onClick = { if (u == null) onBotLogin() else onSessions() })
             Divider2()
-            Tile(AruIcons.Emoticon, "Emoji, GIF va stikerlar", onClick = { if (u == null) onLogin() else onPacks() })
+            Tile(AruIcons.Emoticon, "Emoji, GIF va stikerlar", onClick = { if (u == null) onBotLogin() else onPacks() })
             Divider2()
-            Tile(AruIcons.SupportAgent, "Admin bilan bog'lanish", dot = unread > 0, onClick = { if (u == null) onLogin() else onSupport() })
+            Tile(AruIcons.SupportAgent, "Admin bilan bog'lanish", dot = unread > 0, onClick = { if (u == null) onBotLogin() else onSupport() })
             Divider2()
             Tile(Icons.Filled.Info, "Ilova haqida", onClick = { showAbout = true })
         }
@@ -314,7 +318,7 @@ private fun GuestCard(onLogin: () -> Unit) {
                     .clickable(onClick = onLogin)
                     .padding(vertical = 14.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Kirish", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
+            ) { Text("Telegram orqali kirish", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
         }
     }
 }

@@ -183,25 +183,16 @@ class MainActivity : ComponentActivity() {
 }
 
 /**
- * TO'LIQ KIRMAGUNCHA ILOVA YOPIQ (Flutter `AuthGate`): ilova hisobi VA Telegram hisobi ulangan bo'lsa ilova ochiladi,
- * aks holda butun ekran kirish oynasi. Hisobdan chiqilsa (yoki Telegram sessiyasi uzilsa) yana shu oyna chiqadi.
+ * Ilova DARHOL bosh sahifa bilan ochiladi (kirish talab qilinmaydi). Kirish va Telegram hisobini ulash — Profil bo'limida
+ * («Telegram orqali kirish», «Telegram accountni ulash»); kirish kerak joyda (masalan anime ochish) shu oyna so'raladi.
  */
 @Composable
 private fun AuthGate() {
     val restored by AppServices.auth.restored.collectAsStateWithLifecycle()
-    val user by AppServices.auth.user.collectAsStateWithLifecycle()
-    val tg by AppServices.telegram.state.collectAsStateWithLifecycle()
-    var bot by remember { mutableStateOf(false) }
     Box(Modifier.fillMaxSize().background(AruColors.Bg)) {
-        // Saqlangan hisob va Telegram holati aniqlanmaguncha bo'sh ekran (kirish oynasi miltillamasin).
-        if (!restored || (!tg.started && tg.error == null)) return@Box
-        if (user != null && tg.authorized) {
-            AruApp()
-        } else if (bot) {
-            uz.arumediatv.com.ui.login.BotLoginScreen(onDone = { bot = false }, onBack = { bot = false })
-        } else {
-            LoginScreen(onDone = {}, onClose = {}, onBot = { bot = true })
-        }
+        // Saqlangan hisob aniqlanmaguncha bo'sh ekran (bosh sahifa «mehmon» holatida miltillamasin).
+        if (!restored) return@Box
+        AruApp()
     }
 }
 
@@ -235,7 +226,8 @@ private fun AruApp() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(ob) }
     }
     val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { if (!AppServices.auth.isLoggedIn) askLogin = true else push(Page.SeasonPage(it)) }
-    val login = { push(Page.Login) }
+    // Kirish kerak joyda: Telegram bot orqali kirish (token -> Telegram ilovasini tanlash -> Start). Telegram hisobini ulash — Profilda.
+    val login = { push(Page.BotLogin) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
     // Kirilgach emoji shrifti fonda tayyorlanadi (chat va izohlarda ham Telegram emojisi ko'rinsin).
     LaunchedEffect(Unit) {
@@ -255,8 +247,9 @@ private fun AruApp() {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { askLogin = false },
             icon = { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Lock, null, tint = AruColors.Accent) },
-            text = { androidx.compose.material3.Text("Iltimos anime ko'rish uchun avval profil sahifasiga o'tib accountingizga kiring yoki yangi accaunt oching") },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { askLogin = false }) { androidx.compose.material3.Text("Tushunarli") } },
+            text = { androidx.compose.material3.Text("Anime ko'rish uchun avval Telegram orqali kiring.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { askLogin = false; push(Page.BotLogin) }) { androidx.compose.material3.Text("Telegram orqali kirish") } },
+            dismissButton = { androidx.compose.material3.TextButton(onClick = { askLogin = false }) { androidx.compose.material3.Text("Bekor qilish") } },
             containerColor = AruColors.Surface,
         )
     }
@@ -281,7 +274,8 @@ private fun AruApp() {
                 2 -> CatalogScreen(onOpenSeason = openSeason)
                 3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login, onOpenDownload = { s, e, q -> push(Page.SeasonPage(s, e, q)) }, onOpenAnimeHistory = { push(Page.AnimeHistory(it)) }, onOpenAnimeDownloads = { d -> push(Page.AnimeDownloads(d.animeId, d.seasonId, d.title)) })
                 4 -> ProfileScreen(
-                    onLogin = login,
+                    onLogin = { push(Page.Login) },
+                    onBotLogin = login,
                     onEdit = { push(Page.Edit) },
                     onSessions = { push(Page.Sessions) },
                     onSettings = { push(Page.Settings) },
