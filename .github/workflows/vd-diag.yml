@@ -15,7 +15,7 @@ jobs:
     environment: secret
     steps:
       - run: pip install cryptography
-      - name: Rasm: R2 -> Telegram -> Cloudflare keshi -> shifrni ochish
+      - name: "Rasm yo'li: R2, Telegram, Cloudflare keshi, shifrni ochish"
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
