@@ -13311,10 +13311,15 @@ async fn ensure_encbot_webhook(env: &Env, origin: &str) {
 
 /// Worker manzili cron uchun (unda so'rov yo'q): asosiy bot webhook'i
 /// o'rnatilganda saqlangan manzildan.
+///
+/// Sozlama (`tg_webhook_url`) o'chib ketgan bo'lsa (masalan baza noldan boshlanganda) cron webhook'larni QAYTA o'rnata olmay qolardi va
+/// botlar jim bo'lib qolardi: shu sabab `WORKER_ORIGIN` o'zgaruvchisi, u ham bo'lmasa ommaviy manzil ishlatiladi.
 async fn worker_origin(env: &Env) -> String {
-    config_get(env, "tg_webhook_url").await
-        .and_then(|u| u.strip_suffix("/api/telegram/webhook").map(String::from))
-        .unwrap_or_default()
+    if let Some(o) = config_get(env, "tg_webhook_url").await.and_then(|u| u.strip_suffix("/api/telegram/webhook").map(String::from)) {
+        return o;
+    }
+    let v = tg_secret(env, "WORKER_ORIGIN");
+    if v.starts_with("https://") { v.trim_end_matches('/').to_string() } else { "https://arumediatv.uzcom.workers.dev".to_string() }
 }
 
 async fn gh_api(env: &Env, method: Method, path: &str, body: Option<Value>) -> Result<(u16, Value)> {
