@@ -85,7 +85,7 @@ jobs:
             curl -sS -m 25 -o /tmp/o.bin -D /tmp/oh.txt -w "  kod=%{http_code} bayt=%{size_download} birinchi_bayt=%{time_starttransfer}s jami=%{time_total}s\n" -H "Range: bytes=$r" -H "X-App-Sig: $(sig GET /api/play/vd~$EP)" "$API_BASE/api/play/vd~$EP" || true
             grep -i -E "^HTTP|x-cache|x-warm|content-range|content-length" /tmp/oh.txt | tr -d '\r'
           done
-      - name: Pleyer tokeni (ExoPlayer kabi: sarlavhasiz, ?t=, faqat o'qish)
+      - name: "Pleyer tokeni (ExoPlayer kabi, sarlavhasiz, faqat o'qish)"
         env:
           API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
           SECRET: ${{ secrets.APP_SIGN_SECRET }}
