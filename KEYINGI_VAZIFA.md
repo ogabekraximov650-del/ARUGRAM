@@ -7070,3 +7070,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - **Zaxirani tiklash:** artifactni yuklab, `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K` va `gunzip`; har qator `{t, cols, row}`.
 - **Kesh:** `META_V` = "2" — eski `vd` ma'lumot keshi yozuvlari ko'rinmaydi.
 - **Yangi kodlash (`tool/encode/run.py`):** sifat-run tayyor faylni FAQAT yangi tizimga yozadi (18 MiB bo'laklar -> R2 -> `vdstore.yml` -> Telegram) va jurnalga `quality` (msg_id=0, kanal posti yo'q) bilan yozadi; eski R2 -> bot chati yo'li faqat yangi tizim xato bersa zaxira. Mini App uchun fMP4 nusxasi yaratilmaydi. Qism `vd` da `ready` bo'lguncha (birinchi bo'lak saqlangunicha) ilovada ochilmaydi.
+
+### Video ombori `vd`: yangi saqlash kanali (2026-11)
+- `vd` bo'laklari (Telegram'ga saqlash, o'chirish) endi YANGI kanalda: `ci/VD_CHANNEL_ID` (`-1003816269380`, "ARUmediaTv Storage"). `deploy-worker.yml` uni `VD_CHANNEL_ID` sifatida qo'yadi; fayl bo'sh/yo'q bo'lsa — umumiy `TG_CHANNEL_ID`. Kodda `vd::vd_channel`. Bot kanalda admin (xabar yuborish va o'chirish huquqi bilan) — `POST /api/vd/channel` (ENCODE_TOKEN) bilan tekshirildi. Eski kanal faqat eski yo'l (`tg_files`, avatar/to'plam/poster rasmlari) uchun.
+- APK Telegram'ga yuborilmasdi: runner'dagi Python 3.14 da Pyrogram import xatosi (`There is no current event loop`); `android-native.yml` da `setup-python 3.11` qo'yildi.
