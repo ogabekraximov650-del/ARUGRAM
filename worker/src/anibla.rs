@@ -1388,12 +1388,32 @@ async fn variants(video: &str) -> std::result::Result<Vec<Variant>, String> {
         return Err("bu qismda video yo'q (hali yuklanmagan yoki obuna kerak)".into());
     }
     let sep = if video.contains('?') { '&' } else { '?' };
-    let (code, text) = http(&format!("{video}{sep}format=api"), Method::Get, None, None).await?;
+    // Sayt/CDN vaqtincha 5xx (502/503/504) bersa 3 martagacha qayta uriniladi (kutish 0,8 s, 1,6 s) — bitta tasodifiy xato tugmalarni yo'qotmasin.
+    let mut code = 0;
+    let mut text = String::new();
+    for attempt in 0..3u64 {
+        let (c, t) = http(&format!("{video}{sep}format=api"), Method::Get, None, None).await?;
+        code = c;
+        text = t;
+        if code < 500 {
+            break;
+        }
+        Delay::from(core::time::Duration::from_millis(800 * (attempt + 1))).await;
+    }
     let master = serde_json::from_str::<Value>(&text).ok()
         .and_then(|v| v["file"].as_str().map(|f| join_url(video, f)))
         .filter(|f| !f.is_empty())
         .ok_or_else(|| format!("video manzili ochilmadi (HTTP {code})"))?;
-    let (code, m3u) = http(&master, Method::Get, None, None).await?;
+    let mut m3u = String::new();
+    for attempt in 0..3u64 {
+        let (c, t) = http(&master, Method::Get, None, None).await?;
+        code = c;
+        m3u = t;
+        if code < 500 {
+            break;
+        }
+        Delay::from(core::time::Duration::from_millis(800 * (attempt + 1))).await;
+    }
     if code >= 400 || !m3u.contains("#EXTM3U") {
         return Err(format!("playlist ochilmadi (HTTP {code})"));
     }
