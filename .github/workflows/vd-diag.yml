@@ -38,11 +38,8 @@ jobs:
                       b = x.read(); return b if raw else json.loads(b or b"{}")
               except urllib.error.HTTPError as e:
                   return {"error": e.code}
-          for i in range(40):                                  # deploy tugashini kutadi
-              try:
-                  if tok("/api/vd/forget", {"name": ""}).get("ok"): break
-              except Exception: pass
-              time.sleep(15)
+          print("imginfo (bo'sh):", signed("/api/vd/imginfo", "POST", {"names": []}))
+          print("peek:", tok("/api/vd/peek", {}))
           name = "diag_img_%d.png" % int(time.time())
           plain = b"\x89PNG\r\n\x1a\n" + os.urandom(3000)
           key = os.urandom(16)
@@ -51,10 +48,11 @@ jobs:
           print("put:", tok("/api/vd/put?name=%s&n=0" % name, method="PUT", data=enc, ct="application/octet-stream"))
           print("finish:", {k: v for k, v in tok("/api/vd/finish", {"name": name}).items() if k != "kick"})
           got = None
-          for i in range(60):                                  # saqlovchi workflow Telegram'ga yozguncha
+          for i in range(40):                                  # saqlovchi workflow Telegram'ga yozguncha
               r = signed("/api/vd/imginfo", "POST", {"names": [name]})
               f = (r.get("files") or {}).get(name)
               if f: got = f; break
+              if i % 8 == 0: print("  kutilmoqda:", r, tok("/api/vd/peek", {}))
               time.sleep(15)
           print("imginfo:", {k: v for k, v in (got or {}).items() if k != "key"})
           if got:
@@ -65,3 +63,5 @@ jobs:
                   print("img so'rov", attempt, "-> ochilgan rasm asl bilan bir xil:", ok)
           print("forget:", tok("/api/vd/forget", {"name": name}))
           PY
+
+# v2
