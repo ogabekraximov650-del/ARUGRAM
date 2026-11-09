@@ -1,0 +1,48 @@
+name: Sessiya holati (vaqtinchalik)
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/vd-diag.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: secret
+    env:
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Jonli baza foydalanuvchi va sessiya sonlari"
+        env:
+          OLD_URL: ${{ secrets.TURSO_URL }}
+          OLD_TOKEN: ${{ secrets.TURSO_TOKEN }}
+        run: |
+          U="$OLD_URL"; T="$OLD_TOKEN"
+          if [ -f tool/migrate/new_turso.enc ]; then
+            K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+            NT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/migrate/new_turso.enc 2>/dev/null || true)
+            NU=$(printf '%s' "$NT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
+            NK=$(printf '%s' "$NT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)
+            if [ -n "$NU" ] && [ -n "$NK" ]; then U="$NU"; T="$NK"; fi
+          fi
+          echo "::add-mask::$U"; echo "::add-mask::$T"
+          export TURSO_URL="$U" TURSO_TOKEN="$T"
+          python3 - <<'PY'
+          import json, os, urllib.request, time
+          url = os.environ["TURSO_URL"].replace("libsql://", "https://"); tok = os.environ["TURSO_TOKEN"]
+          def q(sql):
+              r = urllib.request.Request(url + "/v2/pipeline", data=json.dumps({"requests": [{"type": "execute", "stmt": {"sql": sql}}, {"type": "close"}]}).encode(),
+                                         headers={"Authorization": "Bearer " + tok, "Content-Type": "application/json"})
+              with urllib.request.urlopen(r, timeout=60) as x:
+                  res = json.load(x)["results"][0]["response"]["result"]
+              return [[c.get("value") for c in row] for row in res["rows"]]
+          print("users_db:", q("SELECT COUNT(*) FROM users_db"))
+          print("sessions_db:", q("SELECT COUNT(*) FROM sessions_db"))
+          print("eng yangi sessiya (soat oldin):", q("SELECT (strftime('%s','now')*1000 - MAX(created_at))/3600000.0 FROM sessions_db"))
+          print("chat_messages:", q("SELECT COUNT(*) FROM chat_messages"), "chat_threads:", q("SELECT COUNT(*) FROM chat_threads"))
+          PY
