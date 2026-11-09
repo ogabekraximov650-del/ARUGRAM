@@ -36,6 +36,11 @@ const PARTS: &str = "vd/c/";
 
 static SCHEMA_OK: AtomicBool = AtomicBool::new(false);
 
+/// Bo'laklar saqlanadigan kanal: `VD_CHANNEL_ID` (deploy `ci/VD_CHANNEL_ID` dan qo'yadi), bo'lmasa umumiy `TG_CHANNEL_ID`.
+pub(crate) fn vd_channel(env: &Env) -> i64 {
+    tg_secret(env, "VD_CHANNEL_ID").trim().parse::<i64>().ok().filter(|c| *c != 0).unwrap_or_else(|| tg_channel_id(env))
+}
+
 fn bucket(env: &Env) -> Option<Bucket> {
     env.bucket("R2").ok()
 }
@@ -262,7 +267,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
     if let Some(bk) = bucket(env) {
         r2_delete_all(&bk, name).await;
     }
-    let channel = tg_channel_id(env);
+    let channel = vd_channel(env);
     if channel != 0 {
         for id in ids(row["msg_ids"].as_str().unwrap_or("")).into_iter().take(400) {
             if let Ok(m) = id.parse::<i64>() {
@@ -278,7 +283,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
@@ -469,6 +474,22 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             }
             ok(json!({"name": r["name"], "size": r["size"], "chunks": r["chunks"], "key": r["vkey"], "head": hex_of(&bytes[..64]), "chunk0_len": bytes.len()}))
         }
+        // Kanal tekshiruvi: bot shu kanalda adminmi va xabar yubora/o'chira oladimi.
+        "/api/vd/channel" => {
+            let ch = vd_channel(env);
+            let chat = tg_api(env, "getChat", json!({"chat_id": ch})).await;
+            let me = tg_api(env, "getMe", json!({})).await.ok().and_then(|m| m["id"].as_i64()).unwrap_or(0);
+            let member = tg_api(env, "getChatMember", json!({"chat_id": ch, "user_id": me})).await;
+            ok(json!({
+                "channel": ch, "separate": tg_secret(env, "VD_CHANNEL_ID").trim().parse::<i64>().is_ok(),
+                "chat": chat.as_ref().ok().map(|c| json!({"type": c["type"], "title": c["title"]})).unwrap_or(json!(null)),
+                "chat_error": chat.as_ref().err().map(|e| e.to_string()),
+                "bot_status": member.as_ref().ok().map(|m| m["status"].clone()),
+                "can_post": member.as_ref().ok().map(|m| m["can_post_messages"].clone()),
+                "can_delete": member.as_ref().ok().map(|m| m["can_delete_messages"].clone()),
+                "member_error": member.as_ref().err().map(|e| e.to_string()),
+            }))
+        }
         "/api/vd/claim" => {
             turso_many(env, &[
                 ("UPDATE vd_files SET state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
@@ -485,7 +506,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let done: Vec<i64> = (0..have).collect();
             ok(json!({
                 "name": nm, "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
-                "bot_token": tg_secret(env, "TELEGRAM_BOT_TOKEN"), "channel": tg_channel_id(env),
+                "bot_token": tg_secret(env, "TELEGRAM_BOT_TOKEN"), "channel": vd_channel(env),
             }))
         }
         "/api/vd/chunkdone" => {
@@ -617,7 +638,7 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
         let name = row["name"].as_str().unwrap_or("").to_string();
         let msgs: Vec<i64> = ids(row["msg_ids"].as_str().unwrap_or("")).iter().filter_map(|x| x.parse().ok()).collect();
         for part in msgs.chunks(100) {
-            if del_msgs(env, channel, part).await { deleted += part.len() as i64 } else { failed += part.len() as i64 }
+            if del_msgs(env, vd_channel(env), part).await { deleted += part.len() as i64 } else { failed += part.len() as i64 }
         }
         r2_delete_all(bk, &name).await;
         meta_drop(&name).await;

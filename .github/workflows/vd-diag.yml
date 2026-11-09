@@ -1,0 +1,36 @@
+name: VD kanal tekshiruvi (vaqtinchalik)
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/vd-diag.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  d:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: secret
+    steps:
+      - name: Yangi kanal va bot huquqlari
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.request, urllib.error
+          A = "https://arumediatv.uzcom.workers.dev"; T = os.environ["ENCODE_TOKEN"].strip()
+          def call(p):
+              r = urllib.request.Request(A + p, data=b"{}", method="POST", headers={"X-Encode-Token": T, "Content-Type": "application/json", "User-Agent": "arumediatv-vd"})
+              try:
+                  with urllib.request.urlopen(r, timeout=60) as x: return json.loads(x.read())
+              except urllib.error.HTTPError as e: return {"error": e.code}
+              except Exception as e: return {"error": str(e)[:60]}
+          v = {}
+          for i in range(36):                       # deploy tugashini kutadi: yangi kanal (separate=true) chiqquncha
+              v = call("/api/vd/channel")
+              if v.get("separate"): break
+              time.sleep(20)
+          print(v)
+          PY
