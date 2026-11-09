@@ -339,7 +339,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/selftest" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
@@ -545,6 +545,19 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             }))
         }
         // Faylni to'liq o'chirish (R2, kanal xabarlari, kesh, baza) — Actions/ENCODE_TOKEN (sinov fayllarini tozalash uchun).
+        // O'z-o'zini tekshirish: 4 KiB faylni XUDDI `/api/vd/small` yo'li bilan saqlaydi (shifrlash -> Telegram -> baza -> kesh), vaqtlarni qaytaradi, so'ng o'chiradi.
+        "/api/vd/selftest" => {
+            let t0 = now_ms();
+            let tname = format!("selftest_{t0}.bin");
+            let r = store_small(env, &tname, vec![7u8; 4096]).await;
+            let t1 = now_ms();
+            let out = match &r {
+                Ok((_, size)) => json!({"ok": true, "size": size, "ms": t1 - t0}),
+                Err(e) => json!({"ok": false, "error": e.to_string(), "ms": t1 - t0}),
+            };
+            forget(env, &tname).await;
+            ok(out)
+        }
         "/api/vd/forget" => {
             forget(env, &name).await;
             ok(json!({"ok": true}))
@@ -997,6 +1010,33 @@ fn hex_decode16(s: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
+/// Kichik faylni shifrlab Telegram'ga saqlaydi, bazaga `ready` yozadi va keshni to'ldiradi: `(kalit_hex, hajm)`.
+async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(String, u64)> {
+    let size = bytes.len() as u64;
+    let key_hex = random_hex(32);
+    let Some(key) = hex_decode16(&key_hex) else { return Err(Error::RustError("kalit".into())) };
+    ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into()).apply_keystream(&mut bytes);
+    let tag: String = hex_of(&<sha2::Sha256 as sha2::Digest>::digest(name.as_bytes())).chars().take(12).collect();
+    let (fid, mid) = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("vd_{tag}_0000.bin"), &bytes).await?;
+    turso_exec(env,
+        "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'ready','chunks',?,?,?) \
+         ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=1, vkey=excluded.vkey, state='ready', layout='chunks', \
+           chunk_ids=excluded.chunk_ids, msg_ids=excluded.msg_ids, lease=0, tries=0, created=excluded.created",
+        vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::text(&fid), TursoArg::text(&mid.to_string()), TursoArg::int(now_ms())]).await?;
+    // Write-through kesh: ma'lumot va shifrlangan bo'lak (oyna 0) shu mintaqada darrov tayyor.
+    meta_put(name, &json!({"state": "ready", "size": size, "chunks": 1, "key": key_hex, "chunk_ids": fid})).await;
+    let wname = format!("vd~{name}");
+    if let (Ok(creq), Ok(resp)) = (Request::new(&warm_window_url(&wname, 0), Method::Get), Response::from_bytes(bytes)) {
+        let headers = Headers::new();
+        let _ = headers.set("Content-Type", "application/octet-stream");
+        let _ = headers.set("Cache-Control", &format!("public, max-age={CHUNK_CACHE_SECONDS}"));
+        let _ = headers.set("X-Total-Size", &size.to_string());
+        let _ = headers.set("X-Window-Start", "0");
+        let _ = Cache::default().put(&creq, resp.with_headers(headers)).await;
+    }
+    Ok((key_hex, size))
+}
+
 /// `PUT /api/vd/small?name=<nom>` (sessiya + ruxsat, tana = OCHIQ fayl, <= 18 MiB): worker yangi tasodifiy kalit yasaydi, AES-128-CTR bilan shifrlaydi,
 /// `.bin` hujjat sifatida YANGI kanalga yuboradi va bazaga `ready` yozadi (bitta bo'lak). Kesh ham shu zahoti to'ldiriladi (ma'lumot va
 /// shifrlangan bo'lak) — birinchi ochish ham tez. Qaytadi: `{ok, key, size}`; katta fayl uchun 413 (ilova R2 + Actions yo'liga o'tadi).
@@ -1017,28 +1057,11 @@ pub(crate) async fn small(env: &Env, me: i64, admin: bool, name: &str, mut req: 
     if bytes.is_empty() || bytes.len() as u64 > CHUNK {
         return json_resp(&json!({"error": if bytes.is_empty() { "bo'sh fayl" } else { "katta fayl" }, "limit": CHUNK}), if bytes.is_empty() { 400 } else { 413 });
     }
-    let size = bytes.len() as u64;
-    let key_hex = random_hex(32);
-    let Some(key) = hex_decode16(&key_hex) else { return json_resp(&json!({"error": "kalit"}), 500) };
-    ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into()).apply_keystream(&mut bytes);
-    let tag: String = hex_of(&<sha2::Sha256 as sha2::Digest>::digest(name.as_bytes())).chars().take(12).collect();
-    let (fid, mid) = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("vd_{tag}_0000.bin"), &bytes).await?;
-    turso_exec(env,
-        "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'ready','chunks',?,?,?) \
-         ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=1, vkey=excluded.vkey, state='ready', layout='chunks', \
-           chunk_ids=excluded.chunk_ids, msg_ids=excluded.msg_ids, lease=0, tries=0, created=excluded.created",
-        vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::text(&fid), TursoArg::text(&mid.to_string()), TursoArg::int(now_ms())]).await?;
-    // Write-through kesh: ma'lumot va shifrlangan bo'lak (oyna 0) shu mintaqada darrov tayyor.
-    meta_put(name, &json!({"state": "ready", "size": size, "chunks": 1, "key": key_hex, "chunk_ids": fid})).await;
-    let wname = format!("vd~{name}");
-    if let (Ok(creq), Ok(resp)) = (Request::new(&warm_window_url(&wname, 0), Method::Get), Response::from_bytes(bytes)) {
-        let headers = Headers::new();
-        let _ = headers.set("Content-Type", "application/octet-stream");
-        let _ = headers.set("Cache-Control", &format!("public, max-age={CHUNK_CACHE_SECONDS}"));
-        let _ = headers.set("X-Total-Size", &size.to_string());
-        let _ = headers.set("X-Window-Start", "0");
-        let _ = Cache::default().put(&creq, resp.with_headers(headers)).await;
-    }
+    let (key_hex, size) = match store_small(env, name, bytes).await {
+        Ok(v) => v,
+        // Xato matni ilovaga qaytadi (ilova uni ko'rsatadi) — jim 500 emas.
+        Err(e) => return json_resp(&json!({"error": e.to_string()}), 502),
+    };
     ok_nostore(json!({"ok": true, "key": key_hex, "size": size}))
 }
 

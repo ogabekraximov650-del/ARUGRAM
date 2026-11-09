@@ -1,0 +1,26 @@
+name: Video ombori o'z-o'zini tekshirish
+
+# Qo'lda ishga tushadi (faqat tekshiruv): worker `/api/vd/selftest` 4 KiB faylni `/api/vd/small` yo'li bilan saqlaydi (shifr -> Telegram -> baza -> kesh) va o'chiradi;
+# `/api/vd/channel` bot kanal huquqlarini ko'rsatadi. Maxfiy qiymatlar chiqarilmaydi.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: secret
+    env:
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+    steps:
+      - name: Tekshiruv
+        run: |
+          T=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          for p in selftest channel; do
+            echo "== /api/vd/$p"
+            curl -sS -m 90 -X POST -H "X-Encode-Token: $T" -H "Content-Type: application/json" -H "User-Agent: arumediatv-selftest" -d '{}' "$API_BASE/api/vd/$p"; echo
+          done

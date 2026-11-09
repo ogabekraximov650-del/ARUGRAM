@@ -73,7 +73,11 @@ object VdUpload {
      * KICHIK fayl (<= 18 MiB): worker o'zi shifrlab Telegram'ga saqlaydi (R2/Actions kerak emas, bir necha soniya). `null` — bu yo'l ishlamadi
      * (katta fayl, worker xatosi) va R2 + Actions yo'liga o'tiladi; ruxsat/kirish xatosi esa o'sha yo'lda ham rad etiladi, shu sabab darrov qaytariladi.
      */
+    /** Kichik yo'l nega ishlamagani (R2 yo'li ham xato bersa foydalanuvchiga ko'rsatiladi). */
+    @Volatile private var smallNote = ""
+
     private fun smallUpload(f: File, name: String, bearer: String, onProgress: (Long, Long) -> Unit): Result? {
+        smallNote = ""
         val client = Http.client.newBuilder().writeTimeout(2, TimeUnit.MINUTES).readTimeout(2, TimeUnit.MINUTES).build()
         val req = Request.Builder()
             .url(BuildConfig.API_BASE + "/api/vd/small?name=" + java.net.URLEncoder.encode(name, "UTF-8"))
@@ -88,10 +92,11 @@ object VdUpload {
                         Result(j.optString("key"), null)
                     }
                     r.code == 401 || r.code == 403 -> Result(null, j?.optString("error")?.takeIf { it.isNotEmpty() } ?: "Ruxsat yo'q")
-                    else -> null
+                    else -> { smallNote = "kichik yo'l HTTP ${r.code} ${j?.optString("error").orEmpty().take(120)}"; null }
                 }
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            smallNote = "kichik yo'l: ${e.javaClass.simpleName} ${e.message.orEmpty().take(80)}"
             null
         }
     }
@@ -106,7 +111,7 @@ object VdUpload {
         val init = Http.client.callJson("$base/api/vd/up/init", "POST",
             JSONObject().put("name", name).put("size", f.length()).put("key", keyHex), bearer)
         val url = init.json?.optString("url").orEmpty()
-        if (!init.ok || url.isEmpty()) return Result(null, init.error ?: "Yuklash boshlanmadi (HTTP ${init.code})")
+        if (!init.ok || url.isEmpty()) return Result(null, (init.error ?: "Yuklash boshlanmadi (HTTP ${init.code})") + if (smallNote.isNotEmpty()) " [$smallNote]" else "")
         // R2 havolasi imzolangan — ilova imzosi kerak emas (oddiy mijoz), uzoq yuklash uchun cheklovsiz.
         val plain: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.MINUTES)
             .readTimeout(10, TimeUnit.MINUTES).callTimeout(0, TimeUnit.SECONDS).build()
