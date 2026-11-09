@@ -7,12 +7,12 @@
 //
 // QANDAY ISHLAYDI:
 //   1. Run (o'z Telegram sessiyasi bilan) shifrlangan faylni bot chatiga hujjat qilib yuboradi. Izoh (caption):
-//        `ARUENC|<mp4|fmp4>|anime|bo'lim|qism|queued_at|sifat|kalit|hajm`
+//        `ARUENC|mp4|anime|bo'lim|qism|queued_at|sifat|kalit|hajm`
 //      Fayl nomi esa `ep_<a>_<s>_<e>_<q>_<queued_at>.mp4` (fMP4 uchun `..._f.mp4`).
 //   2. Asosiy botning webhook'i xabarni oladi (`handle_tg_webhook`) (`on_file`). Yuboruvchi shu sifatning RO'YXATDAN O'TGAN sessiyasi bo'lishi shart
 //      (`sess_uid_<q>`, "🔑 Yangi sessiya" da yoziladi) — boshqa odam fayl yubora olmaydi.
 //   3. Fayl yopiq kanalga `copyMessage` bilan ko'chadi (qayta yuklanmaydi), `tg_files` va qism yozuviga yoziladi
-//      (`encode_commit_quality` / `fmp4::commit`), chatdagi xabar o'chadi.
+//      (`encode_commit_quality`), chatdagi xabar o'chadi.
 //   4. Run `/api/encode/committed?file=` bilan tasdiqni kutadi va tugaydi.
 // Fayl baytlari worker orqali O'TMAYDI — faqat Telegram ichida ko'chadi.
 
@@ -63,7 +63,6 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
     }
     let name_ok = match kind {
         "mp4" => name == encode_file_name(a, s, e, q, queued_at),
-        "fmp4" => fmp4::valid_name(&name, a, s, e, q),
         _ => false,
     };
     // Ish hali mavjudmi (o'chirilgan/almashtirilgan qismga fayl yozilmasin).
@@ -96,7 +95,7 @@ pub(crate) async fn on_file(env: &Env, msg: &Value) -> bool {
             .ok().and_then(|r| first_row(&r)).and_then(|r| r["done"].as_str().map(String::from)).unwrap_or_default();
         encode_commit_quality(env, (a, s, e), queued_at, q, &name, &key, size, ch_msg, true, &done).await.map(|_| ())
     } else {
-        fmp4::commit(env, (a, s, e), q, &name, &key, size, ch_msg).await
+        Err(Error::RustError("noma'lum tur".into()))
     };
     match res {
         Ok(()) => {

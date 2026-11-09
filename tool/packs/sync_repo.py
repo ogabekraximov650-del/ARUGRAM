@@ -53,9 +53,6 @@ FILES[".github/workflows/anibla_bot.yml"] = HERE.parent / "anibla" / "anibla_bot
 # Eski per-sifat workflow'lar: run'lari to'xtatilib o'chiriladi, fayllari olib tashlanadi (bir martalik, keyin hech narsa topilmaydi).
 OLD_WORKFLOWS = tuple(f"anibla_bot_{_q}.yml" for _q in ("1080p", "720p", "480p", "360p"))
 FILES["tool/anibla/bot_download.py"] = HERE.parent / "anibla" / "bot_download.py"
-# Mini App pleyeri uchun eski qismlarning fMP4 nusxasi — ALOHIDA workflow `fmp4.yml`.
-FILES[".github/workflows/fmp4.yml"] = HERE.parent / "fmp4" / "fmp4.workflow.yml"
-FILES["tool/fmp4/run.py"] = HERE.parent / "fmp4" / "run.py"
 FILES[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
 FILES["tool/session/session.py"] = HERE.parent / "session" / "session.py"
 # "Siqish" (kodlash botining "🗜 Siqish" bo'limi) — ALOHIDA workflow `compress.yml`.

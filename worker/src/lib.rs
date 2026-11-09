@@ -55,7 +55,6 @@ mod livewatch;
 // Telegram Mini App (`web/`, arumediatv.pages.dev) uchun kirish.
 mod tma;
 // Qismlarning fMP4 nusxasi (Mini App pleyeri uchun) va uning navbati.
-mod fmp4;
 
 // ── CORS + JSON yordamchi ──────────────────────────────────────
 
@@ -1122,11 +1121,6 @@ async fn init_db(env: &Env) -> bool {
         ("CREATE INDEX IF NOT EXISTS idx_billing_user
             ON billing_log(user_id, created_at)", vec![]),
 
-        // B2'da yetim qolgan fayllar (pastdagi izohga qarang).
-        ("CREATE TABLE IF NOT EXISTS orphan_files (
-            file_name TEXT PRIMARY KEY
-        )", vec![]),
-
         // ══════════════════════════════════════════════════════
         //  IZOHLAR
         // ══════════════════════════════════════════════════════
@@ -1441,6 +1435,28 @@ async fn init_db(env: &Env) -> bool {
                 &format!("ALTER TABLE season_janr ADD COLUMN janr_{i} TEXT"), vec![]).await;
         }
         config_put(env, "mig_janr_20", "1").await;
+    }
+    // Eski tizim qoldiqlari BIR MARTA tozalanadi (2026-11, foydalanuvchi talabi): fMP4 (endi hamma narsa worker/vd orqali) — jadval va 12 ustun,
+    // yetim fayllar jadvali, eskirgan sozlama kalitlari, fayli yo'q (hech qachon yuklanmagan) yozishma xabarlari, muddati o'tgan kirish tokenlari.
+    if ok && config_get(env, "mig_cleanup_2611").await.is_none() {
+        let _ = turso_exec(env, "DROP TABLE IF EXISTS fmp4_jobs", vec![]).await;
+        let _ = turso_exec(env, "DROP TABLE IF EXISTS orphan_files", vec![]).await;
+        for q in QUALITIES {
+            for col in ["url", "size", "key"] {
+                // Ustun allaqachon yo'q bo'lsa xato beradi — e'tiborsiz.
+                let _ = turso_exec(env, &format!("ALTER TABLE epizod_db DROP COLUMN fmp4_{col}_{q}"), vec![]).await;
+            }
+        }
+        let r = turso_batch(env, &[
+            (r"DELETE FROM app_config WHERE cfg_key IN ('mig_fmp4','fmp4_kicked_at','anibla_kicked_at','emoji_font_kicked_at','post_kicked_at','r2_kicked_at',
+                'sess_at','sess_code','sess_phone','sess_pw','sess_state','sess_target')
+                OR cfg_key LIKE 'dlv\_msg\_%' ESCAPE '\'", vec![]),
+            ("DELETE FROM login_tokens WHERE expires_at<?", vec![TursoArg::int(now_ms())]),
+        ]).await;
+        // `vd_files` jadvali kerak bo'lganda yaratiladi (`vd::ensure`); fayli bazada yo'q yozishma xabarlari o'chadi.
+        let chat_ok = vd::ensure(env).await.is_ok()
+            && turso_exec(env, "DELETE FROM chat_messages WHERE media_file<>'' AND media_file NOT IN (SELECT name FROM vd_files)", vec![]).await.is_ok();
+        if r.is_ok() && chat_ok { config_put(env, "mig_cleanup_2611", "1").await; }
     }
     // Anime qo'shilgan vaqt: yangi anime ro'yxatda eng tepaga chiqadi (2026-10).
     if ok && config_get(env, "mig_anime_created_at").await.is_none() {
@@ -3529,10 +3545,6 @@ fn hide_keys(mut obj: Value) -> Value {
         }
         // Asl videoning kaliti ham hammaga berilmaydi.
         m.remove("origin_key");
-        // fMP4 nusxalar kaliti ham (`fmp4.rs`).
-        for q in QUALITIES {
-            m.remove(&format!("fmp4_key_{q}"));
-        }
     }
     obj
 }
@@ -7376,6 +7388,13 @@ async fn chat_unread(req: &Request, env: &Env) -> Result<Response> {
     ok_nostore(json!({"unread": scalar(&res), "admin": admin, "mk": mk, "at": now}))
 }
 
+/// Yozishma xabarining raqami (RAQAM bilan: `vaqt_ms * 1000 + 3 xonali tasodifiy`, masalan `1794221272123456`). Ustun matn turida qoladi, lekin
+/// qiymat faqat raqam; javob belgisi `[re:<raqam>]` ham shu bilan ishlaydi. Takror bo'lsa (juda kam) PRIMARY KEY rad etadi.
+fn new_chat_id() -> String {
+    let r = u64::from_str_radix(&random_hex(4), 16).unwrap_or(0) % 1000;
+    format!("{}", (now_ms().max(0) as u64) * 1000 + r)
+}
+
 /// TIZIM nomidan foydalanuvchining yozishmasiga xabar qo'yadi.
 ///
 /// Bloklash sababi shu yo'l bilan yetkaziladi: botdagi xabar bir
@@ -7397,7 +7416,7 @@ async fn chat_admin_note(env: &Env, user_id: i64, body: &str) -> Result<()> {
             (id,user_id,from_admin,body,media_file,media_type,media_ms,created_at)
           VALUES (?,?,1,?,'','',0,?)",
          vec![
-            TursoArg::text(&format!("m{}", random_hex(12))),
+            TursoArg::text(&new_chat_id()),
             TursoArg::int(user_id), TursoArg::text(&text), TursoArg::int(now),
          ]),
         ("INSERT INTO chat_threads
@@ -7509,7 +7528,7 @@ async fn chat_send(mut req: Request, env: &Env, origin: &str) -> Result<Response
     let from_admin = admin && target != me;
 
     let now = now_ms();
-    let id = format!("m{}", random_hex(12));
+    let id = new_chat_id();
 
     // Xabar va suhbat qatori BITTA paketda: ikkovi ham yozilsin
     // yoki hech qaysisi yozilmasin.
@@ -10172,12 +10191,6 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                     ],
                 ));
             }
-            if !avatar_gone {
-                stmts.push((
-                    "INSERT OR IGNORE INTO orphan_files (file_name) VALUES (?)",
-                    vec![TursoArg::text(&avatar)],
-                ));
-            }
             for sql in [
                 "DELETE FROM ratings_db WHERE user_id=?",
                 "DELETE FROM favorites_db WHERE user_id=?",
@@ -10423,7 +10436,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/cmp/claim" | "/api/cmp/peek" | "/api/cmp/check" | "/api/cmp/finish" | "/api/cmp/progress"
         | "/api/dub/claim" | "/api/dub/peek" | "/api/dub/check" | "/api/dub/finish" | "/api/dub/progress" | "/api/dub/state" | "/api/dub/stage"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/probe" | "/api/anibla/progress" | "/api/anibla/done"
-        | "/api/fmp4/claim" | "/api/fmp4/done" | "/api/fmp4/r2put" | "/api/fmp4/r2ready" | "/api/session/poll" | "/api/session/report"
+        | "/api/session/poll" | "/api/session/report"
         | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
@@ -11588,8 +11601,6 @@ pub(crate) async fn encode_commit_quality(env: &Env, (a, s, e): (i64, i64, i64),
         if !had_any {
             announce::episode_ready(env, a, s, e).await;
         }
-        // MP4 almashdi — eski fMP4 nusxasi (Mini App) endi boshqa videoniki.
-        fmp4::forget_quality(env, a, s, e, q).await;
         // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
         let old = bare_name(&old);
         if !old.is_empty() && old != file {
@@ -12365,7 +12376,6 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         let size = jint(&b, "size");
         let name_ok = match kind {
             "mp4" => file == encode_file_name(a, s, e, q, queued_at),
-            "fmp4" => fmp4::valid_name(file, a, s, e, q),
             _ => false,
         };
         if !name_ok || size <= 0 || (path == "/api/encode/r2put" && !valid_file_key(&key)) {
@@ -14222,8 +14232,6 @@ async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = cmpbot::kick(&env).await;
     // "Dublyaj" navbati — ALOHIDA workflow (`dubbot::kick`).
     let _ = dubbot::kick(&env).await;
-    // Mini App so'ragan eski qismlarning fMP4 nusxasi (`fmp4::kick`).
-    let _ = fmp4::kick(&env).await;
     // Video ombori (`vd`): saqlash / migratsiya navbati bo'lsa ALOHIDA workflow'lar uyg'otiladi.
     vd::cron(&env).await;
     // R2 oraliq ombori: Telegram'ga yuklanmagan fayllar bo'lsa yuklovchi workflow ishga tushadi; eskirganlar tozalanadi.
@@ -14706,9 +14714,6 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     if method == Method::Post && path == "/api/tma/auth" {
         return tma::auth(req, &env).await;
     }
-    if method == Method::Post && path == "/api/fmp4/request" {
-        return fmp4::request(req, &env).await;
-    }
     if path.starts_with("/api/r2/") {
         let p = path.to_string();
         return r2::route(req, &env, &p).await;
@@ -14717,10 +14722,6 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     if vd::is_actions_path(path) {
         let p = path.to_string();
         return vd::route(req, &env, &p).await;
-    }
-    if method == Method::Post && (path == "/api/fmp4/claim" || path == "/api/fmp4/done" || path == "/api/fmp4/r2put" || path == "/api/fmp4/r2ready") {
-        let p = path.to_string();
-        return fmp4::route(req, &env, &p).await;
     }
 
     // Video ombori rasmlari: kalit va hajm (faqat ilova imzosi, sessiyasiz; POST — GET blokidan TASHQARIDA).

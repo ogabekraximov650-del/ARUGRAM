@@ -16,7 +16,6 @@ on:
       - 'tool/anibla/anibla.workflow.yml'
       - 'tool/anibla/anibla_bot.workflow.yml'
       - 'tool/anibla/bot_download.py'
-      - 'tool/fmp4/**'
       - 'tool/session/**'
       - 'tool/upload/**'
       - 'tool/bdrive/**'

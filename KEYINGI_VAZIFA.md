@@ -7128,3 +7128,10 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 ## Rasmlar Telegram hisobisiz (tuzatish)
 
 `TgImage` rasmni tarmoqdan faqat Telegram hisobi ulangan bo'lsa yuklardi (`network = ready`) — bot orqali kirgan foydalanuvchida vd (Cloudflare keshi) yo'li ishlatilmasdi va rasmlar bo'sh qolardi. Endi `network = true` (Telegram faqat zaxira). Video kadrlari (`Thumbs.kt`) ham vd orqali: `vd/VdFrameSource.kt` (MediaDataSource, 1 MiB bloklar, qurilmada shifr ochiladi). Eslatma: baza tozalanganda eski posterlar (`tg_files`) yo'qolgan — admin ularni qayta yuklaydi.
+
+## Baza va kod tozalash: fMP4 olib tashlandi, yozishma raqamlari (2026-11)
+
+- **fMP4 butunlay olib tashlandi** (hamma narsa worker/vd orqali): `worker/src/fmp4.rs`, `/api/fmp4/*` yo'llari, `fmp4::kick` (cron), `tool/fmp4/`, kodlovchi `tool/encode/run.py` dagi fMP4 nusxa yasash/yuklash, `sync_repo.py`/`setup_repo.py` dagi fmp4 qatorlari. Bazadan: `fmp4_jobs` jadvali va `epizod_db` ning 12 ta `fmp4_{url,size,key}_<sifat>` ustuni (`ALTER TABLE ... DROP COLUMN`). ESLATMA: Telegram Mini App pleyeri (`web/src/js/player`) FAQAT fMP4 ni o'ynardi — endi u qism topa olmaydi; Mini App uchun vd'dan o'ynaydigan pleyer alohida ish. Ikkinchi akkaunt repodagi eski `fmp4.yml` qo'lda o'chiriladi (sync o'chirmaydi).
+- **Bir martalik migratsiya** `mig_cleanup_2611` (`init_db`, `lib.rs`): yuqoridagilar + `orphan_files` jadvali (faqat yozilar edi, hech kim o'qimasdi) + eskirgan `app_config` kalitlari (`*_kicked_at`, bo'sh `sess_*`, `dlv_msg_*`, `mig_fmp4`) + fayli bazada (`vd_files`) yo'q yozishma xabarlari + muddati o'tgan `login_tokens`.
+- **Yozishma xabar raqami endi RAQAM**: `new_chat_id()` = `vaqt_ms*1000 + 3 xonali tasodifiy` (ustun matn turida, qiymat faqat raqam; javob belgisi `[re:<raqam>]` shu bilan ishlaydi). Eski `m<hex>` xabarlari o'zgarmadi.
+- Qoldirildi (hali ishlatiladi): `r2_files` (`r2.rs`), `encode_q`, `tg_files`, `announce*`, `anime_db.davlat/studiya/janri/tavsif` — kod ularga tayanadi; o'chirish alohida refaktor.
