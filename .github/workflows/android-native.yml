@@ -120,6 +120,10 @@ jobs:
 
       # ── TELEGRAM: "SAQLANGAN XABARLAR"GA YUBORISH (Flutter workflow'idagidek) ──
       # Sessiya `tool/encode/session.enc` dan (`ENCODE_TOKEN` bilan) tiklanadi, nusxada ishlanadi. Xato bo'lsa build buzilmaydi.
+      # Runner'dagi standart Python 3.14 da Pyrogram import xatosi beradi (`There is no current event loop`) — 3.11 qo'yiladi.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - name: APK'larni Telegram "Saqlangan xabarlar"ga yuborish
         continue-on-error: true
         working-directory: ${{ github.workspace }}
