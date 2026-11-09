@@ -7124,3 +7124,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 ## vd foydalanuvchi yo'llari (tuzatish)
 
 `/api/vd/info`, `/api/vd/small`, `/api/vd/up/init`, `/api/vd/up/complete` avval `tg_route` ichida edi (faqat `/api/tg/*` ga yetadi) -> 404 "Not found". Endi `vd_user_route` (`worker/src/lib.rs`) va `route()` da `/api/vd/` dispatch. Yangi vd yo'llari FAQAT shu yerga qo'shilsin.
+
+## Rasmlar Telegram hisobisiz (tuzatish)
+
+`TgImage` rasmni tarmoqdan faqat Telegram hisobi ulangan bo'lsa yuklardi (`network = ready`) — bot orqali kirgan foydalanuvchida vd (Cloudflare keshi) yo'li ishlatilmasdi va rasmlar bo'sh qolardi. Endi `network = true` (Telegram faqat zaxira). Video kadrlari (`Thumbs.kt`) ham vd orqali: `vd/VdFrameSource.kt` (MediaDataSource, 1 MiB bloklar, qurilmada shifr ochiladi). Eslatma: baza tozalanganda eski posterlar (`tg_files`) yo'qolgan — admin ularni qayta yuklaydi.

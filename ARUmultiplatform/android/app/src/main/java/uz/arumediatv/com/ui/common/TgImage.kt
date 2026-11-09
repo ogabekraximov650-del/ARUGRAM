@@ -34,8 +34,9 @@ fun TgImage(
     var bmp by remember(url) { mutableStateOf(AppServices.images.peek(url)) }
     LaunchedEffect(url, ready) {
         if (bmp == null && url.isNotEmpty()) {
-            // Diskdagi kesh Telegram ulanishini KUTMAYDI; tarmoq faqat ulangach.
-            bmp = AppServices.images.load(url, maxPx, network = ready)
+            // Yangi tizim (`vd`, Cloudflare keshi) Telegram hisobini TALAB QILMAYDI — tarmoq har doim ochiq; Telegram ulangach (`ready`) eski yo'l
+            // zaxira sifatida ham ishlaydi (qayta urinish shu sabab `ready` kaliti bilan).
+            bmp = AppServices.images.load(url, maxPx, network = true)
         }
     }
     Box(modifier) {

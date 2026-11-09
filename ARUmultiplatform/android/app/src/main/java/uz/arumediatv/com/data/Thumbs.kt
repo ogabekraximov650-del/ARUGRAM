@@ -31,6 +31,7 @@ import java.util.concurrent.ConcurrentHashMap
  * yasaladi, eskisi o'chadi. Navbat bitta-bitta ishlaydi; pleyer ochiq paytda (`gate.busy`) kutadi.
  */
 class ThumbStore(context: Context, private val tg: TelegramService, private val cache: VideoCache) {
+    private val appCtx: Context = context.applicationContext
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val dir = File(context.filesDir, "aru_thumb").apply { mkdirs() }
     private val queue = Mutex()
@@ -121,8 +122,22 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
         // Pleyer ochiq — tarmoq faqat videoniki.
         while (uz.arumediatv.com.AppServices.gate.busy.get() > 0) delay(400)
         val src = item.thumbUrl.ifEmpty { item.videoUrl }
-        val source = if (cache.isComplete(src)) src else tg.playUrl(src)
-        val bytes = if (source != null) grab(source, item.positionMs) else null
+        // YANGI TIZIM (vd): kadr Telegram hisobisiz, Cloudflare keshidan (fayl telefonda to'liq bo'lmasa).
+        val vname = Names.fileNameOf(src)
+        val vdInfo = if (vname.isNotEmpty() && !cache.isComplete(src)) withContext(Dispatchers.IO) {
+            uz.arumediatv.com.vd.VdApi.lookup(appCtx, vname, uz.arumediatv.com.AppServices.auth.sessionToken)
+        } else null
+        val bytes = if (vdInfo != null) {
+            withContext(Dispatchers.IO) {
+                withTimeoutOrNull(90_000) {
+                    val ds = uz.arumediatv.com.vd.VdFrameSource(vdInfo)
+                    try { frameJpeg(1280, 90, item.positionMs) { r -> r.setDataSource(ds) } } finally { runCatching { ds.close() } }
+                }
+            }
+        } else {
+            val source = if (cache.isComplete(src)) src else tg.playUrl(src)
+            if (source != null) grab(source, item.positionMs) else null
+        }
         if (bytes == null) return null
         try {
             f.writeBytes(SecureStore.seal(bytes))
@@ -139,17 +154,19 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
         val port = cache.ensureStarted()
         if (port <= 0) return@withContext null
         val url = "http://127.0.0.1:$port/thumb?u=${URLEncoder.encode(source, "UTF-8")}&ms=$ms"
-        withTimeoutOrNull(60_000) { frameJpeg(url, 1280, 90) }
+        withTimeoutOrNull(60_000) { frameJpeg(1280, 90) { r -> r.setDataSource(url, HashMap<String, String>()) } }
     }
 
-    private fun frameJpeg(url: String, maxWidth: Int, quality: Int): ByteArray? {
+    private fun frameJpeg(maxWidth: Int, quality: Int, atMs: Long = -1, setSource: (MediaMetadataRetriever) -> Unit): ByteArray? {
         val r = MediaMetadataRetriever()
         try {
-            r.setDataSource(url, HashMap<String, String>())
+            setSource(r)
             val durationMs = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
             fun at(us: Long, opt: Int): Bitmap? = try { r.getFrameAtTime(us, opt) } catch (_: Throwable) { null }
             // Bo'lakda bitta kadr bor: avval oxirgi, keyin boshi, keyin tizim tanlagan, keyin 0-raqamli.
-            var bmp: Bitmap? = if (durationMs > 1) at((durationMs - 1) * 1000, MediaMetadataRetriever.OPTION_CLOSEST) else null
+            // Butun video (vd): to'xtagan joydagi kadr; bir kadrlik MP4 (eski yo'l): oxirgi kadr.
+            var bmp: Bitmap? = if (atMs >= 0) at(atMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                else if (durationMs > 1) at((durationMs - 1) * 1000, MediaMetadataRetriever.OPTION_CLOSEST) else null
             if (bmp == null) bmp = at(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
             if (bmp == null) bmp = at(0, MediaMetadataRetriever.OPTION_CLOSEST)
             if (bmp == null) bmp = try { r.getFrameAtTime() } catch (_: Throwable) { null }
