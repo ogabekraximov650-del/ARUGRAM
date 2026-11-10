@@ -25,6 +25,7 @@ class AruPlayer(context: Context) {
     /** Yangi tizim (vd) fayl nomi (`vd://<nom>` ochilganda); 503 (kesh yo'q) bo'lsa oyna majburan qayta isitiladi, ko'pi bilan 2 marta. */
     private var vdName: String? = null
     private var vdRecoveries = 0
+    private var lastRecoveryAt = 0L
     /** 1 daqiqalik oyna ([uz.arumediatv.com.vd.VdAhead]) uchun: ochiq vd faylining hajmi va kaliti. */
     private var vdSize = 0L
     private var vdKey: ByteArray? = null
@@ -92,6 +93,11 @@ class AruPlayer(context: Context) {
             val vn = vdName
             // Tarmoq/IO xatolari (2000..2999: uzilish, taymaut, 503, "Kesh tayyor emas") — sekin tarmoqda oddiy hol: oyna qayta isitiladi va davom etadi (3 martagacha).
             val ioErr = e.errorCode in 2000..2999
+            // Hisoblagich faqat KETMA-KET xatolarni sanaydi: oxirgi tiklanishdan 1 daqiqadan ko'p o'tgan bo'lsa noldan boshlanadi. Ilgari u butun
+            // film davomida yig'ilardi — uzoq ko'rishda 3 ta tasodifiy tarmoq uzilishidan keyin video butunlay to'xtab qolardi.
+            val nowMs = android.os.SystemClock.elapsedRealtime()
+            if (nowMs - lastRecoveryAt > 60_000) vdRecoveries = 0
+            if (vn != null && vdRecoveries < 3) lastRecoveryAt = nowMs
             if (vn != null && vdRecoveries < 3 && (http == 503 || ioErr || generateSequence<Throwable>(e) { it.cause }.any { it.message?.contains("Kesh tayyor emas") == true })) {
                 // Kesh o'chib ketgan (yoki oyna isitilmagan): belgi o'chadi, oyna MAJBURAN qayta isitiladi va ijro shu joydan davom etadi.
                 vdRecoveries++
