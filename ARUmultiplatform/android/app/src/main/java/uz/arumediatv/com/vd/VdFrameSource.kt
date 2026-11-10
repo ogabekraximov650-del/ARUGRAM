@@ -1,42 +1,29 @@
 package uz.arumediatv.com.vd
 
 import android.media.MediaDataSource
-import okhttp3.Request
-import uz.arumediatv.com.data.Http
-import java.util.concurrent.TimeUnit
 
 /**
- * Video kadrini (`MediaMetadataRetriever`) YANGI TIZIMDAN (vd) olish: Telegram hisobi kerak emas. Kerakli 1 MiB bloklar Cloudflare keshidan
- * (bo'lak oldindan isitiladi) shifrlangan holda olinib, qurilmada ochiladi. Faqat bir nechta blok o'qiladi (moov + kerakli kadr).
+ * Video kadrini (`MediaMetadataRetriever`) YANGI TIZIMDAN (vd) olish: Telegram hisobi kerak emas. Kerakli 1 MiB bloklar pleyer bilan umumiy
+ * telefon keshidan, yo'q bo'lsa Cloudflare keshidan olinib qurilmada ochiladi. Faqat bir nechta blok o'qiladi (moov + kerakli kadr).
  * UZ: vd kadr manbasi. EN: frame source for vd files. RU: источник кадров для vd-файлов.
  */
 class VdFrameSource(private val info: VdApi.Info) : MediaDataSource() {
     private val key = VdCtr.hex(info.key)
-    private val http = Http.client.newBuilder().readTimeout(60, TimeUnit.SECONDS).build()
     private val blocks = object : LinkedHashMap<Long, ByteArray>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, ByteArray>?) = size > 8
     }
-    private val warmed = HashSet<Long>()
 
     override fun getSize(): Long = info.size
 
+    /** Bo'lak pleyer bilan UMUMIY keshdan ([VdBlocks]): pleyer ko'rgan joy qayta yuklanmaydi, bu yerda olingani pleyerga ham yaraydi. */
     private fun block(i: Long): ByteArray? {
         synchronized(blocks) { blocks[i]?.let { return it } }
-        val start = i * BLOCK
-        val end = minOf(start + BLOCK, info.size) - 1
-        if (end < start) return null
-        val chunk = start / VdCtr.CHUNK
-        val already = synchronized(warmed) { chunk in warmed }
-        if (!already) {
-            if (!VdApi.warmBlocking(info.name, chunk)) return null
-            synchronized(warmed) { warmed.add(chunk) }
+        if (i * BLOCK >= info.size) return null
+        val plain = try {
+            VdBlocks.get(uz.arumediatv.com.AppServices.appContext, info.name, info.size, key, i)
+        } catch (_: Exception) {
+            return null
         }
-        val req = Request.Builder().url(VdApi.playUrl(info.name)).header("Range", "bytes=$start-$end").build()
-        val enc = try {
-            http.newCall(req).execute().use { r -> if (r.code != 206 && r.code != 200) null else r.body?.bytes() }
-        } catch (_: Exception) { null } ?: return null
-        if (enc.size.toLong() != end - start + 1) return null
-        val plain = VdCtr.apply(key, start, enc)
         synchronized(blocks) { blocks[i] = plain }
         return plain
     }

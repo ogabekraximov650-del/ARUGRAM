@@ -25,6 +25,10 @@ class AruPlayer(context: Context) {
     /** Yangi tizim (vd) fayl nomi (`vd://<nom>` ochilganda); 503 (kesh yo'q) bo'lsa oyna majburan qayta isitiladi, ko'pi bilan 2 marta. */
     private var vdName: String? = null
     private var vdRecoveries = 0
+    /** 1 daqiqalik oyna ([uz.arumediatv.com.vd.VdAhead]) uchun: ochiq vd faylining hajmi va kaliti. */
+    private var vdSize = 0L
+    private var vdKey: ByteArray? = null
+    private var lastAhead = 0L
 
     val exo: ExoPlayer = ExoPlayer.Builder(
         context.applicationContext,
@@ -130,7 +134,8 @@ class AruPlayer(context: Context) {
         ready = false
         positionMs = startMs
         durationMs = 0
-        if (!uri.startsWith("vd://")) vdName = null
+        if (!uri.startsWith("vd://") || vdName != uri.removePrefix("vd://")) uz.arumediatv.com.vd.VdAhead.stop(vdName)
+        if (!uri.startsWith("vd://")) { vdName = null; vdKey = null }
         if (uri.startsWith("vd://")) {
             // Yangi tizim: 18 MiB shifrlangan bo'laklar (Telegram -> Cloudflare kesh), shifrni ilova ochadi, ko'rilgan joy telefon keshida.
             val name = uri.removePrefix("vd://")
@@ -142,6 +147,8 @@ class AruPlayer(context: Context) {
                 error = "Video ma'lumoti topilmadi"
                 return
             }
+            vdSize = info.size
+            vdKey = uz.arumediatv.com.vd.VdCtr.hex(info.key)
             val item = MediaItem.Builder().setUri(uz.arumediatv.com.vd.VdApi.playUrl(name)).setMimeType(androidx.media3.common.MimeTypes.VIDEO_MP4).build()
             val factory = uz.arumediatv.com.vd.VdWarm.mediaSourceFactory(name, appCtx, info.size, info.key)
             exo.setMediaSource(factory.createMediaSource(item), startMs.coerceAtLeast(0))
@@ -180,11 +187,22 @@ class AruPlayer(context: Context) {
         try { reporter.execute { uz.arumediatv.com.core.RustCore.playerPosition(n, pos, dur, buf) } } catch (_: Exception) {}
     }
 
+    /** Yangi tizim: telefonda "ijro joyi .. +1 daqiqa" tayyor tursin (yetishmayotgan 1 MiB bo'laklar fonda bittadan olinadi). */
+    private fun ahead(force: Boolean = false) {
+        val n = vdName ?: return
+        val k = vdKey ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!force && now - lastAhead < 1000) return
+        lastAhead = now
+        uz.arumediatv.com.vd.VdAhead.onPosition(appCtx, n, vdSize, k, exo.currentPosition.coerceAtLeast(0))
+    }
+
     fun tick() {
         positionMs = exo.currentPosition.coerceAtLeast(0)
         val d = exo.duration
         if (d > 0) durationMs = d
         report()
+        ahead()
     }
 
     fun play() {
@@ -203,6 +221,7 @@ class AruPlayer(context: Context) {
         exo.seekTo(ms.coerceIn(0, max))
         positionMs = exo.currentPosition
         report(force = true)
+        ahead(force = true)
     }
 
     fun seekBy(deltaMs: Long) = seekTo(exo.currentPosition + deltaMs)
@@ -214,6 +233,7 @@ class AruPlayer(context: Context) {
 
     fun release() {
         report(close = true)
+        uz.arumediatv.com.vd.VdAhead.stop(vdName)
         reporter.shutdown()
         exo.removeListener(listener)
         exo.release()

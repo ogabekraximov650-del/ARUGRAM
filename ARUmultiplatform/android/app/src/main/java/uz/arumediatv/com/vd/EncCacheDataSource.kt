@@ -6,23 +6,20 @@ import androidx.media3.common.C
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.BaseDataSource
-import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSourceException
 import androidx.media3.datasource.DataSpec
-import java.io.EOFException
-import java.io.IOException
 
 /**
- * ExoPlayer uchun manba: avval telefondagi shifrlangan 1 MiB bo'laklar keshidan ([BlockCache]) o'qiydi; bo'lak yo'q bo'lsa [upstream]
- * (worker orqali) dan ketma-ket o'qib, bo'lakni shifrlab doimiy xotiraga yozadi va pleyerga uzatadi. Ko'rilgan joy keyingi safar tarmoqsiz ochiladi.
- * [total] — fayl hajmi (ro'yxatdan); kesh kaliti — fayl `id`si (havoladagi token o'zgarsa ham kesh saqlanadi).
+ * ExoPlayer uchun manba: baytlarni 1 MiB bo'laklab [VdBlocks] dan oladi — bo'lak telefondagi shifrlangan keshda ([BlockCache]) bo'lsa tarmoqsiz,
+ * bo'lmasa aniq shu bo'lak serverdan olinib, shifri ochilib keshga yoziladi. Ko'rilgan joy keyingi safar tarmoqsiz ochiladi.
+ * [total] — fayl hajmi; kesh kaliti — fayl `id`si; [key] — faylning AES-128-CTR kaliti.
  */
 @UnstableApi
 class EncCacheDataSource(
     private val ctx: Context,
     private val id: String,
     private val total: Long,
-    private val upstream: DataSource,
+    private val key: ByteArray,
 ) : BaseDataSource(false) {
     private var uri: Uri? = null
     private var spec: DataSpec? = null
@@ -31,7 +28,6 @@ class EncCacheDataSource(
     private var opened = false
     private var block: ByteArray? = null
     private var blockIdx = -1L
-    private var upPos = -1L // upstream keyingi beradigan bayt joyi; -1 — yopiq
 
     override fun open(dataSpec: DataSpec): Long {
         uri = dataSpec.uri
@@ -65,49 +61,11 @@ class EncCacheDataSource(
         return n
     }
 
-    private fun blockLen(idx: Long): Int = minOf(BlockCache.BLOCK.toLong(), total - idx * BlockCache.BLOCK).toInt()
-
-    private fun loadBlock(idx: Long): ByteArray {
-        val len = blockLen(idx)
-        BlockCache.read(ctx, id, idx, len)?.let { return it }
-        val start = idx * BlockCache.BLOCK
-        var lastErr: IOException? = null
-        repeat(2) {
-            try {
-                if (upPos != start) {
-                    closeUp()
-                    upstream.open(spec!!.buildUpon().setPosition(start).setLength(C.LENGTH_UNSET.toLong()).build())
-                    upPos = start
-                }
-                val buf = ByteArray(len)
-                var got = 0
-                while (got < len) {
-                    val r = upstream.read(buf, got, len - got)
-                    if (r == C.RESULT_END_OF_INPUT) throw EOFException("kutilmagan oqim oxiri")
-                    got += r
-                }
-                upPos = start + len
-                BlockCache.write(ctx, id, idx, buf)
-                return buf
-            } catch (e: IOException) {
-                lastErr = e
-                closeUp() // ulanish uzilgan/eskirgan bo'lishi mumkin — bir marta qayta ochib ko'ramiz
-            }
-        }
-        throw lastErr ?: IOException("bo'lak o'qilmadi")
-    }
-
-    private fun closeUp() {
-        if (upPos >= 0) {
-            try { upstream.close() } catch (_: IOException) {}
-            upPos = -1
-        }
-    }
+    private fun loadBlock(idx: Long): ByteArray = VdBlocks.get(ctx, id, total, key, idx)
 
     override fun getUri(): Uri? = uri
 
     override fun close() {
-        closeUp()
         block = null
         blockIdx = -1
         if (opened) {

@@ -3,17 +3,21 @@ package uz.arumediatv.com.vd
 import android.content.Context
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSource
-import androidx.media3.datasource.DataSpec
-import androidx.media3.datasource.DefaultHttpDataSource
-import androidx.media3.datasource.ResolvingDataSource
-import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import java.io.IOException
+import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.Extractor
+import androidx.media3.extractor.ExtractorInput
+import androidx.media3.extractor.ExtractorOutput
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.PositionHolder
+import androidx.media3.extractor.SeekMap
+import androidx.media3.extractor.TrackOutput
+import androidx.media3.extractor.mp4.Mp4Extractor
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Pleyer o'qiydigan har bir bo'lak (oyna) uchun avval kesh isitiladi, keyin baytlar shifri ochilib telefonning DOIMIY shifrlangan keshiga yoziladi
- * (ARUDRIVE `Warm`/`EncCacheDataSource` bilan bir xil). Keyingi bo'lak pleyer joriy bo'lakning 15-MB'ini o'qiganda fonda isitiladi.
+ * Isitish holati (qaysi 18 MiB oyna Cloudflare keshida tayyor) va pleyer manbasi. Har bo'lak so'rovidan oldin oynasi isitiladi ([VdBlocks]);
+ * keyingi oyna joriy oynaning 15-MB'i olinganda fonda isitiladi (serverda — telefon trafigi ketmaydi).
  */
 @UnstableApi
 object VdWarm {
@@ -35,39 +39,37 @@ object VdWarm {
         }.start()
     }
 
-    private class Tracker(val name: String) : TransferListener {
-        private val reads = java.util.Collections.synchronizedMap(java.util.IdentityHashMap<DataSpec, LongArray>())
-        override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
-        override fun onTransferStart(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) { reads[dataSpec] = longArrayOf(dataSpec.position, 0) }
-        override fun onBytesTransferred(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean, bytesTransferred: Int) {
-            val r = reads[dataSpec] ?: return
-            r[1] += bytesTransferred
-            onRead(name, r[0] + r[1])
-        }
-        override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) { reads.remove(dataSpec) }
-    }
-
     fun forget(name: String) { done.removeAll { it.startsWith("$name:") } }
 
     fun markWarm(name: String, window: Long = 0) { done.add("$name:$window") }
 
-    /** Pleyer manbasi: [BlockCache] (telefon) <- [CtrDataSource] (shifrni ochish) <- tarmoq (har oyna oldin isitiladi). */
-    fun mediaSourceFactory(name: String, context: Context, size: Long, keyHex: String): DefaultMediaSourceFactory {
-        val resolver = ResolvingDataSource.Resolver { spec: DataSpec ->
-            val w = spec.position / VdApi.WARM_WINDOW
-            val key = "$name:$w"
-            if (!done.contains(key)) {
-                if (!VdApi.warmBlocking(name, w)) throw IOException("Kesh tayyor emas (oyna $w)")
-                done.add(key)
+    fun isWarm(name: String, window: Long): Boolean = done.contains("$name:$window")
+
+    /** Videoning vaqt -> bayt jadvalini ([SeekMap]) 1 daqiqalik oyna ([VdAhead]) uchun ushlab qoladi; qolgan hammasi asl o'quvchiga uzatiladi. */
+    private class TapExtractor(private val inner: Extractor, private val name: String) : Extractor {
+        override fun sniff(input: ExtractorInput): Boolean = inner.sniff(input)
+        override fun init(output: ExtractorOutput) = inner.init(object : ExtractorOutput {
+            override fun track(id: Int, type: Int): TrackOutput = output.track(id, type)
+            override fun endTracks() = output.endTracks()
+            override fun seekMap(seekMap: SeekMap) {
+                VdAhead.setSeekMap(name, seekMap)
+                output.seekMap(seekMap)
             }
-            spec
-        }
-        val network = ResolvingDataSource.Factory(
-            DefaultHttpDataSource.Factory().setConnectTimeoutMs(25_000).setReadTimeoutMs(120_000).setTransferListener(Tracker(name)), resolver)
+        })
+        override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int = inner.read(input, seekPosition)
+        override fun seek(position: Long, timeUs: Long) = inner.seek(position, timeUs)
+        override fun release() = inner.release()
+        override fun getUnderlyingImplementation(): Extractor = inner.underlyingImplementation
+    }
+
+    /** Pleyer manbasi: telefon keshi ([BlockCache]) <- [VdBlocks] (aniq 1 MiB so'rovlar, shifrni ochish). */
+    fun mediaSourceFactory(name: String, context: Context, size: Long, keyHex: String): DefaultMediaSourceFactory {
         val app = context.applicationContext
         val key = VdCtr.hex(keyHex)
-        return DefaultMediaSourceFactory(context).setDataSourceFactory(
-            DataSource.Factory { EncCacheDataSource(app, name, size, CtrDataSource(network.createDataSource(), key)) },
-        )
+        val extractors = ExtractorsFactory {
+            DefaultExtractorsFactory().createExtractors().sortedBy { if (it is Mp4Extractor) 0 else 1 }
+                .map<Extractor, Extractor> { TapExtractor(it, name) }.toTypedArray()
+        }
+        return DefaultMediaSourceFactory(DataSource.Factory { EncCacheDataSource(app, name, size, key) }, extractors)
     }
 }

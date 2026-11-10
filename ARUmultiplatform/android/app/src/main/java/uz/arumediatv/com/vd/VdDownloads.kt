@@ -13,7 +13,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Yangi tizim (`vd`) fayllarini telefonga TO'LIQ yuklab olish. Bo'laklar pleyer ishlatadigan o'sha shifrlangan keshga ([BlockCache]) yoziladi:
- * ko'rish paytida yig'ilgan joy qayta yuklanmaydi, to'liq yuklangan fayl esa internetsiz ochiladi ([EncCacheDataSource] tarmoqqa bormaydi).
+ * ko'rish paytida yig'ilgan joy qayta yuklanmaydi, to'liq yuklangan fayl esa internetsiz ochiladi (bo'laklar telefonda — tarmoqqa borilmaydi).
  * Har 18 MiB oyna avval isitiladi (Telegram -> Cloudflare kesh), so'ng yetishmayotgan joyi Range bilan olinib shifri ochiladi.
  */
 object VdDownloads {
