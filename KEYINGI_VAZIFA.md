@@ -7190,3 +7190,7 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Belgi: kanalga yangi qism posti rasmsiz (faqat matn) chiqardi. Sabab: `announce::cover_file_id` bo'lim rasmini faqat eski `tg_files` dan qidirardi; baza noldan boshlangach yangi rasmlar faqat `vd_files` da -> "rasm saqlash kanalida topilmadi" -> matnli post.
 - Tuzatish (`worker/src/announce.rs` `cover_bytes`, `vd::chunk_bytes` endi `pub(crate)`): avval `vd_files` (`ready`, bitta bo'lak, `vkey` bilan AES-128-CTR ochiladi), topilmasa eski `tg_files` yo'li. Ochilgan rasm e'lon kanaliga yuklanib `file_id` `announce_cover` da eslab qolinadi (har rasm uchun BIR marta).
 - Cheklov: rasm yangi yuklangan bo'lsa Telegram'ga saqlanishi 1-2 daqiqa oladi (`ready` bo'lguncha); shu paytda birinchi sifat joylansa post matn bilan chiqadi. Bo'limga rasm qo'yilmagan (`photo_url` bo'sh) bo'lsa ham matn. Kanalda tayyor postni qo'lda qayta joylash: admin paneldagi "qayta joylash" (`announce::repost`).
+
+## Kanal hujjatlari nomi turga qarab (2026-11)
+
+- `vid_<raqam>_<bo'lak>.bin` endi FAQAT video uchun. Yangi nomlar: rasm `img_...`, ovoz `audio_...`, emoji shrifti `font_...`, boshqa hujjat `file_...` (`worker/src/vd.rs` `doc_kind`; katta fayllar uchun `claim` javobida `kind`, `tool/vd/store.py` uni ishlatadi). Eski hujjatlar nomi o'zgarmadi (ular `file_id` bo'yicha ochiladi, nom ahamiyatsiz).

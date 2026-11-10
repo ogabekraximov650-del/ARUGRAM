@@ -598,7 +598,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let have = ids(r["chunk_ids"].as_str().unwrap_or("")).len() as i64;
             let done: Vec<i64> = (0..have).collect();
             ok(json!({
-                "name": nm, "vid": r["vid"], "label": label(&nm), "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
+                "name": nm, "vid": r["vid"], "kind": doc_kind(&nm), "label": label(&nm), "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
                 "bot_token": tg_secret(env, "TELEGRAM_BOT_TOKEN"), "channel": vd_channel(env),
             }))
         }
@@ -1012,6 +1012,24 @@ fn hex_decode16(s: &str) -> Option<[u8; 16]> {
 }
 
 /// Fayl nomining odam o'qiydigan tavsifi (kanal izohi va bot xabarlari uchun): `ep_1_2_3_720p_...` -> "Qism 1-2-3 (720p)".
+/// Kanal hujjatining nomi boshi: `<tur>_<raqam>_<bo'lak>.bin`. `vid` — FAQAT video (qism, asl video, video fayl); rasm — `img`, ovoz — `audio`,
+/// emoji shrifti — `font`, qolgan hujjatlar — `file`.
+pub(crate) fn doc_kind(name: &str) -> &'static str {
+    let n = name.to_ascii_lowercase();
+    let ext = n.rsplit('.').next().unwrap_or("");
+    if n.starts_with("sys_emojifont_") {
+        "font"
+    } else if n.starts_with("ep_") || n.starts_with("orig_") || matches!(ext, "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v" | "3gp") {
+        "vid"
+    } else if matches!(ext, "jpg" | "jpeg" | "png" | "webp" | "gif" | "bmp" | "heic") {
+        "img"
+    } else if matches!(ext, "ogg" | "oga" | "opus" | "mp3" | "m4a" | "aac" | "wav" | "amr") {
+        "audio"
+    } else {
+        "file"
+    }
+}
+
 pub(crate) fn label(name: &str) -> String {
     let p: Vec<&str> = name.trim_end_matches(".mp4").split('_').collect();
     if name.starts_with("sys_emojifont_") {
@@ -1037,14 +1055,14 @@ async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(Strin
     let key_hex = random_hex(32);
     let Some(key) = hex_decode16(&key_hex) else { return Err(Error::RustError("kalit".into())) };
     ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into()).apply_keystream(&mut bytes);
-    // Fayl RAQAMI (`vid`): jadvalning ketma-ket `rowid` si — kanalda hujjat nomi `vid_<raqam>_<bo'lak>.bin` bo'ladi (o'qish oson, qism raqami kabi).
+    // Fayl RAQAMI (`vid`): jadvalning ketma-ket `rowid` si — kanalda hujjat nomi `<tur>_<raqam>_<bo'lak>.bin` bo'ladi (`doc_kind`: vid/img/audio/font/file) (o'qish oson, qism raqami kabi).
     let r = turso_exec(env,
         "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'staging','chunks','','',?) \
          ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=1, vkey=excluded.vkey, state='staging', layout='chunks', \
            chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created RETURNING rowid AS vid",
         vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::int(now_ms())]).await?;
     let vid = first_row(&r).map(|x| jint(&x, "vid")).unwrap_or(0);
-    let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("vid_{vid}_1.bin"),
+    let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("{}_{vid}_1.bin", doc_kind(name)),
         "", &bytes).await;
     let (fid, mid) = match sent {
         Ok(v) => v,

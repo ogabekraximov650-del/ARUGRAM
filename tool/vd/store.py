@@ -76,8 +76,9 @@ def process(job):
         raise RuntimeError("worker bot tokeni yoki kanalni bermadi")
     print("::add-mask::" + token)
     done = {int(x) for x in job.get("done", [])}
-    vid = int(job.get("vid") or 0)          # fayl RAQAMI (bazadagi ketma-ket raqam): hujjat nomi `vid_<raqam>_<bo'lak>.bin`
+    vid = int(job.get("vid") or 0)          # fayl RAQAMI (bazadagi ketma-ket raqam): hujjat nomi `<tur>_<raqam>_<bo'lak>.bin`
     label = job.get("label") or name
+    kind = job.get("kind") or "vid"          # hujjat nomi boshi: vid (video) / img (rasm) / audio / font / file
     log(f"{name}: {chunks} bo'lak, tayyor {len(done)}")
     pending = []   # bazaga yozilmagan bo'laklar: har 5 tasida bitta so'rov (Turso yozuvlari kamayadi); uzilsa ular qayta yuboriladi
 
@@ -90,7 +91,7 @@ def process(job):
         if n in done:
             continue
         data = vdlib._call(f"/api/vd/read?name={urllib.parse.quote(name)}&n={n}", method="GET", raw=True)
-        fid, mid = tg_send(token, channel, f"vid_{vid}_{n + 1}.bin", data)
+        fid, mid = tg_send(token, channel, f"{kind}_{vid}_{n + 1}.bin", data)
         pending.append({"n": n, "tg_file_id": fid, "msg_id": mid})
         if len(pending) >= 5 or n == chunks - 1:
             flush()
