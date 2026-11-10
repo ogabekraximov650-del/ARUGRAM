@@ -892,7 +892,7 @@ pub(crate) async fn img_info(env: &Env, body: &Value) -> Result<Response> {
 }
 
 /// Telegram'dan bo'lakni to'liq baytlar bilan oladi (kichik fayllar uchun).
-async fn chunk_bytes(env: &Env, tg_file_id: &str, expect: u64) -> Result<Vec<u8>> {
+pub(crate) async fn chunk_bytes(env: &Env, tg_file_id: &str, expect: u64) -> Result<Vec<u8>> {
     let token = tg_secret(env, "TELEGRAM_BOT_TOKEN");
     let f = tg_api_tok(&token, "getFile", json!({"file_id": tg_file_id})).await?;
     let path = f["file_path"].as_str().unwrap_or("").to_string();

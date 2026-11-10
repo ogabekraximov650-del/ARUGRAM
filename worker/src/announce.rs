@@ -155,13 +155,25 @@ fn hex_key(h: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
-/// Bo'lim rasmi uchun Telegram `file_id` (ochilgan nusxa): keshdan, yo'q bo'lsa — saqlash kanalidan
-/// olinadi, ochiladi va e'lon kanaliga yuklanib `file_id` eslab qolinadi (rasm shu bilan chiqadi).
-async fn cover_file_id(env: &Env, photo: &str, ch: i64) -> std::result::Result<String, String> {
-    if let Some(r) = turso_exec(env, "SELECT file_id FROM announce_cover WHERE photo_name=?",
-        vec![TursoArg::text(photo)]).await.ok().and_then(|r| first_row(&r)) {
-        if let Some(f) = r["file_id"].as_str().filter(|f| !f.is_empty()) {
-            return Ok(f.to_string());
+/// Muqovaning OCHILGAN baytlari. Avval YANGI tizim (`vd_files`: shifrlangan bitta bo'lak, Bot API `getFile`), topilmasa eski saqlash kanali
+/// (`tg_files`: xabarni uzatib `file_id` olinadi). Yangi rasmlar (admin yuklagan, baza noldan boshlangach) faqat `vd` da — ilgari bu yerda
+/// faqat eski yo'l bor edi, shu sabab e'lon rasmsiz (faqat matn) chiqardi.
+async fn cover_bytes(env: &Env, photo: &str) -> std::result::Result<Vec<u8>, String> {
+    if vd::ensure(env).await.is_ok() {
+        let r = turso_exec(env, "SELECT size, vkey, chunk_ids, state FROM vd_files WHERE name=?",
+            vec![TursoArg::text(photo)]).await.ok().and_then(|r| first_row(&r));
+        if let Some(row) = r {
+            let size = jint(&row, "size").max(0) as u64;
+            let first = row["chunk_ids"].as_str().unwrap_or("").split(',').next().unwrap_or("").trim().to_string();
+            if row["state"].as_str() == Some("ready") && size > 0 && size as usize <= COVER_MAX && !first.is_empty() {
+                let key = hex_key(row["vkey"].as_str().unwrap_or("").trim()).ok_or("rasm kaliti yo'q")?;
+                let mut bytes = vd::chunk_bytes(env, &first, size).await.map_err(|e| e.to_string())?;
+                // AES-128-CTR (hisoblagich 0) — `vd::store_small` bilan bir xil.
+                let mut c = ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into());
+                c.apply_keystream(&mut bytes);
+                return Ok(bytes);
+            }
+            // Rasm yangi tizimda bor, lekin hali Telegram'ga saqlanmagan (1-2 daqiqa) — eski yo'l sinab ko'riladi.
         }
     }
     let row = turso_exec(env, "SELECT msg_id, file_key FROM tg_files WHERE file_name=?",
@@ -193,6 +205,19 @@ async fn cover_file_id(env: &Env, photo: &str, ch: i64) -> std::result::Result<S
     // AES-128-CTR (boshlang'ich hisoblagich 0) — yuklashdagi (`telegram.rs`) bilan bir xil.
     let mut c = ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into());
     c.apply_keystream(&mut bytes);
+    Ok(bytes)
+}
+
+/// Bo'lim rasmi uchun Telegram `file_id` (ochilgan nusxa): keshdan, yo'q bo'lsa — saqlash kanalidan
+/// olinadi, ochiladi va e'lon kanaliga yuklanib `file_id` eslab qolinadi (rasm shu bilan chiqadi).
+async fn cover_file_id(env: &Env, photo: &str, ch: i64) -> std::result::Result<String, String> {
+    if let Some(r) = turso_exec(env, "SELECT file_id FROM announce_cover WHERE photo_name=?",
+        vec![TursoArg::text(photo)]).await.ok().and_then(|r| first_row(&r)) {
+        if let Some(f) = r["file_id"].as_str().filter(|f| !f.is_empty()) {
+            return Ok(f.to_string());
+        }
+    }
+    let bytes = cover_bytes(env, photo).await?;
 
     // E'lon kanaliga rasm sifatida yuklaymiz, `file_id` ni olamiz, xabarni o'chiramiz.
     let sent = upload_photo(env, ch, &bytes).await?;
