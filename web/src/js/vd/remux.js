@@ -98,9 +98,11 @@ function parseTrack(b, trak) {
     const nch = rd32(b, stco.body + 4);
     const sc = rd32(b, stsc.body + 4);
     let k = 0;
+    // `stsc` yozuvlari tartibli — ko'rsatkich faqat oldinga yuradi (ilgari har chunk uchun boshidan qidirilardi: uzun filmda
+    // millionlab qadam, sahifa qotib qolardi).
+    let e = 0; let per = sc ? rd32(b, stsc.body + 12) : 0;
     for (let c = 0; c < nch && k < n; c++) {
-      let per = 0;
-      for (let e = 0; e < sc; e++) { if (rd32(b, stsc.body + 8 + e * 12) <= c + 1) per = rd32(b, stsc.body + 12 + e * 12); else break; }
+      while (e + 1 < sc && rd32(b, stsc.body + 8 + (e + 1) * 12) <= c + 1) { e++; per = rd32(b, stsc.body + 12 + e * 12); }
       let o = is64 ? rd64(b, stco.body + 8 + c * 8) : rd32(b, stco.body + 8 + c * 4);
       for (let j = 0; j < per && k < n; j++) { off[k] = o; o += sizes[k]; k++; }
     } }
