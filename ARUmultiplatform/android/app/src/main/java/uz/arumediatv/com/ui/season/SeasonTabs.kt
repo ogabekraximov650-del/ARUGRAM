@@ -337,7 +337,8 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
             if (st.downloading || st.queued) { active = true; pct = maxOf(pct, st.percent) }
         }
     }
-    if (!done && !active) done = e.urls.values.any { it.isNotEmpty() && AppServices.videoCache.isComplete(it) }
+    val onDisk = remember(e.id) { e.urls.values.any { dm.isComplete(it) } }
+    if (!done && !active) done = onDisk
     Column(
         Modifier.fillMaxWidth().alpha(if (seen) 0.6f else 1f).clip(shape)
             .background(if (isCurrent) AruColors.AccentTint else AruColors.Card)

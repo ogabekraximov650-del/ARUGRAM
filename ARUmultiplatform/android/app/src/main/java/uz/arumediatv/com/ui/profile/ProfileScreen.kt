@@ -96,7 +96,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
     var error by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(user) {
-        cacheBytes = withContext(Dispatchers.IO) { AppServices.images.diskBytes() + AppServices.videoCache.diskBytes() + AppServices.thumbs.diskBytes() }
+        cacheBytes = withContext(Dispatchers.IO) { AppServices.images.diskBytes() + AppServices.videoCache.diskBytes() + AppServices.thumbs.diskBytes() + uz.arumediatv.com.vd.BlockCache.diskBytes(AppServices.appContext) }
         if (user != null) AppServices.myStats.load()
     }
 

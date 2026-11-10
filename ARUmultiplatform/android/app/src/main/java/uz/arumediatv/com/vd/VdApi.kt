@@ -40,6 +40,7 @@ object VdApi {
             val i = Info(name, f.optLong("size"), f.optString("key"), f.optString("state"), f.optInt("chunks"), f.optInt("stored"))
             if (i.playable) {
                 mem[name] = i
+                noInfo.remove(name)
                 store(ctx).putString(name, "${i.size}|${i.key}|${i.state}|${i.chunks}|${i.stored}")
             }
             return i.takeIf { it.playable }
@@ -51,6 +52,19 @@ object VdApi {
         }
         return null
     }
+
+    /** Tarmoqsiz: xotiradagi yoki telefonda saqlangan ma'lumot (yuklab olingan faylni oflayn ochish va hajmini bilish uchun). */
+    fun stored(ctx: Context, name: String): Info? {
+        mem[name]?.let { return it }
+        if (name in noInfo) return null
+        val p = try { store(ctx).getString(name)?.split('|') } catch (_: Exception) { null }
+        val i = if (p == null || p.size < 5) null
+        else Info(name, p[0].toLongOrNull() ?: 0, p[1], p[2], p[3].toIntOrNull() ?: 0, p[4].toIntOrNull() ?: 0).takeIf { it.playable }
+        if (i == null) noInfo.add(name) else mem[name] = i
+        return i
+    }
+
+    private val noInfo = ConcurrentHashMap.newKeySet<String>()
 
     fun forget(ctx: Context, name: String) {
         mem.remove(name)

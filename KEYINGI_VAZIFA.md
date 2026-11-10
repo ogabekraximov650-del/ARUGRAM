@@ -7167,3 +7167,11 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Belgi: Support chatda video ochiladi (`VdChat`: bo'laklab yuklab shifrini ochadi), lekin qism pleyerida cheksiz aylanadi; worker sinovida (`enc-diag.yml`: warm/play/ochiq diapazon) hammasi 206.
 - Sabab (ilova): `SeasonScreen` `LaunchedEffect(player.error)` vd xatosida faylni `PlaySource.vdFailed` ga qo'yib eski yo'lga (Telegram/worker `/api/play/<nom>`) o'tardi. Telegram hisobisiz foydalanuvchida eski yo'l bu faylni TOPA OLMAYDI -> sekin tarmoqdagi bitta vaqtinchalik xato (taymaut, 503) videoni butun sessiya davomida "o'ldirardi".
 - Tuzatish: eski yo'lga FAQAT Telegram ulangan bo'lsa o'tiladi (`SeasonScreen`, `PlaySource.resolve`); `AruPlayer` tarmoq/IO xatolarida (2000..2999, 503, "Kesh tayyor emas") oynani qayta isitib 3 martagacha davom etadi (oraliq 1,5 s * urinish); HTTP taymautlari 25 s / 120 s.
+
+## Kotlin ilova: yuklab olish yangi tizimda (vd) ishlaydi (2026-11)
+
+- Belgi: video ko'rsatadi, lekin "yuklab olish" tugmasi 0% da qoladi. Sabab: `DownloadManager` faqat eski yo'lni (Rust `videoDownload`: Telegram/worker `/api/play/<nom>`) bilardi; yangi tizim (vd) fayllari u yerda YO'Q.
+- Tuzatish: `vd/VdDownloads.kt` — fayl yangi tizimda bo'lsa (`VdApi.lookup`) har 18 MiB oyna isitilib, yetishmayotgan joyi Range bilan olinadi, shifri ochilib pleyer ishlatadigan o'sha keshga (`BlockCache`, 1 MiB AES-GCM bo'laklar) yoziladi. Ko'rilgan joy qayta yuklanmaydi. Bir vaqtda 2 fayl, har faylda 3 oyna; xatoda 40 martagacha qayta urinadi; pauza/o'chirish ishlaydi.
+- Yuklab olingan fayl `.pin` bilan belgilanadi — 2 GiB kesh chegarasi (`BlockCache.trim`) unga tegmaydi. To'liq fayl internetsiz ochiladi (`PlaySource.resolve`: `VdDownloads.isComplete` + `VdApi.stored`, kalit Keystore bilan saqlangan).
+- Holat (foiz, tezlik) `DownloadManager.poll` va `DownloadsIndex.collect` da: vd fayllari `VdDownloads.stat`, qolganlari Rust. Xotira sahifasi va Profil `filesDir/vdcache` ni ham hisoblaydi; "Videolar" tozalash uni ham o'chiradi.
+- Fayllar: `vd/{VdDownloads,BlockCache,VdApi}.kt`, `data/{Downloads,SeasonData}.kt`, `ui/season/SeasonTabs.kt`, `ui/profile/{StorageScreen,ProfileScreen}.kt`.

@@ -306,6 +306,12 @@ object PlaySource {
         if (!preferWorker) {
             val vname = Names.fileNameOf(url)
             if (vname.isNotEmpty() && (vname !in vdFailed || !tg.state.value.authorized)) {
+                // To'liq yuklab olingan fayl: tarmoqsiz, darhol (kalit va hajm telefonda saqlangan).
+                val appCtx = uz.arumediatv.com.AppServices.appContext
+                val local = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    uz.arumediatv.com.vd.VdDownloads.isComplete(appCtx, vname) && uz.arumediatv.com.vd.VdApi.stored(appCtx, vname) != null
+                }
+                if (local) return Source("vd://$vname", false, local = true, viaVd = true)
                 val info = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     uz.arumediatv.com.vd.VdApi.lookup(uz.arumediatv.com.AppServices.appContext, vname, uz.arumediatv.com.AppServices.auth.sessionToken)
                 }

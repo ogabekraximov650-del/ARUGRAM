@@ -120,7 +120,7 @@ fun StorageScreen(onBack: () -> Unit) {
         val ctx = AppServices.appContext
         val files = ctx.filesDir
         val list = listOf(
-            Slice(VIDEO, dirBytes(File(files, "video_byte_cache"))),
+            Slice(VIDEO, dirBytes(File(files, "video_byte_cache")) + dirBytes(File(files, "vdcache"))),
             Slice(POSTER, dirBytes(File(ctx.cacheDir, "aru_img"))),
             Slice(PACKS, dirBytes(File(files, "aru_packs"))),
             Slice(TEMP, ctx.cacheDir.listFiles().orEmpty().filter { it.name != "aru_img" }.sumOf { dirBytes(it) }),

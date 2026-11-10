@@ -101,7 +101,9 @@ class DownloadManager(
     val stats: StateFlow<Map<String, VideoStat>> = _stats.asStateFlow()
 
     private val watchers = HashMap<Any, Set<String>>()
-    private val active = HashSet<String>()
+    private val active: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /** Yuklash bosilgan, lekin qaysi tizimdaligi hali aniqlanmagan manzillar (holati so'ralmaydi — tugma miltillamasin). */
+    private val pending: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private var loop: Job? = null
     private var netRegistered = false
 
@@ -133,32 +135,66 @@ class DownloadManager(
         }
     }
 
+    /** Yangi tizim (`vd`) fayli holati; `null` — bu manzil yangi tizim orqali telefonda yo'q (eski yo'l — Rust yadrosi hisoblaydi). */
+    private fun vdStat(url: String): VideoStat? = uz.arumediatv.com.vd.VdDownloads.stat(context, Names.fileNameOf(url))
+
+    /** Fayl telefonda to'liq bormi (yangi tizim yoki eski kesh). */
+    fun isComplete(url: String): Boolean = url.isNotEmpty() && (vdStat(url)?.complete ?: cache.isComplete(url))
+
+    @Synchronized
     private fun poll(urls: List<String>) {
-        if (cache.ensureStarted() <= 0) return
-        val raw = RustCore.videoStats(urls)
         val next = HashMap(_stats.value)
+        val old = ArrayList<String>()
         for (u in urls) {
-            val o = raw.optJSONObject(u) ?: continue
-            val s = VideoStat.from(o)
+            if (u in pending) continue
+            val s = vdStat(u)
+            if (s == null) { old += u; continue }
             next[u] = s
             if (!s.downloading) active.remove(u)
-            if (s.complete) tg.unhold("dl:$u")
+        }
+        if (old.isNotEmpty() && cache.ensureStarted() > 0) {
+            val raw = RustCore.videoStats(old)
+            for (u in old) {
+                val o = raw.optJSONObject(u) ?: continue
+                val s = VideoStat.from(o)
+                next[u] = s
+                if (!s.downloading) active.remove(u)
+                if (s.complete) tg.unhold("dl:$u")
+            }
         }
         if (next != _stats.value) _stats.value = next
+    }
+
+    /** Yangi tizimda bo'lsa shu yerda boshlanadi (`true`); aks holda eski yo'l. */
+    private fun startVd(url: String): Boolean {
+        val name = Names.fileNameOf(url)
+        if (name.isEmpty()) return false
+        val info = runCatching {
+            uz.arumediatv.com.vd.VdApi.lookup(context, name, uz.arumediatv.com.AppServices.auth.sessionToken)
+        }.getOrNull() ?: return false
+        uz.arumediatv.com.vd.VdDownloads.start(context, info)
+        return true
     }
 
     fun download(url: String) {
         if (url.isEmpty()) return
         registerNet()
         active.add(url)
+        pending.add(url)
         val cur = statOf(url)
         _stats.value = _stats.value + (url to cur.copy(downloading = true))
         scope.launch {
-            if (tg.active) {
-                tg.playUrl(url)?.let { tg.hold("dl:$url") }
+            try {
+                if (!startVd(url)) {
+                    if (tg.active) {
+                        tg.playUrl(url)?.let { tg.hold("dl:$url") }
+                    }
+                    cache.ensureStarted()
+                    RustCore.videoDownload(url)
+                }
+            } finally {
+                pending.remove(url)
             }
-            cache.ensureStarted()
-            RustCore.videoDownload(url)
             poll(listOf(url))
         }
         ensureLoop()
@@ -166,6 +202,7 @@ class DownloadManager(
 
     fun pause(url: String) {
         if (url.isEmpty()) return
+        uz.arumediatv.com.vd.VdDownloads.pause(Names.fileNameOf(url))
         RustCore.videoPause(url)
         active.remove(url)
         tg.unhold("dl:$url")
@@ -174,6 +211,7 @@ class DownloadManager(
 
     fun delete(url: String) {
         if (url.isEmpty()) return
+        uz.arumediatv.com.vd.VdDownloads.delete(context, Names.fileNameOf(url))
         RustCore.videoDelete(url)
         active.remove(url)
         tg.unhold("dl:$url")
@@ -182,6 +220,7 @@ class DownloadManager(
 
     fun wipeAll() {
         active.clear()
+        uz.arumediatv.com.vd.VdDownloads.wipe(context)
         cache.wipe()
         _stats.value = emptyMap()
     }
@@ -196,6 +235,7 @@ class DownloadManager(
                 override fun onAvailable(network: Network) {
                     scope.launch {
                         for (u in active.toList()) {
+                            if (startVd(u)) continue
                             if (tg.active) tg.playUrl(u)?.let { tg.hold("dl:$u") }
                             RustCore.videoDownload(u)
                         }
@@ -262,15 +302,22 @@ class DownloadsIndex(private val context: Context, private val dm: DownloadManag
                 drafts += DownloadItem(a, s, section, e.id, e.number, title, poster, q, e.qualityTitle(q), u, VideoStat())
             }
         }
-        if (drafts.isEmpty() || cache().ensureStarted() <= 0) return@withContext emptyList()
-        var raw = RustCore.videoStats(urls)
-        // Ilova endi ochilgan bo'lsa birinchi javob bo'sh bo'lishi mumkin (disk fon oqimida skanerlanadi) — bir marta kutamiz.
-        if (urls.none { (raw.optJSONObject(it)?.optLong("downloaded") ?: 0) > 0 }) {
-            delay(1200)
-            raw = RustCore.videoStats(urls)
+        if (drafts.isEmpty()) return@withContext emptyList()
+        // Yangi tizim (vd) fayllari: telefondagi shifrlangan bo'laklar keshidan; qolganlari — eski kesh (Rust yadrosi).
+        val vd = HashMap<String, VideoStat>()
+        for (u in urls) uz.arumediatv.com.vd.VdDownloads.stat(context, Names.fileNameOf(u))?.let { vd[u] = it }
+        val old = urls.filter { it !in vd }
+        var raw = JSONObject()
+        if (old.isNotEmpty() && cache().ensureStarted() > 0) {
+            raw = RustCore.videoStats(old)
+            // Ilova endi ochilgan bo'lsa birinchi javob bo'sh bo'lishi mumkin (disk fon oqimida skanerlanadi) — bir marta kutamiz.
+            if (vd.isEmpty() && old.none { (raw.optJSONObject(it)?.optLong("downloaded") ?: 0) > 0 }) {
+                delay(1200)
+                raw = RustCore.videoStats(old)
+            }
         }
         drafts.mapNotNull { d ->
-            val st = raw.optJSONObject(d.url)?.let(VideoStat::from) ?: return@mapNotNull null
+            val st = vd[d.url] ?: raw.optJSONObject(d.url)?.let(VideoStat::from) ?: return@mapNotNull null
             if (st.downloaded > 0 || st.downloading) d.copy(stat = st) else null
         }.sortedWith(compareByDescending<DownloadItem> { it.stat.downloading }.thenBy { it.title }.thenBy { it.episodeNo })
     }

@@ -20,6 +20,7 @@ object BlockCache {
     const val BLOCK = 1024 * 1024
     private const val CAP_BYTES = 2L * 1024 * 1024 * 1024
     private const val ALIAS = "arumediatv_vd_cache_v1"
+    private const val PIN = ".pin"
     private val writes = AtomicInteger()
 
     private fun key(): SecretKey {
@@ -49,6 +50,41 @@ object BlockCache {
 
     fun has(ctx: Context, id: String, idx: Long): Boolean = file(ctx, id, idx).isFile
 
+    /** Shu fayldan telefonda biror bo'lak bormi (papkasi bor). */
+    fun exists(ctx: Context, id: String): Boolean = File(root(ctx), id).isDirectory
+
+    /**
+     * "Yuklab olingan" belgisi: belgilangan fayl bo'laklari hajm chegarasi ([CAP_BYTES]) sababli O'CHIRILMAYDI
+     * (chegara faqat ko'rish paytida yig'ilgan keshga tegishli).
+     */
+    fun pin(ctx: Context, id: String) {
+        try { File(File(root(ctx), id).apply { mkdirs() }, PIN).createNewFile() } catch (_: Exception) {}
+    }
+
+    /** Telefondagi bo'laklar hajmi (ochiq baytlarda); [total] — fayl hajmi (oxirgi bo'lak to'liq 1 MiB emas). */
+    fun storedBytes(ctx: Context, id: String, total: Long): Long {
+        val names = File(root(ctx), id).list() ?: return 0
+        var n = 0L
+        var last = false
+        val lastIdx = if (total > 0) ((total - 1) / BLOCK).toString() else ""
+        for (x in names) {
+            if (x.isEmpty() || !x.all { it in '0'..'9' }) continue
+            n++
+            if (x == lastIdx) last = true
+        }
+        var bytes = n * BLOCK
+        if (last) bytes -= BLOCK - (total - (total - 1) / BLOCK * BLOCK)
+        return if (total > 0) bytes.coerceAtMost(total) else bytes
+    }
+
+    /** Diskdagi jami hajm (baytlarda). */
+    fun diskBytes(ctx: Context): Long = root(ctx).walkTopDown().filter { it.isFile }.sumOf { it.length() }
+
+    /** Hamma bo'laklarni o'chiradi (Xotira -> Videolar tozalash). */
+    fun wipe(ctx: Context) {
+        try { root(ctx).listFiles()?.forEach { it.deleteRecursively() } } catch (_: Exception) {}
+    }
+
     /** Bo'lakni o'qib shifrini ochadi; yo'q yoki buzilgan (kalit yo'qolgan, teg mos emas) bo'lsa — null (buzilgan fayl o'chiriladi). */
     fun read(ctx: Context, id: String, idx: Long, expectLen: Int): ByteArray? {
         val f = file(ctx, id, idx)
@@ -69,9 +105,9 @@ object BlockCache {
         }
     }
 
-    /** Bo'lakni shifrlab yozadi (avval `.tmp`, so'ng nom almashtiriladi — yarim yozilgan bo'lak qolmaydi). Xato bo'lsa jim o'tadi. */
-    fun write(ctx: Context, id: String, idx: Long, plain: ByteArray) {
-        try {
+    /** Bo'lakni shifrlab yozadi (avval `.tmp`, so'ng nom almashtiriladi — yarim yozilgan bo'lak qolmaydi). Xato bo'lsa `false` (jim o'tadi). */
+    fun write(ctx: Context, id: String, idx: Long, plain: ByteArray): Boolean {
+        return try {
             val dir = File(root(ctx), id).apply { mkdirs() }
             val c = Cipher.getInstance("AES/GCM/NoPadding")
             c.init(Cipher.ENCRYPT_MODE, key())
@@ -79,14 +115,19 @@ object BlockCache {
             val ct = c.doFinal(plain)
             val tmp = File(dir, "$idx.tmp")
             tmp.outputStream().use { it.write(c.iv); it.write(ct) }
-            if (!tmp.renameTo(File(dir, idx.toString()))) tmp.delete()
+            val ok = tmp.renameTo(File(dir, idx.toString()))
+            if (!ok) tmp.delete()
             if (writes.incrementAndGet() % 32 == 0) trim(ctx)
-        } catch (_: Exception) {}
+            ok
+        } catch (_: Exception) {
+            false
+        }
     }
 
-    /** Hajm chegaradan oshsa — eng eski (oxirgi marta o'qilgan) bo'laklar 90% gacha o'chiriladi. */
+    /** Hajm chegaradan oshsa — eng eski (oxirgi marta o'qilgan) bo'laklar 90% gacha o'chiriladi. Yuklab olingan ([pin]) fayllar hisobga kirmaydi. */
     private fun trim(ctx: Context) {
-        val all = root(ctx).walkTopDown().filter { it.isFile }.toList()
+        val all = (root(ctx).listFiles() ?: return).filter { it.isDirectory && !File(it, PIN).exists() }
+            .flatMap { it.listFiles()?.filter { f -> f.isFile } ?: emptyList() }
         var total = all.sumOf { it.length() }
         if (total <= CAP_BYTES) return
         for (f in all.sortedBy { it.lastModified() }) {
