@@ -7223,3 +7223,7 @@ Hamma `GET` yo'llari tekshirildi. Diskda nusxasi bor, lekin har ochilganda serve
 - `ChannelGate`: ro'yxat vaqti diskda (15 daq).
 - `PackStore.load`: 10 daqiqalik "yangi" vaqti fayl vaqtidan olinadi.
 Tegilmadi (allaqachon yetarli): izohlar (`mk/at` -> `same`), chat (`since`), Tarix/Sevimlilar (oldingi bo'lim), rasmlar.
+
+## Kanal hujjati nomida sifat (2026-11)
+
+- Qism videolari kanalda endi `vid_<sifat>_<raqam>_<bo'lak>.bin` (masalan `vid_1080p_17_1.bin`, `vid_720p_18_1.bin`). `worker/src/vd.rs` `doc_prefix` (sifat `ep_<a>_<s>_<e>_<sifat>_...` nomidan olinadi); `claim` javobidagi `kind` shuni beradi, `tool/vd/store.py` o'zgarishsiz ishlatadi. Asl video (`orig_`) `vid_...`, rasm/ovoz/shrift/fayl avvalgidek. Eski hujjatlar nomi o'zgarmadi.

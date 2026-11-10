@@ -598,7 +598,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let have = ids(r["chunk_ids"].as_str().unwrap_or("")).len() as i64;
             let done: Vec<i64> = (0..have).collect();
             ok(json!({
-                "name": nm, "vid": r["vid"], "kind": doc_kind(&nm), "label": label(&nm), "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
+                "name": nm, "vid": r["vid"], "kind": doc_prefix(&nm), "label": label(&nm), "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
                 "bot_token": tg_secret(env, "TELEGRAM_BOT_TOKEN"), "channel": vd_channel(env),
             }))
         }
@@ -1030,6 +1030,21 @@ pub(crate) fn doc_kind(name: &str) -> &'static str {
     }
 }
 
+/// Kanal hujjati nomining boshi (sifat bilan): qism fayli (`ep_<a>_<s>_<e>_<sifat>_...`) uchun `vid_1080p`, `vid_720p` ...; boshqalar uchun `doc_kind`.
+/// To'liq nom: `<bosh>_<raqam>_<bo'lak>.bin` (masalan `vid_1080p_17_1.bin`).
+pub(crate) fn doc_prefix(name: &str) -> String {
+    let kind = doc_kind(name);
+    if kind == "vid" && name.starts_with("ep_") {
+        if let Some(q) = name.split('_').nth(4) {
+            let digits = q.strip_suffix('p').unwrap_or("");
+            if !digits.is_empty() && digits.len() <= 4 && digits.bytes().all(|b| b.is_ascii_digit()) {
+                return format!("vid_{q}");
+            }
+        }
+    }
+    kind.to_string()
+}
+
 pub(crate) fn label(name: &str) -> String {
     let p: Vec<&str> = name.trim_end_matches(".mp4").split('_').collect();
     if name.starts_with("sys_emojifont_") {
@@ -1062,7 +1077,7 @@ async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(Strin
            chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created RETURNING rowid AS vid",
         vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::int(now_ms())]).await?;
     let vid = first_row(&r).map(|x| jint(&x, "vid")).unwrap_or(0);
-    let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("{}_{vid}_1.bin", doc_kind(name)),
+    let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("{}_{vid}_1.bin", doc_prefix(name)),
         "", &bytes).await;
     let (fid, mid) = match sent {
         Ok(v) => v,
@@ -1341,6 +1356,10 @@ mod tests {
         assert_eq!(label("chat_7_1794.jpg"), "Yozishma fayli (foydalanuvchi 7)");
         assert_eq!(label("orig_5.mp4"), "Asl video");
         assert_eq!(label("boshqa.bin"), "boshqa.bin");
+        assert_eq!(doc_prefix("ep_3_1_12_1080p_1794221272.mp4"), "vid_1080p");
+        assert_eq!(doc_prefix("ep_3_1_12_720p_1794221272.mp4"), "vid_720p");
+        assert_eq!(doc_prefix("orig_5.mp4"), "vid");
+        assert_eq!(doc_prefix("avatar_7_1794.jpg"), "img");
     }
 
     #[test]
