@@ -456,7 +456,6 @@ private fun QualityRow(e: Episode, q: String, onPlay: () -> Unit, onDeleted: (St
                 TextButton(onClick = {
                     confirm = false
                     dm.delete(url)
-                    AppServices.progress.forget(url)
                     onDeleted(q)
                 }) { Text("Ha", color = AruColors.Accent, fontWeight = FontWeight.Bold) }
             },

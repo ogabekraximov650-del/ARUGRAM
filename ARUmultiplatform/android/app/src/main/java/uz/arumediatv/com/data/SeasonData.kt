@@ -303,7 +303,9 @@ object PlaySource {
         if (!preferWorker && cache.isComplete(url)) cache.proxyUri(url)?.let { return Source(it, false, local = true) }
         // YANGI TIZIM (vd, ARUDRIVE uslubi): fayl 18 MiB shifrlangan bo'laklarda (Telegram -> Cloudflare kesh), shifrni ilova ochadi;
         // Telegram hisobi kerak emas, ko'rilgan joy telefonda shifrlangan holda qoladi. Yangi tizimda bo'lmasa — eski yo'l.
-        if (!preferWorker) {
+        // `preferWorker` (qayta urinish / kesh tozalangach qayta ochish) yangi tizimni CHETLAB O'TMAYDI: vd fayli eski worker yo'lida YO'Q —
+        // ilgari tozalash yoki «Qayta urinish» bosilganda video "ochilmadi" bo'lib qolardi.
+        run {
             val vname = Names.fileNameOf(url)
             if (vname.isNotEmpty() && (vname !in vdFailed || !tg.state.value.authorized)) {
                 // To'liq yuklab olingan fayl: tarmoqsiz, darhol (kalit va hajm telefonda saqlangan).
