@@ -15,7 +15,7 @@
 //     to'xtab-yurish o'rniga bitta qisqa kutish;
 //   * `onStall({count, kbps, needKbps})` — pleyer sifatni pasaytirishi uchun.
 
-import { openVdFile } from '../vd/store.js';
+import { openVdFile, dbg } from '../vd/store.js';
 import { buildLayout, buildFragment, segSpans } from '../vd/remux.js';
 
 // ── MP4 qutilari ────────────────────────────────────────────────────
@@ -322,7 +322,9 @@ export function createEngine(video, { info, ahead: aheadOpt = 60, behind = 10, s
   const ready = (async () => {
     st('loading');
     file = openVdFile(info);
+    dbg('fayl boshi o\'qilmoqda');
     const moovBytes = await readMoov(file);
+    dbg('jadval o\'qildi');
     if (destroyed) return;
     layout = buildLayout(moovBytes);
     init = layout.init;
@@ -337,6 +339,7 @@ export function createEngine(video, { info, ahead: aheadOpt = 60, behind = 10, s
       e.mime = mime;
       throw e;
     }
+    dbg(`pleyer tayyorlanmoqda (${mime.slice(0, 50)})`);
     ms = new MS();
     if (window.ManagedMediaSource && MS === window.ManagedMediaSource) {
       video.disableRemotePlayback = true;

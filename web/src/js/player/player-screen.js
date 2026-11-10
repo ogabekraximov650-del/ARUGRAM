@@ -244,9 +244,13 @@ function buildPlayer(el, route, season, opts) {
     const b = busy || !!waiting;
     box.classList.toggle('busy', b);
     const w = $('.pl-wait');
-    w.textContent = waiting;
-    w.classList.toggle('on', !!waiting);
+    // Tashxis: yuklanayotganda qaysi bosqichda ekani ko'rsatiladi (`vd/store.js dbg`).
+    const txt = waiting || (busy && window.__vdDbg ? `${window.__vdDbg}` : '');
+    w.textContent = txt;
+    w.classList.toggle('on', !!txt);
   }
+  const onDbg = () => { if (!disposed && (busy || waiting)) paintBusy(); };
+  window.addEventListener('vd-dbg', onDbg);
 
   function paintPP() {
     const playing = intended;
@@ -1068,6 +1072,7 @@ function buildPlayer(el, route, season, opts) {
     },
     dispose() {
       disposed = true;
+      window.removeEventListener('vd-dbg', onDbg);
       token += 1;
       clearTimeout(hideT); clearTimeout(noticeT); clearTimeout(singleT); clearInterval(sleepT);
       document.removeEventListener('visibilitychange', onVis);

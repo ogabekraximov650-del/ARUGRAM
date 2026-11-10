@@ -9,6 +9,11 @@ import { api, apiPost } from '../api.js';
 import { cacheGet, cachePut } from '../tg/chunk-cache.js';
 import { ctrApply } from '../tg/ctr.js';
 
+/** Tashxis izi: pleyer ekranida (yuklanayotganda) ko'rinadi — qaysi bosqichda to'xtagani aniq bo'lsin. */
+export function dbg(msg) {
+  try { window.__vdDbg = `${msg}`; window.dispatchEvent(new CustomEvent('vd-dbg')); } catch (_) { /* */ }
+}
+
 export const BLOCK = 1024 * 1024;
 export const WINDOW = 18 * 1024 * 1024;
 
@@ -33,8 +38,10 @@ export async function vdInfo(name, { fresh = false } = {}) {
   if (infoWait.has(name)) return infoWait.get(name);
   const p = (async () => {
     try {
+      dbg('ma\'lumot so\'ralmoqda');
       const j = await apiPost('/api/vd/info', { names: [name] });
       infoErr.delete(name);
+      dbg(`ma'lumot: ${j?.files?.[name] ? `${j.files[name].state} ${j.files[name].size}` : 'yo\'q'}`);
       const f = j?.files?.[name];
       if (!f) return null;
       const i = norm(name, f);
@@ -43,6 +50,7 @@ export async function vdInfo(name, { fresh = false } = {}) {
       return i;
     } catch (e) {
       infoErr.set(name, e);
+      dbg(`ma'lumot xato: ${e?.status || ''} ${e?.message || e}`);
       return infos.get(name) || null;
     } finally {
       infoWait.delete(name);
@@ -67,8 +75,11 @@ async function warm(name, w, force = false, signal) {
       if (signal?.aborted) throw new Error('cancelled');
       let st = '';
       try {
+        dbg(`isitilmoqda: oyna ${w}`);
+        const t0 = Date.now();
         const j = await api(`/api/warm/vd~${encodeURIComponent(name)}?w=${w}${first ? '&force=1' : ''}`, { signal });
-        st = `${j?.status ?? ''}`;
+        st = `${j?.status ?? j?.raw ?? ''}`;
+        dbg(`oyna ${w}: ${st.slice(0, 40)} (${Math.round((Date.now() - t0) / 1000)} s)`);
       } catch (e) {
         if (e?.name === 'AbortError') throw new Error('cancelled');
         throw e;
@@ -89,12 +100,14 @@ async function fetchRange(name, start, end, signal) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await warm(name, w, attempt > 0, signal);
+      dbg(`yuklanmoqda: ${(start / 1048576).toFixed(0)}-${(end / 1048576).toFixed(0)} MB`);
       const r = await api(`/api/play/vd~${encodeURIComponent(name)}`, { headers: { Range: `bytes=${start}-${end}` }, raw: true, signal });
       const b = new Uint8Array(await r.arrayBuffer());
       if (b.length !== end - start + 1) throw new Error('chunk_short');
       return b;
     } catch (e) {
       if (signal?.aborted || e?.name === 'AbortError' || /^cancelled$/.test(e?.message || '')) throw new Error('cancelled');
+      dbg(`xato (${attempt + 1}/3): ${e?.status || ''} ${e?.message || e}`);
       if (attempt === 2) throw e;
       await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
     }
