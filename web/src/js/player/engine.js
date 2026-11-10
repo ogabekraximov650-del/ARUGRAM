@@ -1,29 +1,22 @@
-// fMP4 videoni Telegram'dan bo'laklab olib <video> ga beradi (MSE).
+// Videoni yangi tizimdan (`vd`) bo'laklab olib <video> ga beradi (MSE).
 //
-// Android ilovada bu ishni ExoPlayer + `AruDataSource` qiladi (pleyer o'zi
-// bayt so'raydi). Brauzerda, ayniqsa iPhone'dagi Telegram ichida, bunday
-// "o'rtadagi server" (Service Worker) yo'q — shu sabab teskari: biz o'zimiz
-// fayl bo'laklarini (moof+mdat fragmentlari) olib, ochib, pleyerga
-// `SourceBuffer.appendBuffer` bilan beramiz. iPhone (iOS 17.1+) da
-// `ManagedMediaSource`, qolganlarida `MediaSource`.
+// Android ilovada bu ishni ExoPlayer pleyerning o'zi qiladi. Brauzerda, ayniqsa iPhone'dagi Telegram ichida, bunday
+// "o'rtadagi server" (Service Worker) yo'q — shu sabab teskari: biz o'zimiz oddiy MP4 (faststart) jadvallarini o'qib
+// (`vd/remux.js`), har ~4 soniyalik bo'lakni fMP4 `moof+mdat` qilib, `SourceBuffer.appendBuffer` bilan beramiz.
+// iPhone (iOS 17.1+) da `ManagedMediaSource`, qolganlarida `MediaSource`. Serverda fMP4 nusxa YO'Q (Telegram'da joy ikki baravar bo'lmaydi).
 //
-// Fayl tuzilishi (`tool/encode/run.py` -> `make_fmp4`):
-//   ftyp | moov (bo'sh jadvallar) | sidx (video) | sidx (audio) | moof+mdat ...
-// `sidx` — "qaysi soniya qaysi baytda" jadvali: surish (seek) shu bilan.
-//
-//   const eng = createEngine(videoEl, { name, key, onState, onError, onStall, shouldPlay, ahead })
+//   const eng = createEngine(videoEl, { info, onState, onError, onStall, shouldPlay, ahead })
 //   await eng.ready;     eng.duration;   eng.holding;   eng.cancelHold();   eng.destroy();
 //
 // Sekin internet uchun:
-//   * oldinda bir nechta fragment PARALLEL yuklanadi (tarmoq bo'sh turmaydi);
+//   * oldinda bir nechta bo'lak PARALLEL so'raladi (tarmoq bo'sh turmaydi; baytlar 1 MiB bo'laklarda, <= 4 tasi bitta so'rovda);
 //   * qotib qolsa (`waiting`) pleyer pauzada "ushlab turiladi" va bufer
 //     yetarli to'lgach (3 s, keyin 6 s, 10 s ...) davom etadi — har soniyada
 //     to'xtab-yurish o'rniga bitta qisqa kutish;
 //   * `onStall({count, kbps, needKbps})` — pleyer sifatni pasaytirishi uchun.
 
-import { openFile } from '../tg/media.js';
-
-const HEAD_PROBE = 256 * 1024;
+import { openVdFile } from '../vd/store.js';
+import { buildLayout, buildFragment, segSpans } from '../vd/remux.js';
 
 // ── MP4 qutilari ────────────────────────────────────────────────────
 
@@ -109,27 +102,19 @@ function hevcCodec(fourcc, b, p) {
   return `${fourcc}.${space}${profile}.${rev.toString(16).toUpperCase()}.${tier}${level}${consStr}`;
 }
 
-/** `sidx` -> fragmentlar ro'yxati. */
-function parseSidx(b, box, fileOffset) {
-  const p0 = box.start + box.hdr;
-  const version = b[p0];
-  const timescale = u32(b, p0 + 8);
-  let ept; let first; let p;
-  if (version === 0) { ept = u32(b, p0 + 12); first = u32(b, p0 + 16); p = p0 + 20; } else { ept = u64(b, p0 + 12); first = u64(b, p0 + 20); p = p0 + 28; }
-  const count = (b[p + 2] << 8) | b[p + 3];
-  p += 4;
-  const segs = [];
-  let off = fileOffset + box.start + box.size + first;
-  let t = ept / timescale;
-  for (let i = 0; i < count; i++) {
-    const size = u32(b, p) & 0x7fffffff;
-    const dur = u32(b, p + 4) / timescale;
-    segs.push({ start: off, size, time: t, dur });
-    off += size;
-    t += dur;
-    p += 12;
+/** Faylning boshidan `moov` qutisini topadi (faststart — boshida; aks holda sarlavhalar bo'ylab sakrab, oxiridan). */
+async function readMoov(file) {
+  let pos = 0;
+  for (let i = 0; i < 64 && pos < file.size; i++) {
+    const h = await file.read(pos, 16);
+    if (h.length < 8) break;
+    let size = u32(h, 0); let hdr = 8;
+    if (size === 1) { size = u64(h, 8); hdr = 16; } else if (size === 0) size = file.size - pos;
+    if (type(h, 4) === 'moov') return file.read(pos, size);
+    if (size < hdr) break;
+    pos += size;
   }
-  return { segs, refId: u32(b, p0 + 4) };
+  throw new Error('bad_mp4');
 }
 
 // ── Dvigatel ────────────────────────────────────────────────────────
@@ -139,15 +124,16 @@ export function engineSupported() {
 }
 
 /**
- * `name` — fMP4 fayl nomi (kanalda), `key` — AES-CTR kaliti (hex).
+ * `info` — `vdInfo` natijasi (`{name, size, key}`).
  * `ahead` — oldindan yuklanadigan oyna (soniya): 20 s (ilova buferi 15..30 s).
  */
-export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behind = 10, startAt = 0, onState = () => {}, onError = () => {}, onStall = () => {}, shouldPlay = () => true }) {
+export function createEngine(video, { info, ahead: aheadOpt = 60, behind = 10, startAt = 0, onState = () => {}, onError = () => {}, onStall = () => {}, shouldPlay = () => true }) {
   const MS = window.ManagedMediaSource || window.MediaSource;
   let file = null;
   let ms = null;
   let sb = null;
   let segs = [];
+  let layout = null;
   let init = null;
   let next = 0; // keyingi yuklanadigan fragment
   let pumping = false;
@@ -167,6 +153,20 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
   const RESUME_GOALS = [3, 6, 10, 15];
 
   const st = (s, extra = {}) => { if (!destroyed) onState({ state: s, ...extra }); };
+
+  const segBytes = (s) => segSpans(layout, s).reduce((a, [, l]) => a + l, 0);
+  /** Bir nechta bo'lakning bayt oraliqlari BIRLASHTIRILIB so'raladi — qo'shni 1 MiB bo'laklar bitta so'rovda keladi (worker so'rovlari kam). */
+  function prefetchSegs(list) {
+    const sp = [];
+    for (const s of list) sp.push(...segSpans(layout, s));
+    sp.sort((a, b) => a[0] - b[0]);
+    const merged = [];
+    for (const [p, l] of sp) {
+      const last = merged[merged.length - 1];
+      if (last && p <= last[0] + last[1]) last[1] = Math.max(last[0] + last[1], p + l) - last[0]; else merged.push([p, l]);
+    }
+    for (const [p, l] of merged) file.prefetch(p, l);
+  }
 
   function segIndexAt(t) {
     if (!segs.length) return 0;
@@ -207,7 +207,6 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
   }
 
   let seekReq = 0;
-  let abortPending = false;
   let focus = null; // sek tayyorlanayotgan nuqta (video hali eski joyda o'ynayapti)
   function bufferedAheadAt(t) {
     const r = video.buffered;
@@ -234,25 +233,20 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
         // Chegara: `ahead` soniya va PREFETCH_BYTES — ortiqcha yuklanmasin.
         {
           const tEnd = (focus ?? video.currentTime) + ahead;
-          let bytes = seg.size;
+          let bytes = segBytes(seg);
+          const group = [seg];
           for (let k = next + 1; k < segs.length && bytes < PREFETCH_BYTES && segs[k].time < tEnd; k++) {
-            file.prefetch(segs[k].start, segs[k].size);
-            bytes += segs[k].size;
+            group.push(segs[k]);
+            bytes += segBytes(segs[k]);
           }
+          prefetchSegs(group);
         }
-        // Fragment 256 KB bo'laklar bilan keladi va keldi-keldisiga qo'shiladi (butun fragment kutilmaydi):
-        // o'ynash tezroq boshlanadi, sekdan keyin ham kutish kam.
-        const B = 256 * 1024;
-        const end = seg.start + seg.size;
-        file.prefetch(seg.start, seg.size);
-        // Oldingi fragment sek tufayli yarmida uzilgan bo'lsa, parser holatini tozalaymiz (aks holda media xatosi).
-        if (abortPending) { abortPending = false; try { sb.abort(); } catch (_) { /* */ } }
-        for (let pos = seg.start; pos < end;) {
-          const to = Math.min(end, (Math.floor(pos / B) + 1) * B);
-          const data = await file.read(pos, to - pos);
-          if (destroyed || my !== gen) { if (pos > seg.start) abortPending = true; break; }
+        const data = await buildFragment(layout, seg, next + 1, (p, l) => file.read(p, l));
+        if (destroyed || my !== gen) break;
+        for (;;) {
           try {
             await appendAsync(data);
+            break;
           } catch (e) {
             if (e?.name === 'QuotaExceededError') {
               // Xotira to'ldi: orqadagini o'chirib, oldinga oynani kichraytiramiz.
@@ -265,7 +259,6 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
             }
             throw e;
           }
-          pos = to;
         }
         if (destroyed || my !== gen) break;
         next += 1;
@@ -328,29 +321,16 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
 
   const ready = (async () => {
     st('loading');
-    file = await openFile(name, { key });
+    file = openVdFile(info);
+    const moovBytes = await readMoov(file);
     if (destroyed) return;
-    // Bosh qism: ftyp + moov + sidx (odatda bir necha KB).
-    let head = await file.read(0, Math.min(HEAD_PROBE, file.size));
-    let top = boxes(head);
-    let moov = top.find((x) => x.type === 'moov');
-    if (moov && moov.start + moov.size > head.length) {
-      head = await file.read(0, Math.min(file.size, moov.start + moov.size + 64 * 1024));
-      top = boxes(head);
-      moov = top.find((x) => x.type === 'moov');
-    }
-    if (!moov) throw new Error('bad_fmp4');
-    const ftyp = top.find((x) => x.type === 'ftyp');
-    const initEnd = moov.start + moov.size;
-    init = head.slice(ftyp ? ftyp.start : 0, initEnd);
-    const sidxBoxes = top.filter((x) => x.type === 'sidx' && x.start + x.size <= head.length);
-    if (!sidxBoxes.length) throw new Error('no_sidx');
-    // Video trek indeksi (birinchi sidx — ffmpeg video trekdan boshlaydi).
-    segs = parseSidx(head, sidxBoxes[0], 0).segs;
-    duration = segs.reduce((a, s) => a + s.dur, 0);
-    // Boshlanadigan fragmentni DARHOL yuklab boshlaymiz (MSE tayyorlanishini kutmasdan).
-    { const f0 = segs[segIndexAt(startAt || 0)]; if (f0) file.prefetch(f0.start, f0.size); }
-    const codecs = trackCodecs(head, moov);
+    layout = buildLayout(moovBytes);
+    init = layout.init;
+    segs = layout.segs;
+    duration = layout.duration;
+    // Boshlanadigan bo'lakni DARHOL yuklab boshlaymiz (MSE tayyorlanishini kutmasdan).
+    { const f0 = segs[segIndexAt(startAt || 0)]; if (f0) prefetchSegs([f0]); }
+    const codecs = trackCodecs(moovBytes, boxes(moovBytes).find((x) => x.type === 'moov'));
     const mime = `video/mp4; codecs="${codecs.join(', ')}"`;
     if (!MS || !MS.isTypeSupported(mime)) {
       const e = new Error('codec_unsupported');
@@ -396,7 +376,7 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
 
   return {
     ready,
-    format: 'fmp4',
+    format: 'mp4',
     get duration() { return duration; },
     /** Qotgani uchun pauzada ushlab turilibdimi (foydalanuvchi pauzasi emas). */
     get holding() { return holding; },
@@ -447,4 +427,4 @@ export function createEngine(video, { name, key = '', ahead: aheadOpt = 60, behi
 }
 
 // Sinov uchun (Node): MP4 qutilarini o'qish.
-export const _test = { boxes, parseSidx, trackCodecs };
+export const _test = { boxes, trackCodecs };

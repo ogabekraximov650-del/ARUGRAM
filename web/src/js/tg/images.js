@@ -9,7 +9,9 @@
 import { mediaUrl, prefetchNames, isTelegramAuthorized } from './media.js';
 import { startup, withTimeout } from './startup.js';
 import { cachedMediaUrl } from './file-cache.js';
-import { ensureKeys } from './ctr.js';
+import { ensureKeys, guessType } from './ctr.js';
+import { fileGet, filePut } from './chunk-cache.js';
+import { vdImageInfo, vdImageBytes } from '../vd/store.js';
 
 const queue = new Map(); // nom -> [{img, orig}]
 let timer = 0;
@@ -38,12 +40,57 @@ function consider(img) {
   timer = setTimeout(flush, 120);
 }
 
+// ── Yangi tizim (`vd`): rasm shifrlangan holda Cloudflare keshidan keladi, brauzer ochadi; ochilgani qurilma kaliti bilan diskda saqlanadi ──
+const vdUrls = new Map(); // nom -> objectURL
+
+async function vdCached(name) {
+  if (vdUrls.has(name)) return vdUrls.get(name);
+  const hit = await fileGet(`vd:${name}`);
+  if (!hit) return null;
+  const u = URL.createObjectURL(new Blob([hit.bytes], { type: hit.type || guessType(name) }));
+  vdUrls.set(name, u);
+  return u;
+}
+
+/** Yangi tizimdan chiqmaganlar qaytadi (eski yo'l: Telegram yoki worker). */
+async function viaVd(batch) {
+  const rest = [];
+  const need = [];
+  await Promise.all(batch.map(async (b) => { const u = await vdCached(b[0]).catch(() => null); if (u) setSrc(b[1], u); else need.push(b); }));
+  if (!need.length) return rest;
+  const infos = await vdImageInfo(need.map((b) => b[0])).catch(() => need.map(() => null));
+  let i = 0;
+  const worker = async () => {
+    while (i < need.length) {
+      const k = i++; const b = need[k]; const inf = infos[k];
+      if (!inf) { rest.push(b); continue; }
+      try {
+        const bytes = await vdImageBytes(inf);
+        const type = guessType(b[0]);
+        const u = URL.createObjectURL(new Blob([bytes], { type }));
+        vdUrls.set(b[0], u);
+        filePut(`vd:${b[0]}`, bytes, type);
+        setSrc(b[1], u);
+      } catch (_) { rest.push(b); }
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  return rest;
+}
+
 function setSrc(list, url) { list.forEach(({ img }) => { if (img.isConnected) img.src = url; }); }
 
 async function flush() {
-  const batch = [...queue.entries()];
+  let batch = [...queue.entries()];
   queue.clear();
   if (!batch.length) return;
+  batch = await viaVd(batch);
+  if (!batch.length) return;
+  // Telegram hisobi ulanmagan bo'lsa — qolganlari oddiy (worker) manzildan.
+  if (!tgOn()) {
+    batch.forEach(([, list]) => list.forEach(({ img, orig }) => { if (img.isConnected && orig) img.src = orig; }));
+    return;
+  }
   // Avval DISK keshi: bor rasmlar Telegram'ga umuman so'rovsiz, darhol chiqadi.
   const rest = [];
   // Kalitlar onlayn (bitta so'rov, bot nusxasiz); tarmoq yo'q bo'lsa kesh ishlatilmaydi.

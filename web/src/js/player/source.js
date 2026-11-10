@@ -1,31 +1,25 @@
-// Qism videosi manbasi — Mini App pleyeri uchun (fMP4, Telegram orqali).
+// Qism videosi manbasi — Mini App pleyeri uchun (yangi tizim `vd`, Telegram hisobisiz).
 //
-// Qism qatori (`GET /api/epizods/:a/:s` elementi) ichida ilova uchun
-// `url_<q>` (oddiy MP4) va Mini App uchun `fmp4_url_<q>` (fMP4 nusxa,
-// `worker/src/fmp4.rs`) bor. Pleyer FAQAT fMP4 ni o'ynaydi:
-//
-//   * fMP4 bor -> `startPlayback` (Telegram'ga kirish, bot chatiga yetkazish,
-//     bo'laklab o'ynatish — `engine.js`);
-//   * fMP4 yo'q, MP4 bor -> worker navbatga qo'yadi (`POST /api/fmp4/request`),
-//     Actions o'zi fMP4 yasaydi; pleyer "tayyorlanmoqda" deydi va
-//     `waitForFmp4` bilan kutadi.
+// Qism qatori (`GET /api/epizods/:a/:s` elementi) ichida `url_<q>` (oddiy MP4, faststart) bor. Fayl 18 MiB shifrlangan bo'laklarda
+// (Telegram -> Cloudflare kesh), kalit `/api/vd/info` bilan (kirgan foydalanuvchiga). Brauzer baytlarni ochadi va MP4 -> fMP4 ni
+// o'zi qiladi (`vd/remux.js`, `engine.js`) — serverda fMP4 nusxa YO'Q.
+//   * fayl `vd` da tayyor (yoki kamida birinchi bo'lagi saqlangan) -> `startPlayback`;
+//   * aks holda pleyer "tayyorlanmoqda" deydi va `waitForFmp4` bilan kutadi (har 5 s so'raydi).
 //
 // Eksport:
 //   QUALITIES                       — ['1080p','720p','480p','360p'] (kattadan)
 //   fileNameOf(url)                 — manzildan fayl nomi
-//   mp4Qualities(ep)                — ilovada bor sifatlar (url_<q>)
-//   fmp4Qualities(ep)               — Mini App'da tayyor sifatlar (fmp4_url_<q>)
-//   requestFmp4(ep)                 — {ready:[q], queued:[q]} (navbatga qo'yadi)
-//   waitForFmp4(ep, q, {signal, onTick}) — tayyor bo'lgach yangilangan nom
+//   mp4Qualities(ep)                — bor sifatlar (url_<q>); fmp4Qualities — xuddi shu (eski nom)
+//   requestFmp4(ep)                 — endi hech narsa qilmaydi (eski nom)
+//   waitForFmp4(ep, q, {signal, onTick}) — fayl yangi tizimda tayyor bo'lguncha kutadi
 //   startPlayback(video, ep, q, {startAt, ahead, onState, onError}) — engine
 //   devicePlatform()                — 'android' | 'ios' | 'desktop' | 'other' (Telegram.WebApp.platform)
-//   chooseSource(ep, q)             — {kind:'fmp4', name} yoki null (fMP4 yo'q yoki MSE qo'llanmaydi)
+//   chooseSource(ep, q)             — {kind:'vd', name, info} yoki null (hali tayyor emas yoki MSE qo'llanmaydi)
 //   explainError(e)                 — foydalanuvchiga matn {title, text, code}
 
-import { apiPost, api, ApiError } from '../api.js';
+import { ApiError } from '../api.js';
 import { createEngine, engineSupported } from './engine.js';
-import { ensureTelegram } from '../tg/media.js';
-import { startup } from '../tg/startup.js';
+import { vdInfo } from '../vd/store.js';
 
 export const QUALITIES = ['1080p', '720p', '480p', '360p'];
 
@@ -36,31 +30,23 @@ export function fileNameOf(url) {
 }
 
 export const mp4Qualities = (ep) => QUALITIES.filter((q) => fileNameOf(ep?.[`url_${q}`]));
-export const fmp4Qualities = (ep) => QUALITIES.filter((q) => fileNameOf(ep?.[`fmp4_url_${q}`]));
+/** Eski nom (pleyer ekrani ishlatadi): endi hamma sifat — `url_<q>` — yangi tizimda. */
+export const fmp4Qualities = mp4Qualities;
 
-export async function requestFmp4(ep) {
-  return apiPost('/api/fmp4/request', {
-    anime_id: ep.anime_id, season_id: ep.season_id, epizod_id: ep.epizod_id,
-  });
+/** Eski fMP4 so'rovi endi kerak emas: hamma narsa yangi tizimda. */
+export async function requestFmp4() {
+  return { ready: [], queued: [] };
 }
 
-/** fMP4 tayyor bo'lguncha kutadi (har 15 soniyada so'raydi). */
+/** Fayl yangi tizimda tayyor bo'lguncha kutadi (har 5 soniyada so'raydi, ~15 daqiqagacha). */
 export async function waitForFmp4(ep, q, { signal, onTick } = {}) {
-  for (let i = 0; i < 160; i++) {
+  const name = fileNameOf(ep?.[`url_${q}`]);
+  for (let i = 0; i < 180; i++) {
     if (signal?.aborted) throw new Error('aborted');
-    const list = await api(`/api/epizods/${ep.anime_id}/${ep.season_id}`).catch(() => null);
-    const fresh = Array.isArray(list) ? list.find((x) => `${x.epizod_id}` === `${ep.epizod_id}`) : null;
-    if (fresh) {
-      Object.assign(ep, fresh);
-      const name = fileNameOf(fresh[`fmp4_url_${q}`]);
-      if (name) return name;
-      if (!fmp4Qualities(fresh).length && i % 4 === 3) await requestFmp4(fresh).catch(() => {});
-      const other = fmp4Qualities(fresh)[0];
-      if (other && onTick) onTick({ other });
-    }
+    if (name && (await vdInfo(name, { fresh: true }))) return name;
     onTick?.({ i });
     await new Promise((r, j) => {
-      const t = setTimeout(r, 15000);
+      const t = setTimeout(r, 5000);
       signal?.addEventListener('abort', () => { clearTimeout(t); j(new Error('aborted')); }, { once: true });
     });
   }
@@ -79,25 +65,25 @@ export function devicePlatform() {
   return p ? 'other' : 'desktop';
 }
 
-/** Faqat fMP4 + MSE. fMP4 nusxa yo'q yoki MSE qo'llanmasa — `null` (fMP4 tayyorlash so'raladi, `requestFmp4`). */
+/** MSE bor va fayl yangi tizimda tayyor bo'lsa — `{kind:'vd', name, info}`; aks holda `null` (kutiladi, `waitForFmp4`). */
 export async function chooseSource(ep, q) {
-  const fmp4 = fileNameOf(ep?.[`fmp4_url_${q}`]);
-  return fmp4 && engineSupported() ? { kind: 'fmp4', name: fmp4 } : null;
+  const name = fileNameOf(ep?.[`url_${q}`]);
+  if (!name || !engineSupported()) return null;
+  const info = await vdInfo(name);
+  return info ? { kind: 'vd', name, info } : null;
 }
 
-/** Qismni o'ynatadi. Telegram'ga kirilmagan bo'lsa — kirish oynasi. */
+/** Qismni o'ynatadi (Telegram hisobi kerak emas). */
 export async function startPlayback(video, ep, q, { startAt = 0, ahead = 60, onState, onError, onStall, shouldPlay } = {}) {
-  await startup();
-  if (!(await ensureTelegram())) throw new Error('tg_login_cancelled');
   const pick = await chooseSource(ep, q);
   if (!pick) {
-    if (!engineSupported() && fileNameOf(ep[`fmp4_url_${q}`])) throw new Error('mse_unsupported');
-    throw new Error('no_fmp4');
+    if (!engineSupported()) throw new Error('mse_unsupported');
+    throw new Error('not_ready');
   }
-  return createEngine(video, { name: pick.name, ahead, startAt, onState, onError, onStall, shouldPlay });
+  return createEngine(video, { info: pick.info, ahead, startAt, onState, onError, onStall, shouldPlay });
 }
 
-/** Pleyer yopilganda bot chatiga TEGILMAYDI (eski nusxalar faqat ilova ochilganda tozalanadi). */
+/** Pleyer yopilganda qiladigan ish yo'q (bot chatiga TEGILMAYDI). */
 export function releasePlayback() {}
 
 export function explainError(e) {
@@ -111,13 +97,14 @@ export function explainError(e) {
       return { code, title: 'Video ochilmadi', text: "Qurilmangiz bu video formatini (H.265) Telegram ichida qo'llamaydi." };
     case 'mse_unsupported':
       return { code, title: 'Video ochilmadi', text: "Telegram'ingiz eskirgan — video pleyer ishlamaydi. Telegram'ni yangilang (iPhone: iOS 17.1+)." };
-    case 'tg_login_cancelled':
-      return { code, title: "Telegram ulanmagan", text: "Videolar Telegram hisobingiz orqali ko'rsatiladi — Telegram'ni ulang." };
     case 'not_on_telegram':
     case 'not_in_chat':
       return { code, title: 'Video topilmadi', text: "Video hali Telegram'ga joylanmagan." };
     case 'fmp4_timeout':
+    case 'not_ready':
       return { code, title: 'Video tayyor emas', text: "Video hali tayyorlanmoqda — birozdan keyin qayta oching." };
+    case 'bad_mp4':
+      return { code, title: 'Video ochilmadi', text: "Video fayli buzuq yoki qo'llab-quvvatlanmaydi." };
     case 'tg_disabled':
       return { code, title: 'Video ochilmadi', text: "Telegram orqali ko'rish hozircha o'chiq." };
     default:

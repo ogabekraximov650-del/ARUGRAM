@@ -20,7 +20,7 @@ import { openSeason, openSeasonIds } from './player/player-screen.js';
 import { openPublicProfile } from './screens/public-profile.js';
 import { startSync } from './sync.js';
 import { channelGate } from './services/channel-gate.js';
-import { checkTelegram, ensureTelegram, clearOldBotChat, telegramMe, telegramLogout } from './tg/media.js';
+import { checkTelegram, clearOldBotChat, telegramMe, telegramLogout } from './tg/media.js';
 import { setStartup, withTimeout } from './tg/startup.js';
 import { watchImages, rescanImages } from './tg/images.js';
 import { unreadBadge, ChatController } from './services/support.js';
@@ -119,8 +119,8 @@ async function main() {
   startSync();
   // Telegram (videolar) holati fonda tekshiriladi; kanallarga obuna —
   // ruxsat berilgan bo'lsa orqa fonda (`channel-gate.js`).
-  // Ochilganda: Telegram tekshiriladi (kerak bo'lsa kirish oynasi), bot chatidagi
-  // eski nusxalar tozalanadi, keyin rasmlar/videolar yangidan so'raladi.
+  // Ochilganda: Telegram hisobi (oldin ulangan bo'lsa) tekshiriladi, bot chatidagi eski nusxalar tozalanadi. Video va rasmlar
+  // yangi tizimdan (`vd`) Telegram hisobisiz olinadi — kirish oynasi ochilmaydi; hisob faqat kerak bo'lganda (yuklash va h.k.) so'raladi.
   const boot = (async () => {
     let ok = await withTimeout(checkTelegram(), 30000).catch(() => false);
     if (ok) {
@@ -130,7 +130,6 @@ async function main() {
       const opener = tgUser()?.id;
       if (me && opener && `${me.id}` !== `${opener}`) { await telegramLogout().catch(() => {}); ok = false; }
     }
-    if (!ok) ok = await ensureTelegram().catch(() => false);
     if (ok) await withTimeout(clearOldBotChat(), 20000).catch(() => {});
     return ok;
   })();

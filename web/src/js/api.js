@@ -157,6 +157,11 @@ export async function api(path, opts = {}) {
       await auth({ force: true, withSession: true });
       continue;
     }
+    // `raw: true` — bayt oqimi (video/rasm bo'laklari): `Response` o'zi qaytadi, xato bo'lsa ApiError.
+    if (opts.raw) {
+      if (!r.ok) throw new ApiError(r.status, { error: r.headers.get('X-Warm-Reason') || `http_${r.status}` });
+      return r;
+    }
     if (r.status === 204 || r.status === 304) return null;
     const text = await r.text();
     let j = null;
@@ -170,13 +175,11 @@ export const apiGet = (p) => api(p);
 export const apiPost = (p, body) => api(p, { method: 'POST', body });
 
 const PIX = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
-const tgOn = () => { try { return localStorage.getItem('aru_tg_on') === '1'; } catch (_) { return false; } };
 
 /**
- * Worker rasmi (`/api/image/...`). Telegram ulangan bo'lsa fayl worker'dan
- * EMAS (ilovadagidek: worker orqali fayl o'tmaydi), Telegram'dan olinadi —
- * shu sabab bu yerda 1x1 rasm + fayl nomi qaytadi, `tg/images.js` uni
- * almashtiradi. Telegram'da bo'lmasa — oddiy manzil (zaxira).
+ * Worker rasmi (`/api/image/...`). Rasm yangi tizimdan (`vd`, shifrlangan — brauzer ochadi) yoki Telegram'dan olinadi:
+ * shu sabab bu yerda 1x1 rasm + fayl nomi qaytadi, `tg/images.js` uni almashtiradi.
+ * Hech qaysisida topilmasa — oddiy manzil (zaxira).
  */
 export function imageUrl(url) {
   const u = `${url ?? ''}`.trim();
@@ -184,7 +187,7 @@ export function imageUrl(url) {
   if (!u.includes('/api/') || !token) return u;
   const full = u + (u.includes('?') ? '&' : '?') + 'tma=' + encodeURIComponent(token);
   const m = /\/api\/(?:image|media)\/([^?#]+)/.exec(u);
-  if (m && tgOn()) return `${PIX}#aru=${encodeURIComponent(decodeURIComponent(m[1]))}&o=${encodeURIComponent(full)}`;
+  if (m) return `${PIX}#aru=${encodeURIComponent(decodeURIComponent(m[1]))}&o=${encodeURIComponent(full)}`;
   return full;
 }
 

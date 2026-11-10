@@ -581,7 +581,7 @@ function buildPlayer(el, route, season, opts) {
           if (my !== token) return;
           if (/^cancelled$/i.test(`${er?.message || er}`)) return; // sek tufayli bekor qilingan so'rov — xato emas
           // Media/append yoki tarmoq xatosi — pleyerni joriy joydan o'zi qayta ishga tushiradi (3 martagacha).
-          if (autoRetry < 3 && /appendBuffer|append_error|MEDIA_ERR|HTMLMediaElement|chunk_timeout|download_failed|timeout|network|connect|fetch|socket/i.test(`${er?.message || er?.text || er}`)) {
+          if (autoRetry < 3 && /appendBuffer|append_error|MEDIA_ERR|HTMLMediaElement|chunk_timeout|chunk_short|warm_failed|http_5\d\d|NO_WINDOW|no-window|download_failed|timeout|network|connect|fetch|socket|Failed to fetch|Load failed/i.test(`${er?.message || er?.text || er}`)) {
             autoRetry += 1;
             playEpisode(e, { resumeMs: (pendingT ?? video.currentTime) * 1000, playing: intended, recovery: true, auto: true });
             return;
