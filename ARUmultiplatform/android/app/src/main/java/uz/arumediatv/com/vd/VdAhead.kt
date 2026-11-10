@@ -7,13 +7,15 @@ import androidx.media3.extractor.SeekMap
 
 /**
  * SIRPANUVCHI OYNA (eski tizimdagi `player_source.rs` kabi): ko'rish paytida telefonda doim "ijro joyi .. +1 daqiqa" oralig'i tayyor turadi.
- * Yetishmayotgan 1 MiB bo'laklar fonda BITTADAN, ketma-ket olinadi ([VdBlocks] — pleyer bilan bir bo'lak ikki marta yuklanmaydi); oyna to'lsa
+ * Yetishmayotgan 1 MiB bo'laklar fonda 4 tadan to'plab (bitta so'rovda) olinadi ([VdBlocks] — pleyer bilan bir bo'lak ikki marta yuklanmaydi); oyna to'lsa
  * hech narsa yuklanmaydi. "1 daqiqa" aniq: vaqt -> bayt videoning o'z jadvalidan (`moov`, pleyer o'qigan [SeekMap]) olinadi, o'rtacha bitreytdan emas
  * (aks holda tinch sahnada 4-5 daqiqa yuklanib ketardi).
  */
 @UnstableApi
 object VdAhead {
     const val AHEAD_MS = 60_000L
+    /** Bitta so'rovda olinadigan bo'laklar soni (worker so'rovlari 4 baravar kam; oldinda ba'zan 1 daqiqadan <= 3 MB ko'proq turadi). */
+    private const val RUN = 4
 
     private class Target(val ctx: Context, val name: String, val total: Long, val key: ByteArray, val from: Long, val to: Long)
 
@@ -78,7 +80,7 @@ object VdAhead {
                 continue
             }
             try {
-                VdBlocks.get(t.ctx, t.name, t.total, t.key, idx)
+                VdBlocks.getRun(t.ctx, t.name, t.total, t.key, idx, RUN)
                 fails = 0
             } catch (_: Exception) {
                 // Tarmoq yo'q/xato: biroz kutib qayta urinadi (pleyerga ta'sir qilmaydi — u o'zi ham so'rab oladi).
