@@ -202,7 +202,8 @@ class PackStore(
     suspend fun load(force: Boolean = false) = withContext(Dispatchers.IO) {
         if (_lib.value.loading || token == null) return@withContext
         if (!_lib.value.loaded) try { if (libFile.exists()) apply(JSONObject(libFile.readText())) } catch (_: Exception) {}
-        if (!force && _lib.value.loaded && System.currentTimeMillis() - loadedAt < 10 * 60_000L) return@withContext
+        val at = maxOf(loadedAt, if (libFile.exists()) libFile.lastModified() else 0L)
+        if (!force && _lib.value.loaded && System.currentTimeMillis() - at < 10 * 60_000L) return@withContext
         _lib.update { it.copy(loading = true, error = null) }
         val r = client.callJson("$base/api/packs/library", bearer = token)
         val j = r.json

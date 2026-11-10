@@ -125,11 +125,21 @@ class SeasonRepository(
 ) {
     private val dir = File(context.filesDir, "cache").apply { mkdirs() }
 
+    private companion object {
+        const val EPISODES_TTL = 10 * 60_000L
+        const val SEASONS_TTL = 30 * 60_000L
+        const val INFO_TTL = 5 * 60_000L
+    }
+
     private fun read(name: String): String? = try {
         File(dir, name).takeIf { it.exists() }?.readText()
     } catch (_: Exception) {
         null
     }
+
+    /** Diskdagi nusxa shu muddatdan yangi bo'lsa serverga (worker/Turso) bormaymiz. */
+    private fun fresh(name: String, ttlMs: Long): Boolean =
+        File(dir, name).let { it.exists() && System.currentTimeMillis() - it.lastModified() < ttlMs }
 
     private fun write(name: String, text: String) {
         try {
@@ -152,6 +162,7 @@ class SeasonRepository(
 
     /** `null` — tarmoq xatosi (kesh saqlanib qoladi). */
     suspend fun fetchEpisodes(a: Long, s: Long): List<Episode>? = withContext(Dispatchers.IO) {
+        if (fresh("eps_${a}_$s.json", EPISODES_TTL)) return@withContext null // kesh yangi — server so'ralmaydi
         val (code, text) = client.callText("$base/api/epizods/$a/$s")
         if (code != 200) return@withContext null
         val list = parseEpisodes(text)
@@ -171,6 +182,7 @@ class SeasonRepository(
     }
 
     suspend fun fetchSeasons(a: Long): List<Season>? = withContext(Dispatchers.IO) {
+        if (fresh("seasons_anime_$a.json", SEASONS_TTL)) return@withContext null
         val (code, text) = client.callText("$base/api/seasons/anime/$a")
         if (code != 200) return@withContext null
         write("seasons_anime_$a.json", text)
@@ -187,6 +199,7 @@ class SeasonRepository(
     }
 
     suspend fun loadInfo(a: Long, s: Long): SeasonInfo? = withContext(Dispatchers.IO) {
+        if (fresh(key(a, s), INFO_TTL)) return@withContext infoFromDisk(a, s)
         val (code, text) = client.callText("$base/api/season/$a/$s", auth.sessionToken)
         if (code != 200) return@withContext infoFromDisk(a, s)
         try {

@@ -98,6 +98,7 @@ class ChannelGate(
     /** Ro'yxat serverdan (15 daqiqada bir marta). */
     suspend fun refresh(force: Boolean = false) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
+        if (listAt == 0L) listAt = prefs.getLong("listAt_${uid()}", 0)
         if (!force && _state.value.channels != null && now - listAt < 15 * 60_000L) return@withContext
         val token = auth.sessionToken ?: return@withContext
         val r = client.callJson("$base/api/channels", bearer = token)
@@ -105,7 +106,7 @@ class ChannelGate(
         if (r.ok && arr != null) {
             _state.update { it.copy(channels = parse(arr.toString())) }
             listAt = now
-            prefs.edit().putString("list_${uid()}", arr.toString()).apply()
+            prefs.edit().putString("list_${uid()}", arr.toString()).putLong("listAt_${uid()}", now).apply()
         }
     }
 

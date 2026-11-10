@@ -24,7 +24,7 @@ class AruApplication : Application() {
             AppServices.auth.restore()
             AppServices.billing.restore()
             AppServices.gate.start()
-            AppServices.billing.load(force = true)
+            AppServices.billing.loadIfStale()
             sweepTemp()
             AppServices.telegram.start()
         }

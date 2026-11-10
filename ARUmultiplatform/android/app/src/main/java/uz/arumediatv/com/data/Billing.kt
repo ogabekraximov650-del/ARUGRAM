@@ -61,6 +61,13 @@ class BillingStore(
         _state.value = BillingState()
     }
 
+    /** Ilova ochilganda: diskdagi holat 10 daqiqadan yangi bo'lsa serverga bormaydi (to'lov/yangilash tugmalari baribir `force`). */
+    suspend fun loadIfStale() {
+        val uid = auth.user.value?.id ?: 0L
+        if (uid != 0L && System.currentTimeMillis() - prefs.getLong("at_$uid", 0) < 10 * 60_000L) return
+        load(force = true)
+    }
+
     suspend fun load(force: Boolean = false) = withContext(Dispatchers.IO) {
         val s = _state.value
         if (s.loading || (s.loaded && !force)) return@withContext
@@ -81,7 +88,7 @@ class BillingStore(
             .map { BillingEntry(it.optString("kind"), it.optLong("amount"), it.optInt("days"), it.optString("note"), it.optLong("created_at")) }
         val bal = j.optLong("balance")
         val until = j.optLong("subscription_until")
-        auth.user.value?.id?.let { uid -> prefs.edit().putLong("bal_$uid", bal).putLong("until_$uid", until).apply() }
+        auth.user.value?.id?.let { uid -> prefs.edit().putLong("bal_$uid", bal).putLong("until_$uid", until).putLong("at_$uid", System.currentTimeMillis()).apply() }
         _state.value = BillingState(bal, until, plans, links, hist, loading = false, loaded = true, error = null)
     }
 

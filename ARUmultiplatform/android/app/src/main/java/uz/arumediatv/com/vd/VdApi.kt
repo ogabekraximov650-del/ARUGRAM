@@ -34,6 +34,8 @@ object VdApi {
     /** Fayl haqida ma'lumot: avval tarmoqdan (yangi holat), tarmoq yo'q bo'lsa saqlangan nusxadan. `null` — yangi tizimda yo'q (eski yo'l bilan ochiladi). */
     fun lookup(ctx: Context, name: String, bearer: String?): Info? {
         mem[name]?.takeIf { it.ready }?.let { return it }
+        // Tayyor ("ready") fayl o'zgarmaydi (hajm va kalit qat'iy): telefonda saqlangan bo'lsa serverga bormaymiz.
+        stored(ctx, name)?.takeIf { it.ready }?.let { return it }
         val r = Http.client.callJson("$base/api/vd/info", "POST", JSONObject().put("names", JSONArray().put(name)), bearer)
         if (r.ok) {
             val f = r.json?.optJSONObject("files")?.optJSONObject(name) ?: return null

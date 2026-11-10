@@ -39,11 +39,13 @@ class SeasonsRepository(
     suspend fun fetch(force: Boolean = false): FetchResult = withContext(Dispatchers.IO) {
         try {
             val rb = Request.Builder().url("$baseUrl/api/seasons")
+            // Oxirgi tekshiruvdan 5 daqiqa o'tmagan bo'lsa serverga umuman bormaymiz.
+            if (!force && bodyFile.exists() && etagFile.exists() && System.currentTimeMillis() - etagFile.lastModified() < 5 * 60_000L) return@withContext FetchResult.NotModified
             val etag = if (!force && bodyFile.exists() && etagFile.exists()) etagFile.readText().trim() else ""
             if (etag.isNotEmpty()) rb.header("If-None-Match", etag)
             client.newCall(rb.build()).execute().use { r ->
                 when {
-                    r.code == 304 -> FetchResult.NotModified
+                    r.code == 304 -> { etagFile.setLastModified(System.currentTimeMillis()); FetchResult.NotModified }
                     r.isSuccessful -> {
                         val body = r.body?.string().orEmpty()
                         val items = SeasonParser.parse(body)

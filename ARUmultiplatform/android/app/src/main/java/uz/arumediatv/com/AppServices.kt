@@ -102,7 +102,7 @@ object AppServices {
         seasons = SeasonsStore(SeasonsRepository(ctx))
         library = LibraryStore(ctx, auth)
         sync = SyncQueue(ctx, auth)
-        myStats = MyStatsStore(auth)
+        myStats = MyStatsStore(ctx, auth)
         billing = BillingStore(ctx, auth)
         seasonData = SeasonRepository(ctx, auth, { sync }, { library })
         progress = WatchProgress(ctx)

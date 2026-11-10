@@ -7211,3 +7211,15 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - Nima: `data/LibraryStore.kt` serverdan kelgan `/api/favorites` va `/api/history` javobini `filesDir/cache/library.json` ga yozadi (hisob raqami bilan, atomik). Ochilganda avval shu nusxa darhol ko'rsatiladi, keyin server bilan yangilanadi. Boshqa hisob nusxasi o'qilmaydi; chiqishda (`clear()`) fayl o'chadi. Sevimli/tarixdan o'chirish ham diskka yoziladi.
 - `ui/library/LibraryScreen.kt`: hisob hali tiklanmagan (`user == null`) paytda `clear()` chaqirilmaydi — aks holda nusxa har ochilishda o'chib ketardi.
 - `AppServices.kt`: `LibraryStore(ctx, auth)`.
+
+## Kotlin ilova: worker so'rovlarini kamaytirish — doimiy xotira auditi (2026-11)
+
+Hamma `GET` yo'llari tekshirildi. Diskda nusxasi bor, lekin har ochilganda serverga qayta borayotganlar tuzatildi:
+- `SeasonRepository` (qismlar, bo'lim ma'lumoti, anime bo'limlari): diskdagi fayl yangi bo'lsa (qismlar 10 daq, bo'limlar 30 daq, ma'lumot 5 daq; fayl `lastModified`) server so'ralmaydi. Avval har pleyer ochilishida 3 ta so'rov ketardi.
+- `VdApi.lookup`: telefonda saqlangan "ready" fayl ma'lumoti bo'lsa `POST /api/vd/info` yuborilmaydi (hajm/kalit o'zgarmaydi). Avval ilova qayta ochilgach har qism uchun so'rov ketardi.
+- `SeasonsRepository` (`/api/seasons`): oxirgi tekshiruvdan 5 daqiqa o'tmagan bo'lsa 304 uchun ham bormaydi.
+- `MyStatsStore`: statistika va "yangi" vaqti diskda (`aru_mystats`).
+- `BillingStore.loadIfStale`: ilova ochilganda 10 daqiqadan yangi bo'lsa `/api/billing` so'ralmaydi.
+- `ChannelGate`: ro'yxat vaqti diskda (15 daq).
+- `PackStore.load`: 10 daqiqalik "yangi" vaqti fayl vaqtidan olinadi.
+Tegilmadi (allaqachon yetarli): izohlar (`mk/at` -> `same`), chat (`since`), Tarix/Sevimlilar (oldingi bo'lim), rasmlar.
