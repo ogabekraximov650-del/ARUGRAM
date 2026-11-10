@@ -75,9 +75,11 @@ async function warm(name, w, force = false, signal) {
       if (signal?.aborted) throw new Error('cancelled');
       let st = '';
       try {
-        dbg(`isitilmoqda: oyna ${w}`);
         const t0 = Date.now();
-        const j = await api(`/api/warm/vd~${encodeURIComponent(name)}?w=${w}${first ? '&force=1' : ''}`, { signal });
+        dbg(`isitilmoqda: oyna ${w}`);
+        const tick = setInterval(() => dbg(`isitilmoqda: oyna ${w} (${Math.round((Date.now() - t0) / 1000)} s)`), 1000);
+        let j;
+        try { j = await api(`/api/warm/vd~${encodeURIComponent(name)}?w=${w}${first ? '&force=1' : ''}`, { signal }); } finally { clearInterval(tick); }
         st = `${j?.status ?? j?.raw ?? ''}`;
         dbg(`oyna ${w}: ${st.slice(0, 40)} (${Math.round((Date.now() - t0) / 1000)} s)`);
       } catch (e) {
@@ -94,22 +96,52 @@ async function warm(name, w, force = false, signal) {
   try { await run; } finally { warming.delete(key); }
 }
 
+const STALL_MS = 20_000; // shuncha vaqt bitta bayt ham kelmasa so'rov uziladi va qayta uriniladi
+
+/** Javob tanasini oqim bilan o'qiydi: jarayon ekranda ko'rinadi, to'xtab qolsa (`STALL_MS`) uziladi. */
+async function readBody(r, expect, label, t0, touch) {
+  const reader = r.body.getReader();
+  const out = new Uint8Array(expect);
+  let got = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (got + value.length > expect) throw new Error('chunk_long');
+    out.set(value, got); got += value.length;
+    touch();
+    dbg(`${label}: ${(got / 1048576).toFixed(1)}/${(expect / 1048576).toFixed(1)} MB (${Math.round((Date.now() - t0) / 1000)} s)`);
+  }
+  if (got !== expect) throw new Error('chunk_short');
+  return out;
+}
+
 /** Shifrlangan `[start, end]` (ikkala chegara ham kiradi) baytlar — bitta so'rov. */
 async function fetchRange(name, start, end, signal) {
   const w = Math.floor(start / WINDOW);
+  const label = `yuklanmoqda ${(start / 1048576).toFixed(0)}-${((end + 1) / 1048576).toFixed(0)} MB`;
   for (let attempt = 0; attempt < 3; attempt++) {
+    const ac = new AbortController();
+    const onAbort = () => ac.abort();
+    signal?.addEventListener('abort', onAbort, { once: true });
+    let last = Date.now(); let stalled = false; let watch = false; // isitish uzoq davom etishi mumkin — kuzatuv faqat bayt so'rovida
+    const iv = setInterval(() => { if (watch && Date.now() - last > STALL_MS) { stalled = true; ac.abort(); } }, 2000);
     try {
-      await warm(name, w, attempt > 0, signal);
-      dbg(`yuklanmoqda: ${(start / 1048576).toFixed(0)}-${(end / 1048576).toFixed(0)} MB`);
-      const r = await api(`/api/play/vd~${encodeURIComponent(name)}`, { headers: { Range: `bytes=${start}-${end}` }, raw: true, signal });
-      const b = new Uint8Array(await r.arrayBuffer());
-      if (b.length !== end - start + 1) throw new Error('chunk_short');
-      return b;
+      await warm(name, w, attempt > 0, ac.signal);
+      last = Date.now(); watch = true;
+      const t0 = Date.now();
+      dbg(`${label}: so'ralmoqda`);
+      const r = await api(`/api/play/vd~${encodeURIComponent(name)}`, { headers: { Range: `bytes=${start}-${end}` }, raw: true, signal: ac.signal });
+      last = Date.now();
+      return await readBody(r, end - start + 1, label, t0, () => { last = Date.now(); });
     } catch (e) {
-      if (signal?.aborted || e?.name === 'AbortError' || /^cancelled$/.test(e?.message || '')) throw new Error('cancelled');
-      dbg(`xato (${attempt + 1}/3): ${e?.status || ''} ${e?.message || e}`);
-      if (attempt === 2) throw e;
+      if (signal?.aborted) throw new Error('cancelled');
+      const why = stalled ? `javob ${STALL_MS / 1000} s kelmadi` : `${e?.status || ''} ${e?.message || e}`;
+      dbg(`xato (${attempt + 1}/3): ${why}`);
+      if (attempt === 2) throw new Error(stalled ? 'chunk_timeout' : (e?.message || 'download_failed'));
       await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+    } finally {
+      clearInterval(iv);
+      signal?.removeEventListener('abort', onAbort);
     }
   }
   throw new Error('download_failed');
