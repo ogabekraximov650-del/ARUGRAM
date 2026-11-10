@@ -7204,3 +7204,10 @@ Foydalanuvchi: model "sudo yo'q, o'rnatib bo'lmaydi" deb to'xtab qoldi ("Modelni
 - **Qilinmagan (eski yo'lda qoldi):** yozishma (`chat_`) fayllari va to'plamlar (`openFile`/`mediaUrl`, Telegram hisobi kerak), admin yuklashlari (rasm/video `uploadFile`), Mini App ichidagi qism admin yuklash. Eski Telegram ulash oynasi profilda qoldi (kerak bo'lganda ochiladi).
 - **Tuzatish (uzun filmda sahifa qotardi, video ochilmasdi):** `vd/remux.js` `parseTrack` `stsc` jadvalini har chunk uchun boshidan qidirardi (O(chunk x yozuv)): 2 soatlik faylda kompyuterda 30 s, telefonda daqiqalab — asosiy oqim band, tugmalar ishlamasdi. Endi ko'rsatkich faqat oldinga yuradi (53 ms). Qisqa sinov videosida sezilmagan edi; 2 soatlik fayl bilan o'lchab tasdiqlandi. Pleyerda yuklanish bosqichi yozuvi (`vd/store.js dbg`, `player-screen.js paintBusy`) tashxis uchun qoldirilgan.
 - **Kotlin pleyer (uzoq ko'rishda to'xtab qolishi):** `AruPlayer.vdRecoveries` (xatodan keyin avtomatik tiklanish, 3 martagacha) butun fayl davomida yig'ilardi va hech qachon nolga tushmasdi — 2 soatlik filmda 3 ta tasodifiy tarmoq xatosidan keyin video butunlay to'xtardi. Endi faqat ketma-ket (1 daqiqa ichidagi) xatolar sanaladi.
+
+## Kotlin ilova: Tarix va Sevimlilar doimiy xotirada (2026-11)
+
+- Nega: `LibraryStore` faqat xotirada turardi — ilova qayta ochilganda Kutubxona > Tarix har safar serverdan qayta yuklanib, aylanib turardi.
+- Nima: `data/LibraryStore.kt` serverdan kelgan `/api/favorites` va `/api/history` javobini `filesDir/cache/library.json` ga yozadi (hisob raqami bilan, atomik). Ochilganda avval shu nusxa darhol ko'rsatiladi, keyin server bilan yangilanadi. Boshqa hisob nusxasi o'qilmaydi; chiqishda (`clear()`) fayl o'chadi. Sevimli/tarixdan o'chirish ham diskka yoziladi.
+- `ui/library/LibraryScreen.kt`: hisob hali tiklanmagan (`user == null`) paytda `clear()` chaqirilmaydi — aks holda nusxa har ochilishda o'chib ketardi.
+- `AppServices.kt`: `LibraryStore(ctx, auth)`.

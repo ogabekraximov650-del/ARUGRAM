@@ -100,7 +100,7 @@ object AppServices {
         telegram = TelegramService(ctx, auth, secure)
         images = ImageStore(ctx, telegram)
         seasons = SeasonsStore(SeasonsRepository(ctx))
-        library = LibraryStore(auth)
+        library = LibraryStore(ctx, auth)
         sync = SyncQueue(ctx, auth)
         myStats = MyStatsStore(auth)
         billing = BillingStore(ctx, auth)

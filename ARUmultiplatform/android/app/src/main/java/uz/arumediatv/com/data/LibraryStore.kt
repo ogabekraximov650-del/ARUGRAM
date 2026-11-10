@@ -15,7 +15,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import android.content.Context
 import okhttp3.OkHttpClient
+import java.io.File
 import org.json.JSONObject
 import uz.arumediatv.com.BuildConfig
 
@@ -59,25 +61,67 @@ data class LibraryState(
  * Ketma-ket ochishlarda serverga qayta bormaydi: 60 soniya "yangi" hisoblanadi.
  */
 class LibraryStore(
+    context: Context,
     private val auth: AuthService,
     private val client: OkHttpClient = Http.client,
     private val base: String = BuildConfig.API_BASE,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Mutex()
+    private val file = File(File(context.filesDir, "cache").apply { mkdirs() }, "library.json")
+    private val restoreLock = Any()
+    private var restored = false
     private val _state = MutableStateFlow(LibraryState())
     val state: StateFlow<LibraryState> = _state.asStateFlow()
 
     @Volatile
     private var loadedAt = 0L
 
+    /**
+     * Diskdagi nusxa (doimiy xotira): ilova qayta ochilganda Tarix/Sevimlilar serverni kutmasdan darhol chiqadi,
+     * keyin server bilan yangilanadi. Boshqa hisob nusxasi o'qilmaydi.
+     */
+    fun restoreFromDisk() {
+        synchronized(restoreLock) {
+            if (restored) return
+            val uid = auth.user.value?.id ?: return // hisob hali tiklanmagan — keyingi chaqiruvda
+            restored = true
+            try {
+                if (!file.exists()) return
+                val j = JSONObject(file.readText())
+                if (j.optLong("uid") != uid) return
+                val fav = parseFavorites(j.optJSONObject("fav"))
+                val hist = parseHistory(j.optJSONObject("hist"))
+                _state.update { s ->
+                    if (s.loaded) s else s.copy(
+                        favorites = if (s.favorites.isEmpty()) fav else s.favorites,
+                        history = if (s.history.isEmpty()) hist else s.history,
+                    )
+                }
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun saveDisk(fav: JSONObject?, hist: JSONObject?) {
+        try {
+            val uid = auth.user.value?.id ?: return
+            val tmp = File(file.parentFile, "library.json.tmp")
+            tmp.writeText(JSONObject().put("uid", uid).put("fav", fav ?: JSONObject()).put("hist", hist ?: JSONObject()).toString())
+            if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
+        } catch (_: Exception) {
+        }
+    }
+
     fun load(force: Boolean = false) {
         if (auth.sessionToken == null) return
+        scope.launch { restoreFromDisk() }
         if (!force && System.currentTimeMillis() - loadedAt < FRESH_MS) return
         scope.launch {
             if (!lock.tryLock()) return@launch
             try {
                 val token = auth.sessionToken ?: return@launch
+                restoreFromDisk()
                 _state.update { it.copy(loading = true) }
                 val (fav, hist) = coroutineScope {
                     val f = async { client.callJson("$base/api/favorites", bearer = token) }
@@ -94,7 +138,10 @@ class LibraryStore(
                         error = if (failed) (fav.error ?: hist.error ?: "Server bilan bog'lanib bo'lmadi") else null,
                     )
                 }
-                if (!failed) loadedAt = System.currentTimeMillis()
+                if (!failed) {
+                    loadedAt = System.currentTimeMillis()
+                    saveDisk(fav.json, hist.json)
+                }
             } finally {
                 lock.unlock()
             }
@@ -108,22 +155,59 @@ class LibraryStore(
             s.copy(favorites = if (on) listOf(season) + rest else rest)
         }
         loadedAt = 0
+        scope.launch { saveCurrent() }
     }
 
     /** Tarixdan o'chirish: ro'yxatdan darhol olinadi, serverga SyncQueue orqali boradi. */
     fun removeHistory(h: HistoryItem) {
         _state.update { s -> s.copy(history = s.history.filterNot { it.animeId == h.animeId && it.seasonId == h.seasonId && it.epizodId == h.epizodId }) }
         uz.arumediatv.com.AppServices.sync.hideHistory(h.animeId, h.seasonId, h.epizodId)
+        scope.launch { saveCurrent() }
+    }
+
+    /** Joriy holatni (tahrirlardan keyin) diskka yozadi. */
+    private fun saveCurrent() {
+        val s = _state.value
+        saveDisk(favoritesJson(s.favorites), historyJson(s.history))
     }
 
     /** Hisobdan chiqilganda. */
     fun clear() {
         loadedAt = 0
+        synchronized(restoreLock) { restored = false }
+        try { file.delete() } catch (_: Exception) {}
         _state.value = LibraryState()
     }
 
     companion object {
         private const val FRESH_MS = 60_000L
+
+        private fun favoritesJson(l: List<Season>): JSONObject {
+            val arr = org.json.JSONArray()
+            l.forEach { x ->
+                arr.put(
+                    JSONObject().put("anime_id", x.animeId).put("season_id", x.seasonId).put("nomi", x.name).put("bolim_id", x.sectionNo)
+                        .put("epizod_count", x.episodes).put("photo_url", x.photoUrl).put("rating_count", x.ratingCount)
+                        .put("rating_sum", Math.round(x.ratingAvg * x.ratingCount)).put("views_total", x.views).put("yosh", x.age)
+                        .put("janri", x.genres.joinToString(",")).put("yili", x.year).put("holati", x.status).put("turi", x.kind)
+                        .also { o -> x.free?.let { o.put("free", it) } },
+                )
+            }
+            return JSONObject().put("items", arr)
+        }
+
+        private fun historyJson(l: List<HistoryItem>): JSONObject {
+            val arr = org.json.JSONArray()
+            l.forEach { h ->
+                arr.put(
+                    JSONObject().put("anime_id", h.animeId).put("season_id", h.seasonId).put("epizod_number", h.episodeNo).put("bolim_id", h.sectionNo)
+                        .put("season_name", h.title).put("season_photo", h.photoUrl).put("position_ms", h.positionMs).put("duration_ms", h.durationMs)
+                        .put("view_count", h.views).put("watched_ms", h.watchedMs).put("last_quality", h.quality).put("epizod_id", h.epizodId)
+                        .put("updated_at", h.updatedAt).put("video_url", h.videoUrl).put("thumb_url", h.thumbUrl),
+                )
+            }
+            return JSONObject().put("items", arr)
+        }
 
         fun parseFavorites(j: JSONObject?): List<Season> {
             if (j == null) return emptyList()

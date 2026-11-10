@@ -75,7 +75,9 @@ fun LibraryScreen(onOpenSeason: (Season) -> Unit, onLogin: () -> Unit, onOpenDow
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(user) {
-        if (user == null) AppServices.library.clear() else AppServices.library.load()
+        if (user != null) AppServices.library.load()
+        // Hisob tiklanmaguncha (user hali null) diskdagi nusxaga tegilmaydi; faqat haqiqiy chiqishda tozalanadi.
+        else if (AppServices.auth.restored.value && AppServices.auth.sessionToken == null) AppServices.library.clear()
     }
 
     Column(Modifier.fillMaxSize()) {
