@@ -14,6 +14,10 @@ export const WINDOW = 18 * 1024 * 1024;
 
 const infos = new Map(); // nom -> {name,size,key,state,chunks,stored}
 const infoWait = new Map();
+const infoErr = new Map(); // nom -> oxirgi xato (server javob bermadi / rad etdi) — "tayyor emas" dan farqlash uchun
+
+/** Oxirgi `vdInfo` xatosi (`null` — xato yo'q: fayl shunchaki yangi tizimda yo'q yoki hali tayyor emas). */
+export const vdInfoError = (name) => infoErr.get(name) || null;
 
 export const playable = (i) => !!i && i.size > 0 && `${i.key}`.length === 32 && (i.state === 'ready' || i.stored > 0);
 
@@ -30,13 +34,15 @@ export async function vdInfo(name, { fresh = false } = {}) {
   const p = (async () => {
     try {
       const j = await apiPost('/api/vd/info', { names: [name] });
+      infoErr.delete(name);
       const f = j?.files?.[name];
       if (!f) return null;
       const i = norm(name, f);
       if (!playable(i)) return null;
       infos.set(name, i);
       return i;
-    } catch (_) {
+    } catch (e) {
+      infoErr.set(name, e);
       return infos.get(name) || null;
     } finally {
       infoWait.delete(name);

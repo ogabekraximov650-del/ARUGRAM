@@ -19,7 +19,7 @@
 
 import { ApiError } from '../api.js';
 import { createEngine, engineSupported } from './engine.js';
-import { vdInfo } from '../vd/store.js';
+import { vdInfo, vdInfoError } from '../vd/store.js';
 
 export const QUALITIES = ['1080p', '720p', '480p', '360p'];
 
@@ -41,9 +41,12 @@ export async function requestFmp4() {
 /** Fayl yangi tizimda tayyor bo'lguncha kutadi (har 5 soniyada so'raydi, ~15 daqiqagacha). */
 export async function waitForFmp4(ep, q, { signal, onTick } = {}) {
   const name = fileNameOf(ep?.[`url_${q}`]);
+  let errs = 0;
   for (let i = 0; i < 180; i++) {
     if (signal?.aborted) throw new Error('aborted');
     if (name && (await vdInfo(name, { fresh: true }))) return name;
+    const fail = name ? infoFailure(name) : null;
+    if (fail && ++errs >= 2) throw fail;
     onTick?.({ i });
     await new Promise((r, j) => {
       const t = setTimeout(r, 5000);
@@ -73,6 +76,13 @@ export async function chooseSource(ep, q) {
   return info ? { kind: 'vd', name, info } : null;
 }
 
+/** Server so'rovga xato berdi (kirish, tarmoq, 5xx) — "tayyorlanmoqda" deb abadiy kutish o'rniga xato ko'rsatiladi. */
+function infoFailure(name) {
+  const e = vdInfoError(name);
+  if (!e) return null;
+  return e instanceof ApiError ? e : new Error(`net_${`${e?.message || e}`.slice(0, 40)}`);
+}
+
 /** Qismni o'ynatadi (Telegram hisobi kerak emas). */
 export async function startPlayback(video, ep, q, { startAt = 0, ahead = 60, onState, onError, onStall, shouldPlay } = {}) {
   const pick = await chooseSource(ep, q);
@@ -100,6 +110,9 @@ export function explainError(e) {
     case 'not_on_telegram':
     case 'not_in_chat':
       return { code, title: 'Video topilmadi', text: "Video hali Telegram'ga joylanmagan." };
+    case 'http_401':
+    case 'unauthorized':
+      return { code, title: 'Kirish kerak', text: "Hisobingiz tasdiqlanmadi — Mini App'ni yopib, qayta oching." };
     case 'fmp4_timeout':
     case 'not_ready':
       return { code, title: 'Video tayyor emas', text: "Video hali tayyorlanmoqda — birozdan keyin qayta oching." };
