@@ -32,7 +32,8 @@ def via_worker(engine, op, C, secs, n=45, kill_after=None):
             k += 1
             t0 = time.time()
             try:
-                with urllib.request.urlopen(f"{WORKER}/run?engine={engine}&op={op}&n={n}&seed={i * 1000 + k}", timeout=60) as r:
+                rq = urllib.request.Request(f"{WORKER}/run?engine={engine}&op={op}&n={n}&seed={i * 1000 + k}", headers={'User-Agent': 'dbbench/1.0'})
+                with urllib.request.urlopen(rq, timeout=60) as r:
                     j = json.load(r)
                 ms, ok = j['ms'], j['ok']
             except Exception:
@@ -43,7 +44,7 @@ def via_worker(engine, op, C, secs, n=45, kill_after=None):
     def killer():
         time.sleep(kill_after)
         try:
-            urllib.request.urlopen(f"{AMPLE}/chaos/{engine}?token={TOKEN}", timeout=30).read()
+            urllib.request.urlopen(urllib.request.Request(f"{AMPLE}/chaos/{engine}?token={TOKEN}", headers={'User-Agent': 'dbbench/1.0'}), timeout=30).read()
         except Exception as e:
             print('   chaos call failed:', e)
         kill['t'] = time.time()
@@ -129,11 +130,12 @@ def main():
             for C in levels:
                 _, total, errs, elapsed, lat, _ = via_worker(engine, op, C, 12)
                 row(f"{NAME[engine]} {op}", C, total, errs, elapsed, lat)
-        print("-- to'g'ridan-to'g'ri Actions -> Ample (worker'siz, yuqori parallel) --", flush=True)
-        for op, levels in (('read', (50, 100, 200)), ('write', (50, 100)), ('hot', (50,)), ('heavy', (20,))):
-            for C in levels:
-                total, errs, elapsed, lat = direct(engine, op, C, 8)
-                row(f"{NAME[engine]} {op} direct", C, total, errs, elapsed, lat)
+        if os.environ.get('DIRECT', '1') == '1':
+            print("-- to'g'ridan-to'g'ri Actions -> Ample (worker'siz, yuqori parallel) --", flush=True)
+            for op, levels in (('read', (50, 100, 200)), ('write', (50, 100)), ('hot', (50,)), ('heavy', (20,))):
+                for C in levels:
+                    total, errs, elapsed, lat = direct(engine, op, C, 8)
+                    row(f"{NAME[engine]} {op} direct", C, total, errs, elapsed, lat)
         chaos(engine)
         time.sleep(10)
     print(f"\njami vaqt: {time.time() - t:.0f}s")

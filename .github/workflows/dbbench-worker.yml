@@ -46,6 +46,7 @@ jobs:
         env:
           AMPLE_URL: https://7xx659f87f2y.ample.run
           CHAOS_TOKEN: 970f8a0cd9939874
+          DIRECT: '0'
         run: |
           export WORKER_URL=$(cat /tmp/url.txt)
           [ -n "$WORKER_URL" ] || { echo "worker URL topilmadi"; exit 1; }
@@ -55,4 +56,5 @@ jobs:
           done
           echo "worker ready: $WORKER_URL (http $code)"
           for e in ping pg lite; do curl -sS -m 60 "$WORKER_URL/run?engine=$e&op=read&n=10&seed=0" >/dev/null; done
+          curl -sS -m 30 -A dbbench/1.0 "$WORKER_URL/run?engine=pg&op=read&n=3&seed=5"; echo
           python3 tool/dbbench/load.py
