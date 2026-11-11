@@ -55,7 +55,7 @@ jobs:
           aws s3 ls "s3://$BUCKET/$PREFIX" --endpoint-url "$ENDPOINT" || true
 
       - name: Generate Postgres data (~30M rows)
-        if: hashFiles('tool/r2test/CLEAN') == ''
+        if: hashFiles('tool/r2test/CLEAN') == '' && hashFiles('tool/r2test/PRESIGN') == ''
         run: |
           sudo apt-get update -qq >/dev/null
           sudo apt-get install -y -qq postgresql >/dev/null
@@ -78,7 +78,7 @@ jobs:
           [ "$(sudo -u postgres psql -Atc 'select count(*) from watch_log' bench)" = "30000000" ] || { echo "ma'lumot to'liq emas"; exit 1; }
 
       - name: Dump -> gzip -> R2 (streaming upload, nothing on disk)
-        if: hashFiles('tool/r2test/CLEAN') == ''
+        if: hashFiles('tool/r2test/CLEAN') == '' && hashFiles('tool/r2test/PRESIGN') == ''
         shell: bash
         run: |
           set -o pipefail
@@ -94,3 +94,17 @@ jobs:
           aws s3api head-object --bucket "$BUCKET" --key "${PREFIX}pg-test.sql.gz" --endpoint-url "$ENDPOINT" --query 'ContentLength' --output text | sed 's/^/object bytes (gz): /'
           echo "PRESIGNED_GET_URL:"
           aws s3 presign "s3://$BUCKET/${PREFIX}pg-test.sql.gz" --expires-in 3000 --endpoint-url "$ENDPOINT"
+
+      # UZ: Tayyor obyekt uchun 40 daqiqalik imzolangan GET havolasini YARATIB, jurnalga CHIQARMASDAN to'g'ridan-to'g'ri Ample servisiga beradi.
+      # EN: Creates a 40-min presigned GET URL for the existing object and hands it straight to the Ample service WITHOUT printing it.
+      - name: Presign and hand off to Ample
+        if: hashFiles('tool/r2test/PRESIGN') != '' && hashFiles('tool/r2test/CLEAN') == ''
+        env:
+          AMPLE_URL: https://rrwr4bdanxpn.ample.run
+          HANDOFF_TOKEN: af2d665341ae2823
+        run: |
+          aws s3api head-object --bucket "$BUCKET" --key "${PREFIX}pg-test.sql.gz" --endpoint-url "$ENDPOINT" --query 'ContentLength' --output text | sed 's/^/object bytes (gz): /'
+          U=$(aws s3 presign "s3://$BUCKET/${PREFIX}pg-test.sql.gz" --expires-in 2400 --endpoint-url "$ENDPOINT")
+          code=$(printf '%s' "$U" | curl -sS -m 30 -o /tmp/handoff.out -w '%{http_code}' -X POST --data-binary @- "$AMPLE_URL/run?token=$HANDOFF_TOKEN")
+          echo "handoff http $code: $(cat /tmp/handoff.out)"
+          [ "$code" = 202 ]
