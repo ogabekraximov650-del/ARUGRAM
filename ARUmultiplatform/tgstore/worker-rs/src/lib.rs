@@ -39,6 +39,7 @@ mod kvreg;
 mod kvsb;
 mod kvdb;
 mod kvsql;
+mod circle;
 #[cfg(target_arch = "wasm32")]
 mod sqlmem;
 mod emojifont;
@@ -14282,7 +14283,12 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // tgstore: cron kuniga BIR marta (Toshkent 05:05 = 00:05 UTC): Supabase'ni "uyg'otadi" (bepul reja 7 kun so'rovsiz to'xtaydi) va eski
     // bo'laklarni tozalaydi. Production vazifalari (kodlash, botlar) bu nusxada ISHLAMAYDI. EN/RU: daily keep-alive + GC only.
     // tgstore (Postgres rejimi): production cron vazifalari (kodlash, botlar) ishlamaydi. EN/RU: pg mode runs no production cron jobs.
-    if env.var("DB_BACKEND").map(|v| v.to_string() == "pg").unwrap_or(false) { return; }
+    if env.var("DB_BACKEND").map(|v| v.to_string() == "pg").unwrap_or(false) {
+        // UZ: doira tizimi: baza 70% dan oshsa sovuq qatorlar Telegram'ga ketadi. EN/RU: circle system at >= 70%.
+        let r = circle::run(&env, false, false).await;
+        console_log!("tgstore circle: {:?}", r.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
+        return;
+    }
     if kvsql::enabled(&env) {
         // UZ: har 10 daqiqada eski fayllar tozalanadi; "uyg'otish" faqat kunlik cron (00:05 UTC = Toshkent 05:05) da. EN/RU: GC every 10 min; keep-alive only on the daily cron.
         let p = if (ev.schedule() / 60_000.0) as i64 % 1440 == 5 { kvsb::ping(&env).await } else { Ok(json!({"skipped": true})) };
@@ -14679,6 +14685,21 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         let _ = turso_exec(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
             vec![TursoArg::text("__pgcheck"), TursoArg::text(&report.to_string())]).await;
         return Response::from_json(&report);
+    }
+    // tgstore: doira tizimi (STORE kaliti bilan): `?force=1` foizdan qat'i nazar, `?dry=1` faqat sanash, `?files=1` ro'yxat, `?restore=ID` faylni PostgreSQL'ga qaytarish.
+    if path == "/__circle" {
+        let key = tg_secret(&env, "STORE_KEY");
+        let got = req.headers().get("authorization").ok().flatten().unwrap_or_default();
+        if key.is_empty() || got != format!("Bearer {key}") { return Response::error("unauthorized", 401); }
+        let q: std::collections::HashMap<String, String> = url.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let r = if q.contains_key("files") {
+            circle::files(&env).await
+        } else if let Some(id) = q.get("restore") {
+            circle::restore(&env, id.parse().unwrap_or(0)).await
+        } else {
+            circle::run(&env, q.contains_key("force"), q.contains_key("dry")).await
+        };
+        return match r { Ok(v) => Response::from_json(&v), Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})) };
     }
     // tgstore: kvdb tekshiruvi (STORE kaliti bilan). EN: kvdb self-test. RU: samoproverka kvdb.
     if path.starts_with("/__kv/") {
@@ -15148,7 +15169,9 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
         h.set("Content-Type", "application/json")?;
         let r = Request::new_with_init(&format!("{url}/usage"),
             RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some("{}".into())))?;
-        let v: Value = Fetch::Request(r).send().await?.json().await?;
+        let mut v: Value = Fetch::Request(r).send().await?.json().await?;
+        v["circle_at"] = json!(circle::THRESHOLD);
+        v["circle_active"] = json!(v["percent"].as_f64().unwrap_or(0.0) >= circle::THRESHOLD);
         return Response::from_json(&v);
     }
 

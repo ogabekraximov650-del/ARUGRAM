@@ -27,10 +27,10 @@ thread_local! {
 const META_TTL_MS: i64 = 3000;
 fn now_ms() -> i64 { Date::now().as_millis() as i64 }
 
-fn token(env: &Env) -> String { crate::tg_secret(env, "TELEGRAM_BOT_TOKEN") }
-fn channel(env: &Env) -> i64 { crate::tg_secret(env, "KV_CHANNEL_ID").parse().unwrap_or(0) }
+pub(crate) fn token(env: &Env) -> String { crate::tg_secret(env, "TELEGRAM_BOT_TOKEN") }
+pub(crate) fn channel(env: &Env) -> i64 { crate::tg_secret(env, "KV_CHANNEL_ID").parse().unwrap_or(0) }
 
-fn hex_key(h: &str) -> Result<[u8; 32]> {
+pub(crate) fn hex_key(h: &str) -> Result<[u8; 32]> {
     if h.len() != 64 { return Err(Error::RustError("kalit uzunligi".into())); }
     let mut out = [0u8; 32];
     for i in 0..32 {
@@ -66,7 +66,7 @@ pub async fn meta_all(env: &Env, fresh: bool) -> Result<TableMeta> {
     Ok(t)
 }
 
-async fn download(env: &Env, file_id: &str) -> Result<Vec<u8>> {
+pub(crate) async fn download(env: &Env, file_id: &str) -> Result<Vec<u8>> {
     let token = token(env);
     // UZ: `getFile` natijasi (fayl yo'li) ~1 soat yaroqli — izolyatda eslab qolinadi (ichki chaqiruvlar chegarasini tejaydi). EN/RU: cache getFile paths.
     let cached = PATHS.with(|p| p.borrow().get(file_id).cloned());

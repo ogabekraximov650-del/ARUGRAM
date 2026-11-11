@@ -7285,3 +7285,11 @@ Ilova: paketlab yuborish (`SyncQueue`) 5 daqiqaga o'zgartirildi; yuborilmagan ta
 - **Ample:** darvoza `tgstore-pg-gw` (server `tgstore-reg`ning ichida; Free reja 2 GiB to'lgan), baza `tgstore-pg`. Eski `tgstore-reg` ilovasi o'chirildi.
 - **Xavf:** PG qat'iyroq (GROUP BY, boolean, `rowid`, `strftime`) — xatolar darvoza loglarida (`ample_logs`, "SQL XATO").
 - Telegram bo'lak tizimi (kvdb/kvsql/Supabase) kodda qoladi (zaxira/arxiv uchun), jonli ma'lumot uchun ishlatilmaydi.
+
+## tgstore: doira tizimi (2026-11)
+
+- **Nima:** Ample PostgreSQL hajmi `circle::THRESHOLD` (70%) ga yetsa, cron (har 10 daqiqada) sovuq qatorlarni (eski `billing_log`, `reports_db`, o'chirilgan `comments_db`, eski `sessions_db`, o'chirilgan `watch_history_db`; muddati o'tgan `login_tokens` shunchaki o'chadi) 500 tadan faylga yig'adi, Telegram'ga yuklaydi va PostgreSQL'dan o'chiradi. Fayl formati: **PostgreSQL `COPY ... CSV HEADER`** (NULL — bo'sh, bo'sh satr — `""`), AES-256-GCM bilan shifrlangan; kalit va `file_id` Ample'dagi kichik `arch_files` jadvalida. Ochgach `\copy jadval FROM fayl CSV HEADER` bilan to'g'ridan-to'g'ri yuklanadi.
+- **Tartib (xavfsiz):** Telegram'ga yuklash -> `arch_files` ga yozish -> PostgreSQL'dan o'chirish; bosqich yiqilsa oldingisi qaytariladi.
+- **Yo'llar (STORE kaliti bilan):** `/__circle?force=1&dry=1` (sanash, natija `app_config.__circle` da), `/__circle?files=1` (ro'yxat), `/__circle?restore=ID` (faylni PostgreSQL'ga qaytarish). `/api/admin/db` javobida `circle_at`, `circle_active`.
+- **Fayllar:** `worker-rs/src/circle.rs`. Eski TGK1/Supabase bo'lak tizimi (kvdb) bu yerda ishlatilmaydi.
+- **Qilinmadi (keyingi bosqich):** katta KO'RINADIGAN jadvallar (izoh, tarix, chat) uchun o'qishda arxivdan zaxira yo'li; ular hozir 70% da arxivlanmaydi.
