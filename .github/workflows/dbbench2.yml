@@ -48,6 +48,7 @@ jobs:
           DIRECT=$(printf '%s' "$NEON" | sed 's/-pooler//' | sed 's/?.*$/?sslmode=require/')
           echo "::add-mask::$DIRECT"
           echo "NEON=$NEON" >> "$GITHUB_ENV"
+          echo "NEON_DIRECT=$DIRECT" >> "$GITHUB_ENV"
           # Turso: jonli baza (faqat O'QISH uchun)
           U="${{ secrets.TURSO_URL }}"; T="${{ secrets.TURSO_TOKEN }}"
           if [ -f ../../migrate/new_turso.enc ]; then
@@ -72,10 +73,12 @@ jobs:
             echo 'compatibility_date = "2024-09-23"'
             echo 'compatibility_flags = ["nodejs_compat"]'
             echo 'workers_dev = true'
-            echo '[[d1_databases]]'
-            echo 'binding = "DB"'
-            echo 'database_name = "dbbench-temp"'
-            echo 'database_id = "27d44f20-ae96-491b-9737-ee46c8117a05"'
+            if [ -f ../WITH_D1 ]; then
+              echo '[[d1_databases]]'
+              echo 'binding = "DB"'
+              echo 'database_name = "dbbench-temp"'
+              echo 'database_id = "27d44f20-ae96-491b-9737-ee46c8117a05"'
+            fi
             if [ -n "$HD" ]; then
               echo '[[hyperdrive]]'
               echo 'binding = "HD"'
@@ -89,8 +92,10 @@ jobs:
         working-directory: tool/dbbench2/worker
         run: |
           wrangler deploy 2>&1 | tee /tmp/deploy.log
+          grep -q 'Deployed\|Uploaded' /tmp/deploy.log || { echo "::error::deploy muvaffaqiyatsiz"; exit 1; }
           grep -o 'https://[A-Za-z0-9.-]*workers.dev' /tmp/deploy.log | head -1 > /tmp/url.txt
           printf '%s' "$NEON" | wrangler secret put NEON_URL
+          printf '%s' "$NEON_DIRECT" | wrangler secret put NEON_DIRECT
           printf '%s' "$TURSO_URL" | wrangler secret put TURSO_URL
           printf '%s' "$TURSO_TOKEN" | wrangler secret put TURSO_TOKEN
           echo "URL=$(cat /tmp/url.txt)"

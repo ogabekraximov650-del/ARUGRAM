@@ -29,10 +29,12 @@ export default {
     const op = u.searchParams.get('op') || 'read';
     const n = Math.min(40, Math.max(1, Number(u.searchParams.get('n')) || 40));
     const seed = Number(u.searchParams.get('seed')) || 1;
-    if (!['neon_hd', 'neon_http', 'd1', 'turso'].includes(engine) || !['read', 'write', 'heavy'].includes(op)) {
+    if (!['neon_hd', 'neon_tcp', 'neon_http', 'd1', 'turso'].includes(engine) || !['read', 'write', 'heavy'].includes(op)) {
       return new Response('bad engine/op', { status: 400 });
     }
     if (engine === 'turso' && op === 'write') return Response.json({ engine, op, skipped: 'production DB: write not tested' });
+    if (engine === 'd1' && !env.DB) return Response.json({ engine, op, skipped: 'D1 binding not available (API token lacks D1 permission)' });
+    const usesClient = engine === 'neon_hd' || engine === 'neon_tcp';
 
     const ms = [];
     let errors = 0, lastError = '', connectMs = 0;
@@ -42,6 +44,11 @@ export default {
         if (!env.HD) return Response.json({ engine, op, skipped: 'Hyperdrive not configured' });
         const t0 = Date.now();
         client = new Client({ connectionString: env.HD.connectionString });
+        await client.connect();
+        connectMs = Date.now() - t0;
+      } else if (engine === 'neon_tcp') {
+        const t0 = Date.now();
+        client = new Client({ connectionString: env.NEON_DIRECT });
         await client.connect();
         connectMs = Date.now() - t0;
       } else if (engine === 'neon_http') {
@@ -55,7 +62,7 @@ export default {
       const id = idOf(seed, i);
       const t0 = Date.now();
       try {
-        if (engine === 'neon_hd') {
+        if (usesClient) {
           if (op === 'read') await client.query('select v from t where id = $1', [id]);
           else if (op === 'write') await client.query('update t set v = v + 1 where id = $1', [id]);
           else await client.query('select count(*), sum(v) from t where id between $1 and $1 + 10000', [id]);

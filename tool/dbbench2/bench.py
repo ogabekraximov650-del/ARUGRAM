@@ -26,7 +26,7 @@ def line(label, ms, errs, conn, extra=''):
     print(f"{label:<22} n={len(ms):<4} mean={mean(ms) if ms else float('nan'):>7.1f} p50={pct(ms,.5):>6} p95={pct(ms,.95):>6} p99={pct(ms,.99):>6} err={errs:<3} connect≈{conn:>5.0f}ms {extra}", flush=True)
 
 
-ENGINES = ['neon_hd', 'neon_http', 'd1', 'turso']
+ENGINES = ['neon_tcp', 'neon_http', 'neon_hd', 'd1', 'turso']
 print("== A) Ketma-ket o'lchov (worker ichida, har chaqiruvda 40 so'rov, 5 chaqiruv) ==", flush=True)
 for e in ENGINES:
     for op in ('read', 'write', 'heavy'):
@@ -68,7 +68,7 @@ for e in ENGINES:
 
 print("\n== C) Neon sovuq start (330 s bekor turgach) ==", flush=True)
 time.sleep(330)
-for e in ('neon_hd', 'neon_http'):
+for e in ('neon_tcp', 'neon_http'):
     j, wall = call(e, 'read', n=3, seed=7)
     ms = j.get('ms', [])
     print(f"{e:<12} birinchi so'rovlar (ms): {ms}  ulanish: {j.get('connect_ms')}  umumiy chaqiruv: {wall:.0f} ms  {j.get('error','')}", flush=True)
