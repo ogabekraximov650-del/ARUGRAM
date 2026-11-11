@@ -7227,3 +7227,8 @@ Tegilmadi (allaqachon yetarli): izohlar (`mk/at` -> `same`), chat (`since`), Tar
 ## Kanal hujjati nomida sifat (2026-11)
 
 - Qism videolari kanalda endi `vid_<sifat>_<raqam>_<bo'lak>.bin` (masalan `vid_1080p_17_1.bin`, `vid_720p_18_1.bin`). `worker/src/vd.rs` `doc_prefix` (sifat `ep_<a>_<s>_<e>_<sifat>_...` nomidan olinadi); `claim` javobidagi `kind` shuni beradi, `tool/vd/store.py` o'zgarishsiz ishlatadi. Asl video (`orig_`) `vid_...`, rasm/ovoz/shrift/fayl avvalgidek. Eski hujjatlar nomi o'zgarmadi.
+
+## Kodlashni to'xtatish kaliti `ci/ENCODE_PAUSE` va Bleach 36+ qismlari o'chirildi (2026-11)
+
+- `ci/ENCODE_PAUSE` ichida `1` bo'lsa deploy worker'ga `ENCODE_PAUSE=1` sirini qo'yadi (`deploy-worker.yml`, `worker/src/lib.rs` `encode_paused`): cron yangi run ochmaydi, `/api/encode/claim` va `/peek` ish bermaydi, cron ishlayotgan va navbatdagi run'larni GitHub'dan bekor qiladi (`encode_cancel_runs`). Davom ettirish: fayl ichini `0` qilib push (deploy o'zi ishga tushadi).
+- Bleach (anime 11, bo'lim 1): 35-qismdan keyingi 73 ta qism (36-109) o'chirildi: qism qatori, fayllari (worker `/api/vd/forget`: R2 va kanal xabarlari), kodlash navbati, tomosha tarixi; bo'lim qism soni yangilandi. Qoldi 35 ta qism. Bir martalik yordamchi (`ci/trim_episodes.py`, workflow) ishdan keyin olib tashlandi.
