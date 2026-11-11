@@ -1,0 +1,4 @@
+# Ilova kodining boshlang'ich profili: o'rnatilgach ART bu metodlarni oldindan kompilyatsiya qiladi —
+# ilova tezroq ochiladi va birinchi ishlatishda qotmaydi (kuchsiz telefonlarda ayniqsa seziladi).
+HSPLuz/arumediatv/com/**->**(**)**
+Luz/arumediatv/com/**;

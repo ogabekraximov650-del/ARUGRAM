@@ -1,0 +1,92 @@
+name: tgstore-test worker — testlar, deploy va E2E
+
+# UZ: `ARUmultiplatform/tgstore/worker/**` o'zgarganda: node birlik testlari (DO mantiqi soxta Telegram bilan) ->
+#     (bot.enc + channels.txt bo'lsa) deploy `tgstore-test` worker -> haqiqiy Telegram bilan E2E.
+#     Production `arumediatv` worker'iga TEGILMAYDI. R2 ishlatilmaydi.
+# EN: On changes under `ARUmultiplatform/tgstore/worker/**`: node unit tests (DO logic with a fake Telegram) ->
+#     (when bot.enc + channels.txt exist) deploy the `tgstore-test` worker -> E2E against real Telegram.
+#     The production `arumediatv` worker is NOT touched. No R2.
+# RU: Pri izmenenii `ARUmultiplatform/tgstore/worker/**`: unit-testy node -> (esli est bot.enc + channels.txt) deploy
+#     worker'a `tgstore-test` -> E2E s nastoyashchim Telegram. Produkshn `arumediatv` ne trogaem. R2 net.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/tgstore/worker/**'
+      - 'ARUmultiplatform/tgstore/bot.enc'
+      - 'ARUmultiplatform/tgstore/channels.txt'
+      - '.github/workflows/tgstore-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tgstore-worker
+  cancel-in-progress: false
+
+jobs:
+  test-deploy-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: secret
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/tgstore
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Birlik testlari (soxta Telegram)
+        working-directory: ARUmultiplatform/tgstore/worker
+        run: node --test
+
+      - name: Sirlar tayyormi?
+        id: ready
+        env:
+          BOT_SECRET: ${{ secrets.TGSTORE_BOT_TOKEN }}
+        run: |
+          # UZ: bot tokeni: `bot.enc` (ENCODE_TOKEN bilan shifrlangan) YOKI GitHub Secret `TGSTORE_BOT_TOKEN`. EN: bot token from bot.enc or the secret. RU: token iz bot.enc ili sekreta.
+          if { [ -s bot.enc ] || [ -n "$BOT_SECRET" ]; } && [ -s channels.txt ]; then echo "ok=1" >> "$GITHUB_OUTPUT"; else echo "ok=0" >> "$GITHUB_OUTPUT"; echo "⏭  bot.enc/channels.txt yo'q — deploy o'tkazib yuborildi (faqat birlik testlari)"; fi
+
+      - name: Wrangler
+        if: steps.ready.outputs.ok == '1'
+        run: npm install -g wrangler
+
+      - name: Deploy va sirlar
+        if: steps.ready.outputs.ok == '1'
+        working-directory: ARUmultiplatform/tgstore/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          BOT_SECRET: ${{ secrets.TGSTORE_BOT_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          if [ -n "$BOT_SECRET" ]; then BOT=$(printf '%s' "$BOT_SECRET" | tr -d '[:space:]')
+          else BOT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../bot.enc | tr -d '[:space:]'); fi
+          echo "::add-mask::$BOT"
+          [ -n "$BOT" ] || { echo "❌ bot.enc ochilmadi"; exit 1; }
+          CH=$(grep -E '^CHANNEL_ID=' ../channels.txt | head -1 | cut -d= -f2- | tr -d '[:space:]')
+          MR=$(grep -E '^MIRROR_CHANNEL_ID=' ../channels.txt | head -1 | cut -d= -f2- | tr -d '[:space:]')
+          [ -n "$CH" ] || { echo "❌ channels.txt da CHANNEL_ID yo'q"; exit 1; }
+          # Ilova va E2E uchun kalit: ENCODE_TOKEN dan hosil qilinadi (alohida sir saqlanmaydi).
+          SK=$(printf '%s' "$K:tgstore" | sha256sum | cut -c1-32)
+          echo "::add-mask::$SK"
+          wrangler deploy
+          printf '%s' "$BOT" | wrangler secret put BOT_TOKEN
+          printf '%s' "$CH" | wrangler secret put CHANNEL_ID
+          if [ -n "$MR" ]; then printf '%s' "$MR" | wrangler secret put MIRROR_CHANNEL_ID; else wrangler secret delete MIRROR_CHANNEL_ID --force || true; fi
+          printf '%s' "$SK" | wrangler secret put STORE_KEY
+          echo "KEY=$SK" >> "$GITHUB_ENV"
+
+      - name: E2E (haqiqiy Telegram + Cloudflare)
+        if: steps.ready.outputs.ok == '1'
+        working-directory: ARUmultiplatform/tgstore/worker
+        env:
+          URL: https://tgstore-test.uzcom.workers.dev
+        run: |
+          for i in $(seq 1 12); do curl -fsS "$URL/health" >/dev/null 2>&1 && break; sleep 5; done
+          node e2e/run.mjs

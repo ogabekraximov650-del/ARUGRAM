@@ -1,0 +1,15 @@
+# UZ: Alohida TEST worker (production `arumediatv` ga tegmaydi). R2 YO'Q: ma'lumot = Telegram kanal bo'laklari + Cloudflare kesh.
+# EN: Separate TEST worker (does not touch production `arumediatv`). NO R2: data = Telegram channel chunks + Cloudflare cache.
+# RU: Otdelnyy TEST-worker (produkshn `arumediatv` ne trogaem). BEZ R2: dannye = chanki v Telegram-kanale + kesh Cloudflare.
+name = "tgstore-test"
+main = "src/index.js"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[durable_objects.bindings]]
+name = "TABLE"
+class_name = "TableDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["TableDO"]

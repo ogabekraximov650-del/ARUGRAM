@@ -7232,3 +7232,19 @@ Tegilmadi (allaqachon yetarli): izohlar (`mk/at` -> `same`), chat (`since`), Tar
 
 - `ci/ENCODE_PAUSE` ichida `1` bo'lsa deploy worker'ga `ENCODE_PAUSE=1` sirini qo'yadi (`deploy-worker.yml`, `worker/src/lib.rs` `encode_paused`): cron yangi run ochmaydi, `/api/encode/claim` va `/peek` ish bermaydi, cron ishlayotgan va navbatdagi run'larni GitHub'dan bekor qiladi (`encode_cancel_runs`). Davom ettirish: fayl ichini `0` qilib push (deploy o'zi ishga tushadi).
 - Bleach (anime 11, bo'lim 1): 35-qismdan keyingi 73 ta qism (36-109) o'chirildi: qism qatori, fayllari (worker `/api/vd/forget`: R2 va kanal xabarlari), kodlash navbati, tomosha tarixi; bo'lim qism soni yangilandi. Qoldi 35 ta qism. Bir martalik yordamchi (`ci/trim_episodes.py`, workflow) ishdan keyin olib tashlandi.
+
+## tgstore — Telegram bo'laklar bazasi (TEST, R2 yo'q) — 2026-11
+
+**Nima:** `ARUmultiplatform/tgstore/` — alohida test tizimi (production `arumediatv` ga tegmaydi).
+- `worker/` (JS, worker nomi `tgstore-test`): jadval = bitta SQLite Durable Object (indeks kalit -> bo'lak). Yozuvlar ~1 MB bo'laklarda
+  (`DBP_<jadval>_<no>_v<versiya>`), Telegram Bot API (`sendDocument`/`getFile`) orqali CHANNEL_ID kanalida saqlanadi. To'lgan bo'lak muhrlanadi
+  (faqat tahrir/o'chirish). Yozish guruh-commit (bir vaqtdagi so'rovlar bitta yuklashga birlashadi), tahrirda yangi versiya yuklanadi, eskisi
+  ~2 daqiqadan keyin o'chiriladi (GC). O'qish: Cloudflare Cache API (`/c/<jadval>/<no>/<ver>` o'zgarmas URL) -> izolyat LRU -> Telegram.
+  Zaxira: har bo'lak MIRROR_CHANNEL_ID ga `copyMessage` qilinadi, bo'laklar jadvali `DBP_<jadval>_index.json` sifatida u yerda qadab qo'yiladi;
+  `/restore` shundan holatni tiklaydi (asosiy kanal yo'qolsa zerkal nusxadan).
+- `android/` — `ARUmultiplatform/android` nusxasi, paket `uz.arumediatv.tgstore`, ishga tushuvchi ekran `TgStoreActivity` (yozish/o'qish/tahrir/o'chirish/GC/zaxira/tiklash).
+  Ilova qaysi yozuv qaysi bo'lakda ekanini eslab qoladi va bo'lakni diskda saqlaydi.
+- Sinovlar: `worker/test` (node --test: sof mantiq + DO soxta Telegram bilan), `worker/e2e/run.mjs` (haqiqiy worker), Kotlin `ChunkCodecTest`.
+- Workflow'lar: `tgstore-worker.yml` (test -> deploy -> E2E), `tgstore-android.yml` (APK). Kalit: `sha256(ENCODE_TOKEN:tgstore)[:32]` (STORE_KEY).
+- Maxfiy: bot tokeni `ARUmultiplatform/tgstore/bot.enc` (ENCODE_TOKEN bilan) YOKI GitHub Secret `TGSTORE_BOT_TOKEN`; kanal ID'lari `channels.txt`.
+- Ochiq savol: `workers.dev` da Cache API ishlamasligi mumkin — E2E "kesh" qadami `x-src` ni ko'rsatadi (izolyat/kesh/telegram); ishlamasa maxsus domen kerak.
