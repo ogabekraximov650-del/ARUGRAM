@@ -137,14 +137,21 @@ jobs:
       - name: SQL ko'prigi (production sxemasi va turso_* chaqiruvlari bo'laklar ustida)
         if: env.SB == '1'
         run: |
+          # UZ: Cloudflare bitta so'rovda cheklangan ichki chaqiruv beradi — sinov bosqichlarga bo'lingan. EN/RU: phases keep each call under the subrequest limit.
           URL=https://tgstore-rs.uzcom.workers.dev
-          S=$(date +%s)
-          curl -sS -m 300 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__kv/sqltest" | tee /tmp/sql.json; echo
-          echo "devor vaqti: $(( $(date +%s) - S )) s"
-          python3 - <<'PY'
+          FAIL=0
+          for PH in init write update config delete; do
+            S=$(date +%s)
+            curl -sS -m 300 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__kv/sqltest?phase=$PH" -o /tmp/sql_$PH.json || true
+            echo "── bosqich: $PH ($(( $(date +%s) - S )) s)"
+            python3 - "$PH" <<'PY' || FAIL=1
           import json,sys
-          j=json.load(open('/tmp/sql.json'))
+          ph=sys.argv[1]
+          try: j=json.load(open('/tmp/sql_%s.json'%ph))
+          except Exception as e: print('XATO javob JSON emas:', open('/tmp/sql_%s.json'%ph).read()[:300]); sys.exit(1)
           for s in j.get('steps',[]): print(('OK  ' if s['ok'] else 'XATO'), s['step'], '-', s['note'])
           if 'error' in j: print('XATO', j['error'])
           sys.exit(0 if j.get('ok') else 1)
           PY
+          done
+          exit $FAIL

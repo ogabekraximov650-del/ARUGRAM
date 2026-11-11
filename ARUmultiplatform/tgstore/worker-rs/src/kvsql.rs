@@ -26,6 +26,8 @@ thread_local! {
     /// UZ: sxema: (jadval, DDL) ro'yxati, bajarilgan tartibda. EN: schema (table, DDL) in execution order. RU: skhema.
     static SCHEMA: RefCell<Vec<(String, String)>> = RefCell::new(Vec::new());
     static READY: RefCell<bool> = RefCell::new(false);
+    /// UZ: sxema yaratilayotganda faqat DDL bajariladi, DML o'tkazib yuboriladi (bo'sh baza + ichki chaqiruvlar chegarasi). EN/RU: DDL-only while creating the schema.
+    static DDL_ONLY: RefCell<bool> = RefCell::new(false);
 }
 
 // ── Sof yordamchilar (native testlar) / Pure helpers (native tests) / Chistye pomoshchniki ──────────────────────────────
@@ -226,6 +228,12 @@ fn dump(m: &Mem, table: &str, has_pk: bool) -> Result<BTreeMap<String, Value>> {
 /// UZ: buyruqlar paketini bajaradi (Turso `pipeline` o'rniga). Har buyruqqa bitta Turso-shakldagi natija. EN/RU: runs a batch of statements.
 #[cfg(target_arch = "wasm32")]
 pub async fn run(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value>> {
+    let ddl_only = DDL_ONLY.with(|d| *d.borrow());
+    if ddl_only {
+        let mut out = Vec::new();
+        for (sql, _) in stmts { out.push(if is_ddl(sql) { run_ddl(sql)? } else { to_turso(&[], &[], 0, false) }); }
+        return Ok(out);
+    }
     if !stmts.iter().any(|(s, _)| is_ddl(s)) {
         return run_dml(env, stmts).await;
     }
@@ -323,7 +331,9 @@ pub async fn ensure_schema(env: &Env, mark: &str, init: impl std::future::Future
     }
     // UZ: yangi kod/sxema — init_db DDL larni `run` orqali sxemaga yozadi, keyin saqlaymiz. EN/RU: first run for this code version.
     SCHEMA.with(|s| s.borrow_mut().clear());
+    DDL_ONLY.with(|d| *d.borrow_mut() = true);
     let ok = init.await;
+    DDL_ONLY.with(|d| *d.borrow_mut() = false);
     if ok {
         let ddl = SCHEMA.with(|s| s.borrow().clone());
         let row = json!({"hash": mark, "ddl": ddl});
@@ -333,54 +343,67 @@ pub async fn ensure_schema(env: &Env, mark: &str, init: impl std::future::Future
     ok
 }
 
-/// UZ: `/__kv/sqltest` — haqiqiy production sxemasi va `turso_*` chaqiruvlari bo'laklar ustida: yozish, JOIN, GROUP BY, LIKE, UPDATE, DELETE.
-/// EN/RU: end-to-end test of the SQL bridge using the real production schema and `turso_*` calls.
-pub async fn sqltest(env: &Env) -> Result<Value> {
+/// UZ: `/__kv/sqltest?phase=...` — haqiqiy production sxemasi va `turso_*` chaqiruvlari bo'laklar ustida. Bosqichlarga bo'lingan: Cloudflare bitta
+///     so'rovda cheklangan miqdorda ichki chaqiruv (subrequest) beradi. Bosqichlar: init, write, update, config, delete.
+/// EN/RU: end-to-end test of the SQL bridge, split into phases to stay under the per-invocation subrequest limit.
+pub async fn sqltest(env: &Env, phase: &str) -> Result<Value> {
     crate::ensure_db(env).await;
     let mut steps: Vec<Value> = Vec::new();
     let mut rec = |name: &str, ok: bool, note: String| steps.push(json!({"step": name, "ok": ok, "note": note}));
     let base = 900_000i64;
-    let pad = "x".repeat(6000);
-    let mut ins: Vec<(String, Vec<TursoArg>)> = Vec::new();
-    for i in 0..250i64 {
-        ins.push(("INSERT INTO anime_db(id,name,davlat,tavsif) VALUES(?,?,?,?)".to_string(),
-            vec![TursoArg::int(base + i), TursoArg::text(&format!("Test anime {i} ўзбек")), TursoArg::text("Xitoy"), TursoArg::text(&pad)]));
+    let range = || vec![TursoArg::int(base), TursoArg::int(base + 1000)];
+    match phase {
+        "init" => {
+            let m = crate::kvdb::meta(env, "_schema").await?;
+            rec("sxema saqlangan (_schema)", !m.chunks.is_empty(), format!("{} bo'lak", m.chunks.len()));
+        }
+        "write" => {
+            let pad = "x".repeat(6000);
+            let mut ins: Vec<(String, Vec<TursoArg>)> = Vec::new();
+            for i in 0..250i64 {
+                ins.push(("INSERT INTO anime_db(id,name,davlat,tavsif) VALUES(?,?,?,?)".to_string(),
+                    vec![TursoArg::int(base + i), TursoArg::text(&format!("Test anime {i} ўзбек")), TursoArg::text("Xitoy"), TursoArg::text(&pad)]));
+            }
+            let refs: Vec<(&str, Vec<TursoArg>)> = ins.iter().map(|(s, a)| (s.as_str(), a.clone())).collect();
+            let w = crate::turso_batch(env, &refs).await;
+            rec("250 qator INSERT (bitta paket)", w.is_ok(), format!("{:?}", w.as_ref().err().map(|e| e.to_string())));
+            let c = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db WHERE id>=? AND id<?", range()).await;
+            rec("COUNT = 250", matches!(&c, Ok(v) if crate::scalar(v) == 250), format!("{:?}", c.as_ref().map(|v| crate::scalar(v)).map_err(|e| e.to_string())));
+            let m = crate::kvdb::meta(env, "anime_db").await?;
+            rec("anime_db bo'laklarga bo'lingan (>=2)", m.chunks.len() >= 2, format!("{} bo'lak", m.chunks.len()));
+            let l = crate::turso_exec(env, "SELECT id,name FROM anime_db WHERE name LIKE ? AND id>=? ORDER BY id DESC LIMIT 3", vec![TursoArg::text("Test anime%ўзбек"), TursoArg::int(base)]).await;
+            let ok_l = matches!(&l, Ok(v) if v["rows"].as_array().map_or(false, |r| r.len() == 3) && v["rows"][0][0]["value"] == json!((base + 249).to_string()));
+            rec("LIKE + ORDER BY DESC LIMIT", ok_l, String::new());
+        }
+        "update" => {
+            let u = crate::turso_exec(env, "UPDATE anime_db SET davlat=? WHERE id>=? AND id<?", vec![TursoArg::text("Yaponiya"), TursoArg::int(base), TursoArg::int(base + 10)]).await;
+            rec("UPDATE 10 qator", matches!(&u, Ok(v) if v["rows_written"] == json!(10)), format!("{:?}", u.as_ref().map(|v| v["rows_written"].clone()).map_err(|e| e.to_string())));
+            let g = crate::turso_exec(env, "SELECT davlat, COUNT(*) c FROM anime_db WHERE id>=? AND id<? GROUP BY davlat ORDER BY c DESC", range()).await;
+            let ok_g = matches!(&g, Ok(v) if v["rows"][0][0]["value"] == json!("Xitoy") && v["rows"][0][1]["value"] == json!("240") && v["rows"][1][1]["value"] == json!("10"));
+            rec("GROUP BY natijasi 240/10", ok_g, format!("{:?}", g.as_ref().map(|v| v["rows"].to_string()).map_err(|e| e.to_string())));
+            let j = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db a JOIN anime_db b ON a.id=b.id WHERE a.id>=? AND a.id<?", range()).await;
+            rec("JOIN (o'zi bilan)", matches!(&j, Ok(v) if crate::scalar(v) == 250), String::new());
+        }
+        "config" => {
+            crate::config_put(env, "kv_selftest", "salom").await;
+            let cg = crate::config_get_db(env, "kv_selftest").await;
+            rec("app_config yozish/o'qish", cg.as_deref() == Some("salom"), format!("{cg:?}"));
+            let _ = crate::turso_exec(env, "DELETE FROM app_config WHERE cfg_key=?", vec![TursoArg::text("kv_selftest")]).await;
+            let cg2 = crate::config_get_db(env, "kv_selftest").await;
+            rec("app_config o'chirish", cg2.is_none(), format!("{cg2:?}"));
+        }
+        "delete" => {
+            let d = crate::turso_exec(env, "DELETE FROM anime_db WHERE id>=? AND id<?", vec![TursoArg::int(base + 240), TursoArg::int(base + 1000)]).await;
+            let c2 = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db WHERE id>=? AND id<?", range()).await;
+            rec("DELETE 10 -> 240 qoladi", d.is_ok() && matches!(&c2, Ok(v) if crate::scalar(v) == 240), format!("{:?}", c2.as_ref().map(|v| crate::scalar(v)).map_err(|e| e.to_string())));
+            let _ = crate::turso_exec(env, "DELETE FROM anime_db WHERE id>=? AND id<?", range()).await;
+            let c3 = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db WHERE id>=? AND id<?", range()).await;
+            rec("tozalash: 0 qator", matches!(&c3, Ok(v) if crate::scalar(v) == 0), String::new());
+        }
+        other => rec("noma'lum bosqich", false, other.to_string()),
     }
-    let refs: Vec<(&str, Vec<TursoArg>)> = ins.iter().map(|(s, a)| (s.as_str(), a.clone())).collect();
-    let w = crate::turso_batch(env, &refs).await;
-    rec("250 qator INSERT (bitta paket)", w.is_ok(), format!("{:?}", w.as_ref().err().map(|e| e.to_string())));
-
-    let c = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db WHERE id>=? AND id<?", vec![TursoArg::int(base), TursoArg::int(base + 1000)]).await;
-    rec("COUNT = 250", matches!(&c, Ok(v) if crate::scalar(v) == 250), format!("{:?}", c.as_ref().map(|v| crate::scalar(v)).map_err(|e| e.to_string())));
-    let m = crate::kvdb::meta(env, "anime_db").await?;
-    rec("anime_db bo'laklarga bo'lingan (>=2)", m.chunks.len() >= 2, format!("{} bo'lak", m.chunks.len()));
-
-    let l = crate::turso_exec(env, "SELECT id,name FROM anime_db WHERE name LIKE ? AND id>=? ORDER BY id DESC LIMIT 3", vec![TursoArg::text("Test anime%ўзбек"), TursoArg::int(base)]).await;
-    let ok_l = matches!(&l, Ok(v) if v["rows"].as_array().map_or(false, |r| r.len() == 3) && v["rows"][0][0]["value"] == json!((base + 249).to_string()));
-    rec("LIKE + ORDER BY DESC LIMIT", ok_l, String::new());
-
-    let u = crate::turso_exec(env, "UPDATE anime_db SET davlat=? WHERE id>=? AND id<?", vec![TursoArg::text("Yaponiya"), TursoArg::int(base), TursoArg::int(base + 10)]).await;
-    rec("UPDATE 10 qator", u.is_ok(), format!("{:?}", u.as_ref().map(|v| v["rows_written"].clone()).map_err(|e| e.to_string())));
-    let g = crate::turso_exec(env, "SELECT davlat, COUNT(*) c FROM anime_db WHERE id>=? AND id<? GROUP BY davlat ORDER BY c DESC", vec![TursoArg::int(base), TursoArg::int(base + 1000)]).await;
-    let ok_g = matches!(&g, Ok(v) if v["rows"][0][0]["value"] == json!("Xitoy") && v["rows"][0][1]["value"] == json!("240") && v["rows"][1][1]["value"] == json!("10"));
-    rec("GROUP BY natijasi 240/10", ok_g, format!("{:?}", g.as_ref().map(|v| v["rows"].to_string()).map_err(|e| e.to_string())));
-
-    let j = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db a JOIN anime_db b ON a.id=b.id WHERE a.id>=? AND a.id<?", vec![TursoArg::int(base), TursoArg::int(base + 1000)]).await;
-    rec("JOIN (o'zi bilan)", matches!(&j, Ok(v) if crate::scalar(v) == 250), String::new());
-
-    crate::config_put(env, "kv_selftest", "salom").await;
-    let cg = crate::config_get_db(env, "kv_selftest").await;
-    rec("app_config yozish/o'qish", cg.as_deref() == Some("salom"), format!("{cg:?}"));
-
-    let d = crate::turso_exec(env, "DELETE FROM anime_db WHERE id>=? AND id<?", vec![TursoArg::int(base + 240), TursoArg::int(base + 1000)]).await;
-    let c2 = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db WHERE id>=? AND id<?", vec![TursoArg::int(base), TursoArg::int(base + 1000)]).await;
-    rec("DELETE 10 -> 240 qoladi", d.is_ok() && matches!(&c2, Ok(v) if crate::scalar(v) == 240), String::new());
-
-    // tozalash / cleanup / ochistka
-    let _ = crate::turso_exec(env, "DELETE FROM anime_db WHERE id>=? AND id<?", vec![TursoArg::int(base), TursoArg::int(base + 1000)]).await;
-    let _ = crate::turso_exec(env, "DELETE FROM app_config WHERE cfg_key=?", vec![TursoArg::text("kv_selftest")]).await;
     let ok = steps.iter().all(|s| s["ok"] == json!(true));
-    Ok(json!({"ok": ok, "steps": steps}))
+    Ok(json!({"ok": ok, "phase": phase, "steps": steps}))
 }
 
 #[cfg(test)]

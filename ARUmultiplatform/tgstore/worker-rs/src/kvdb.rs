@@ -19,6 +19,7 @@ thread_local! {
     /// UZ: ochilgan bo'laklar (nom -> ko'rinish); nom o'zgarmas versiyali, shuning uchun eskirmaydi. EN: opened chunks by immutable name. RU: otkrytye chanki.
     static HOT: RefCell<HashMap<String, Rc<View>>> = RefCell::new(HashMap::new());
     /// UZ: ro'yxat nusxasi (jadval -> (ro'yxat, olingan vaqt)). O'qish shundan; yozish HAR DOIM yangisini oladi. EN/RU: registry cache for reads.
+    static PATHS: RefCell<HashMap<String, String>> = RefCell::new(HashMap::new());
     static METAS: RefCell<HashMap<String, (TableMeta, i64)>> = RefCell::new(HashMap::new());
 }
 
@@ -78,8 +79,17 @@ pub async fn metas(env: &Env, tables: &[String], fresh: bool) -> Result<std::col
 
 async fn download(env: &Env, file_id: &str) -> Result<Vec<u8>> {
     let token = token(env);
-    let f = crate::tg_api_tok(&token, "getFile", json!({"file_id": file_id})).await?;
-    let path = f["file_path"].as_str().unwrap_or("").to_string();
+    // UZ: `getFile` natijasi (fayl yo'li) ~1 soat yaroqli — izolyatda eslab qolinadi (ichki chaqiruvlar chegarasini tejaydi). EN/RU: cache getFile paths.
+    let cached = PATHS.with(|p| p.borrow().get(file_id).cloned());
+    let path = match cached {
+        Some(p) => p,
+        None => {
+            let f = crate::tg_api_tok(&token, "getFile", json!({"file_id": file_id})).await?;
+            let p = f["file_path"].as_str().unwrap_or("").to_string();
+            if !p.is_empty() { PATHS.with(|c| { let mut c = c.borrow_mut(); if c.len() > 512 { c.clear(); } c.insert(file_id.to_string(), p.clone()); }); }
+            p
+        }
+    };
     if path.is_empty() { return err("Telegram fayl yo'lini bermadi"); }
     let mut r = Fetch::Request(Request::new(&format!("https://api.telegram.org/file/bot{token}/{path}"), Method::Get)?).send().await?;
     if r.status_code() != 200 { return err(format!("Telegram yuklash {}", r.status_code())); }

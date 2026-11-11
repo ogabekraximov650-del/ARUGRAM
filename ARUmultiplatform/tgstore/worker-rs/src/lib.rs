@@ -14651,7 +14651,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 Ok(v) => Response::from_json(&v),
                 Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),
             },
-            "/__kv/sqltest" => match kvsql::sqltest(&env).await {
+            "/__kv/sqltest" => match kvsql::sqltest(&env, &url.query_pairs().find(|(k, _)| k == "phase").map(|(_, v)| v.to_string()).unwrap_or_default()).await {
                 Ok(v) => Response::from_json(&v),
                 Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),
             },
