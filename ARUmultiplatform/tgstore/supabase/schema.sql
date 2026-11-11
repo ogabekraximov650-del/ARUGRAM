@@ -220,3 +220,5 @@ end $$;
 
 revoke all on function kv_wipe_take(text, int), kv_wipe_done(text, bigint[], boolean), kv_drop_table(text, text) from public;
 grant execute on function kv_wipe_take(text, int), kv_wipe_done(text, bigint[], boolean), kv_drop_table(text, text) to anon, authenticated, service_role;
+
+-- UZ: kv_wipe_done "where true" bilan yangilandi (Supabase shartsiz DELETE ni bloklaydi).
