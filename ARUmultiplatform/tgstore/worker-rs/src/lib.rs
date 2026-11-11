@@ -14283,7 +14283,7 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // bo'laklarni tozalaydi. Production vazifalari (kodlash, botlar) bu nusxada ISHLAMAYDI. EN/RU: daily keep-alive + GC only.
     if kvsql::enabled(&env) {
         // UZ: har 10 daqiqada eski fayllar tozalanadi; "uyg'otish" faqat kunlik cron (00:05 UTC = Toshkent 05:05) da. EN/RU: GC every 10 min; keep-alive only on the daily cron.
-        let p = if (ev.scheduled_time() / 60_000.0) as i64 % 1440 == 5 { kvsb::ping(&env).await } else { Ok(json!({"skipped": true})) };
+        let p = if (ev.schedule() / 60_000.0) as i64 % 1440 == 5 { kvsb::ping(&env).await } else { Ok(json!({"skipped": true})) };
         let g = kvdb::gc(&env).await;
         console_log!("tgstore cron: ping={:?} gc={:?}", p.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()), g.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
         return;
