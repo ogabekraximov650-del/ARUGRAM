@@ -7248,3 +7248,15 @@ Tegilmadi (allaqachon yetarli): izohlar (`mk/at` -> `same`), chat (`since`), Tar
 - Workflow'lar: `tgstore-worker.yml` (test -> deploy -> E2E), `tgstore-android.yml` (APK). Kalit: `sha256(ENCODE_TOKEN:tgstore)[:32]` (STORE_KEY).
 - Maxfiy: bot tokeni `ARUmultiplatform/tgstore/bot.enc` (ENCODE_TOKEN bilan) YOKI GitHub Secret `TGSTORE_BOT_TOKEN`; kanal ID'lari `channels.txt`.
 - Ochiq savol: `workers.dev` da Cache API ishlamasligi mumkin — E2E "kesh" qadami `x-src` ni ko'rsatadi (izolyat/kesh/telegram); ishlamasa maxsus domen kerak.
+
+## tgstore-rs — production Rust workerning nusxasi, bazasi Telegram bo'laklarida (2026-11)
+
+**Nima:** `ARUmultiplatform/tgstore/worker-rs/` — `worker/` nusxasi (worker nomi `tgstore-rs`, cron YO'Q), `DB_BACKEND=kv`: `turso_exec/batch/many` Turso o'rniga `kvsql.rs` ga ketadi.
+- `kvfmt.rs` — bo'lak fayli: ikkilik, kalit bo'yicha tartiblangan mundarija + MessagePack, har bo'lak versiyasiga alohida AES-256-GCM kalit; ~1 MB dan oshsa teng ikkiga bo'linadi.
+- `kvreg.rs` — Durable Object `KvRegistry`: FAQAT bo'lak nomi, `file_id`, ochish kaliti, kalit oralig'i (ma'lumot YO'Q); CAS (`rev`), eski versiyalar GC navbati.
+- `kvdb.rs` — o'qish (xotira -> Cloudflare keshi -> Telegram), yozish (bo'lakni ochish -> o'zgartirish -> shifrlab yuklash -> CAS), `scan`, `snapshot`, GC.
+- `kvsql.rs` — SQL ko'prigi: jadvallar bo'laklardan xotiradagi SQLite'ga (`sqlmem.rs`, `sqlite-wasm-rs`) yuklanadi, production SQL o'zgarishsiz bajariladi, o'zgargan qatorlar farqi (`diff`) bo'laklarga qaytadi. Har jadval = alohida bo'laklar. Sxema (DDL) `_schema` jadvalida.
+- R2 faqat fayl/rasm/video uchun, `R2_PREFIX=tgstore/` prefiksida (baza R2'da emas). Telegram: baza bo'laklari `KV_CHANNEL_ID` (Database kanali), videolar `TG_CHANNEL_ID`/`VD_CHANNEL_ID` (Fayl kanali).
+- Tekshiruv: `tgstore-rs.yml` -> `cargo test` (18 ta), `/__sqlcheck`, `/__kv/selftest`, `/__kv/sqltest` (haqiqiy Telegram bilan).
+
+**Ma'lum cheklovlar:** (1) har yozish = 1 ta Telegram yuklash; Telegram ~20 xabar/daqiqa chegarasi (`429 retry after`) — yozuvlarni birlashtiruvchi navbat kerak; (2) jadvallararo tranzaksiya yo'q (bir paketdagi jadvallar ketma-ket saqlanadi); (3) katta jadvallar worker xotirasiga (128 MB) sig'ishi kerak; (4) Turso'dan ma'lumot ko'chirilmagan (baza bo'sh).
