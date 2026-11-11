@@ -34,6 +34,8 @@ aes-gcm = "0.10"
 # tgstore: xotiradagi SQLite (WASM) — production SQL o'zgarishsiz bajariladi. Faqat wasm32 da.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sqlite-wasm-rs = { version = "0.6", features = ["wasm-bindgen"] }
+# UZ: aes-gcm tortadigan getrandom 0.2 WASM'da `js` ni talab qiladi. EN: getrandom 0.2 (via aes-gcm) needs `js` on WASM. RU: getrandom 0.2 trebuet `js` v WASM.
+getrandom = { version = "0.2", features = ["js"] }
 
 [profile.release]
 # WASM hajmini kamaytirish va tezlikni oshirish
