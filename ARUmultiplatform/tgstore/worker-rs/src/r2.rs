@@ -95,7 +95,9 @@ fn signed_url(env: &Env, method: &str, file: &str, expires: i64) -> Option<Strin
         return None;
     }
     let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
-    Some(presign(method, &host, &format!("/arumediatv/{file}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
+    // UZ: tgstore test tizimi R2 da alohida prefiksda ishlaydi (`R2_PREFIX`, production fayllari bilan aralashmaydi). EN/RU: test-system key prefix.
+    let pfx = tg_secret(env, "R2_PREFIX");
+    Some(presign(method, &host, &format!("/arumediatv/{pfx}{file}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
         &tg_secret(env, "R2_SECRET_ACCESS_KEY"), "auto", &amz_date(now_ms()), expires))
 }
 
@@ -105,7 +107,8 @@ pub(crate) fn signed_key(env: &Env, method: &str, key: &str, expires: i64) -> Op
         return None;
     }
     let host = format!("{}.r2.cloudflarestorage.com", tg_secret(env, "R2_ACCOUNT_ID"));
-    Some(presign(method, &host, &format!("/arumediatv/{key}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
+    let pfx = tg_secret(env, "R2_PREFIX");
+    Some(presign(method, &host, &format!("/arumediatv/{pfx}{key}"), &tg_secret(env, "R2_ACCESS_KEY_ID"),
         &tg_secret(env, "R2_SECRET_ACCESS_KEY"), "auto", &amz_date(now_ms()), expires))
 }
 

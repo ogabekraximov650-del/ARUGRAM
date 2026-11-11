@@ -12,6 +12,8 @@ command = "cargo install -q worker-build && worker-build --release"
 [vars]
 # UZ: baza = Telegram bo'laklari (Turso EMAS). EN: DB backend = Telegram chunks (not Turso). RU: baza = chanki Telegram.
 DB_BACKEND = "kv"
+# UZ: R2 yo'llari alohida prefiksda (production bilan aralashmaydi). EN: R2 keys under their own prefix. RU: klyuchi R2 pod svoim prefiksom.
+R2_PREFIX = "tgstore/"
 
 [ai]
 binding = "AI"

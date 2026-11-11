@@ -74,6 +74,12 @@ jobs:
           printf '%s' "$DB" | wrangler secret put KV_CHANNEL_ID
           printf '%s' "$FL" | wrangler secret put TG_CHANNEL_ID
           printf '%s' "$FL" | wrangler secret put VD_CHANNEL_ID
+          # UZ: R2 (faqat fayl/rasm/video; baza R2'da EMAS) — production bilan bir xil kalitlar, lekin `tgstore/` prefiksida. EN/RU: R2 keys, own prefix.
+          printf '%s' "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" | tr -d '[:space:]' | wrangler secret put R2_ACCOUNT_ID
+          if [ -f ../../../tool/r2/r2_keys.enc ]; then
+            R2K=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../../../tool/r2/r2_keys.enc 2>/dev/null | tr -d '[:space:]' || true)
+            case "$R2K" in *:*) printf '%s' "${R2K%%:*}" | wrangler secret put R2_ACCESS_KEY_ID; printf '%s' "${R2K#*:}" | wrangler secret put R2_SECRET_ACCESS_KEY ;; esac
+          fi
           # UZ: ilova so'rov imzosi production bilan bir xil bo'lishi uchun. EN: same app-signature secret as production. RU: tot zhe sekret podpisi.
           if [ -n "$APP_SIGN_SECRET" ]; then printf '%s' "$APP_SIGN_SECRET" | wrangler secret put APP_SIGN_SECRET; fi
           echo "KEY=$SK" >> "$GITHUB_ENV"
