@@ -14307,6 +14307,10 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // bo'laklarni tozalaydi. Production vazifalari (kodlash, botlar) bu nusxada ISHLAMAYDI. EN/RU: daily keep-alive + GC only.
     // tgstore (Postgres rejimi): production cron vazifalari (kodlash, botlar) ishlamaydi. EN/RU: pg mode runs no production cron jobs.
     if env.var("DB_BACKEND").map(|v| v.to_string() == "pg").unwrap_or(false) {
+        // UZ: har daqiqada Ample'ga yengil so'rov: server 60 soniya bo'sh tursa uxlab qoladi va birinchi foydalanuvchi uyg'onishni kutadi. Og'ir ishlar har 5 daqiqada.
+        // EN/RU: a light ping every minute keeps Ample awake (no cold-start wait); heavy jobs only every 5th minute.
+        let _ = circle::usage(&env).await;
+        if (ev.schedule() / 60_000.0) as i64 % 5 != 0 { return; }
         // UZ: doira tizimi: baza 70% dan oshsa sovuq qatorlar Telegram'ga ketadi. EN/RU: circle system at >= 70%.
         let r = circle::run(&env, false, false).await;
         console_log!("tgstore circle: {:?}", r.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
@@ -14715,6 +14719,23 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         // UZ: natija `app_config` ga ham yoziladi (CI logi ko'rinmasa ham o'qish mumkin). EN/RU: result also stored in app_config.
         let _ = turso_exec(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
             vec![TursoArg::text(&format!("__pgcheck{part}")), TursoArg::text(&report.to_string())]).await;
+        return Response::from_json(&report);
+    }
+    // tgstore: kechikish o'lchovi (STORE kaliti bilan): Worker'dan Ample'ga ketma-ket 10 ta `SELECT 1` (ms). EN/RU: Worker -> Ample latency probe.
+    if path == "/__latency" {
+        let key = tg_secret(&env, "STORE_KEY");
+        let got = req.headers().get("authorization").ok().flatten().unwrap_or_default();
+        if key.is_empty() || got != format!("Bearer {key}") { return Response::error("unauthorized", 401); }
+        let mut ms: Vec<i64> = Vec::new();
+        for _ in 0..10 {
+            let t = js_sys::Date::now();
+            let _ = turso_exec_pg(&env, "SELECT 1", vec![]).await;
+            ms.push((js_sys::Date::now() - t) as i64);
+        }
+        let colo = req.headers().get("cf-ray").ok().flatten().unwrap_or_default();
+        let report = json!({"ms": ms, "first": ms.first(), "min": ms.iter().min(), "cf_ray": colo});
+        let _ = turso_exec_pg(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
+            vec![TursoArg::text("__latency"), TursoArg::text(&report.to_string())]).await;
         return Response::from_json(&report);
     }
     // tgstore: katalog nusxasi (STORE kaliti bilan): `?publish=1` (yoki `&force=1`) nashr, aks holda holat.

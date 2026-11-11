@@ -153,6 +153,13 @@ jobs:
           sleep 3
           curl -sS -m 60 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__snap?read=1" | tee /tmp/snap2.json; echo
 
+      - name: Kechikish o'lchovi (Worker -> Ample)
+        if: always()
+        continue-on-error: true
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          curl -sS -m 60 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__latency"; echo
+
       - name: "Bazani tozalash kerakmi? (bir martalik, fayl WIPE_ONCE)"
         if: env.SB == '1'
         run: |

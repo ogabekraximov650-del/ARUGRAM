@@ -15,6 +15,10 @@ DB_BACKEND = "pg"
 # UZ: R2 yo'llari alohida prefiksda (production bilan aralashmaydi). EN: R2 keys under their own prefix. RU: klyuchi R2 pod svoim prefiksom.
 R2_PREFIX = "tgstore/"
 
+# UZ: Smart Placement: Worker Ample (San-Xose) yaqiniga joylashadi — bir so'rovdagi ketma-ket baza chaqiruvlari tezlashadi. EN/RU: runs the Worker near its backend.
+[placement]
+mode = "smart"
+
 [ai]
 binding = "AI"
 
@@ -39,4 +43,4 @@ deleted_classes = ["KvRegistry"]
 
 # UZ: BITTA cron (bepul reja 5 ta cron bilan cheklangan): har 10 daqiqada (:05, :15, ...) eski fayllarni tozalash (GC); 00:05 UTC (= Toshkent 05:05) da qo'shimcha Supabase "uyg'otish". EN: daily at 05:00 Tashkent (00:00 UTC): keep-alive + GC.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]
