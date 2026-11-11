@@ -11143,6 +11143,33 @@ const ENCODE_WORKFLOWS: [(&str, &str); 4] = [
     ("720p", "encode_720.yml"), ("1080p", "encode_1080.yml"),
 ];
 
+/// UZ: Kodlashni TO'XTATISH: `ci/ENCODE_PAUSE` faylida `1` bo'lsa deploy worker'ga `ENCODE_PAUSE=1` sirini qo'yadi. Shunda cron yangi run ochmaydi,
+///     `claim`/`peek` ish bermaydi va ishlayotgan run'lar bekor qilinadi. Davom ettirish: fayl ichini `0` qilib push.
+/// EN: Encode PAUSE switch (`ci/ENCODE_PAUSE` = `1`): no new runs, no jobs handed out, running runs get cancelled. Resume: set the file to `0`.
+/// RU: Пауза кодирования (`ci/ENCODE_PAUSE` = `1`): новые запуски не создаются, задачи не выдаются, текущие запуски отменяются. Возобновить: `0`.
+fn encode_paused(env: &Env) -> bool {
+    tg_secret(env, "ENCODE_PAUSE").trim() == "1"
+}
+
+/// Pauza paytida kodlash repo'sidagi ishlayotgan va navbatdagi run'larni bekor qiladi (qaytadigan son — bekor qilinganlar).
+async fn encode_cancel_runs(env: &Env, repo: &str) -> usize {
+    let mut n = 0usize;
+    for (_, wf) in ENCODE_WORKFLOWS.iter() {
+        for st in ["in_progress", "queued"] {
+            let Ok((200, v)) = gh_api(env, Method::Get,
+                &format!("/repos/{repo}/actions/workflows/{wf}/runs?status={st}&per_page=20"), None).await else { continue };
+            for r in v["workflow_runs"].as_array().cloned().unwrap_or_default() {
+                if let Some(id) = r["id"].as_i64() {
+                    if let Ok((202, _)) = gh_api(env, Method::Post, &format!("/repos/{repo}/actions/runs/{id}/cancel"), None).await {
+                        n += 1;
+                    }
+                }
+            }
+        }
+    }
+    n
+}
+
 /// Asl video balandligi `h` bo'lganda shu sifat tayyorlanadimi (`tool/encode/run.py` `plan()`
 /// bilan bir xil: upscale YO'Q, chegara — qo'shni sifatlarning teng yarmi). 360p har doim.
 fn encode_planned(q: &str, h: i64) -> bool {
@@ -12063,6 +12090,9 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     }
 
     if path == "/api/encode/peek" && method == Method::Get {
+        if encode_paused(env) {
+            return ok(json!({"pending": 0, "paused": true}));
+        }
         // Sifat-workflow: faqat o'z sifati bo'yicha kutayotgan qismlar (`?quality=360p`).
         let wq = req.url().ok().and_then(|u| u.query_pairs().find(|(k, _)| k == "quality").map(|(_, v)| v.to_string()))
             .and_then(|q| QUALITIES.iter().copied().find(|x| *x == q));
@@ -12183,6 +12213,9 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         let runner = b["runner"].as_str().unwrap_or("").trim().to_string();
         if runner.is_empty() || runner.len() > 64 {
             return json_resp(&json!({"error": "runner"}), 400);
+        }
+        if encode_paused(env) {
+            return ok(json!({"none": true, "paused": true}));
         }
         // Jonli holat qaysi kanalda (`StatusPin`) — o'zgargandagina yoziladi.
         if let Some(lc) = b["log_chat"].as_i64().filter(|v| *v < 0) {
@@ -14042,6 +14075,11 @@ async fn encode_requeue_stuck(env: &Env) {
 async fn encode_kick_full(env: &Env, full: bool) -> String {
     let now = now_ms();
     let repo = tg_secret(env, "GH_REPO");
+    if encode_paused(env) {
+        let n = if full && repo.contains('/') { encode_cancel_runs(env, &repo).await } else { 0 };
+        return format!("\u{23F8}\u{FE0F} Kodlash TO'XTATILGAN (ENCODE_PAUSE=1){}",
+            if n > 0 { format!(", {n} ta run bekor qilindi") } else { String::new() });
+    }
     if !repo.contains('/') {
         return "\u{26A0}\u{FE0F} GH_REPO o'rnatilmagan — Actions ishga tushirilmadi.".into();
     }

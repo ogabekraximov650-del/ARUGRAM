@@ -10,6 +10,7 @@ on:
       - 'worker/**'
       - 'ci/WIPE_DB_ONCE'
       - 'tool/anibla/creds.enc'
+      - 'ci/ENCODE_PAUSE'
       - 'tool/announce/channel.enc'
       - 'tool/encode/gh_token.enc'
       - 'tool/encode/gh_repo.txt'
@@ -138,6 +139,8 @@ jobs:
           if [ -s ../ci/TG_CHANNEL_ID ]; then put TG_CHANNEL_ID "$(tr -d '[:space:]' < ../ci/TG_CHANNEL_ID)"; fi
           # Video ombori (`vd`) bo'laklari saqlanadigan YANGI kanal: `ci/VD_CHANNEL_ID` (kanal ID raqami, maxfiy emas). Bo'sh/yo'q bo'lsa — TG_CHANNEL_ID.
           if [ -s ../ci/VD_CHANNEL_ID ]; then put VD_CHANNEL_ID "$(tr -d '[:space:]' < ../ci/VD_CHANNEL_ID)"; fi
+          # Kodlashni TO'XTATISH / davom ettirish: `ci/ENCODE_PAUSE` ichida `1` — to'xtatilgan, `0` — davom etadi (`worker/src/lib.rs` `encode_paused`).
+          if [ -s ../ci/ENCODE_PAUSE ]; then put ENCODE_PAUSE "$(tr -d '[:space:]' < ../ci/ENCODE_PAUSE)"; fi
           # Avto-kodlash (`encode.yml`): Actions shu kalit bilan kiradi.
           put ENCODE_TOKEN "${{ secrets.ENCODE_TOKEN }}"
           # Kodlash boti (qism qo'shish, faqat admin) — @BotFather tokeni.
