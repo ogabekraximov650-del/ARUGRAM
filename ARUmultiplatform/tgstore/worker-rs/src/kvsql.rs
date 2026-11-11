@@ -286,9 +286,13 @@ async fn run_dml(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value
             let has_pk = !pk_cols(&m, t)?.is_empty();
             let new = dump(&m, t, has_pk)?;
             let ops = diff(&olds[t], &new);
-            if !ops.is_empty() { items.push(crate::kvdb::TableOps { table: t.clone(), ops, expect: Some(revs[t]) }); }
+            if !ops.is_empty() {
+                let (p, d) = (ops.iter().filter(|o| matches!(o, Op::Put(..))).count(), ops.iter().filter(|o| matches!(o, Op::Del(..))).count());
+                console_log!("tgs_w table={} rows_before={} put={} del={} rev={} attempt={}", t, olds[t].len(), p, d, revs[t], _attempt);
+                items.push(crate::kvdb::TableOps { table: t.clone(), ops, expect: Some(revs[t]) });
+            }
         }
-        if !crate::kvdb::commit_multi(env, items).await? { continue; }
+        if !crate::kvdb::commit_multi(env, items).await? { console_log!("tgs_conflict attempt={}", _attempt); continue; }
         let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
         crate::turso_after(env, &sqls, &results).await;
         return Ok(results);

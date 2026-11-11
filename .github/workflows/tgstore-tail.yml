@@ -39,7 +39,7 @@ jobs:
               req=ev.get("request") or {}; resp=ev.get("response") or {}
               url=str(req.get("url","")).replace("https://tgstore-rs.uzcom.workers.dev","")
               msgs=[" ".join(str(x) for x in (l.get("message") or [])) for l in (e.get("logs") or [])]
-              logs=[m[:300] for m in msgs if not m.startswith(("aru_tq","aru_sv"))]
+              logs=[m[:300] for m in msgs if not m.startswith(("aru_sv",))]
               exc=[str(x.get("name",""))+": "+str(x.get("message",""))[:500] for x in (e.get("exceptions") or [])]
               print(e.get("outcome"), resp.get("status"), req.get("method"), url[:110], "| CPU:", e.get("cpuTime"), "ms | wall:", e.get("wallTime"), "ms", flush=True)
               for l in logs: print("   log:", l, flush=True)
