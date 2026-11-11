@@ -1,0 +1,58 @@
+name: DB load test worker (Postgres vs libSQL on Ample)
+
+# UZ: Vaqtinchalik test worker `arumediatv-dbbench` deploy qilinadi va Ample'dagi Postgres / libSQL yuk ostida o'lchanadi.
+#     `tool/dbbench/DELETE` fayli bo'lsa worker O'CHIRILADI.
+# EN: Deploys a temporary test worker and load-tests Postgres vs libSQL on Ample. `tool/dbbench/DELETE` deletes the worker.
+# RU: Разворачивает временный воркер и нагрузочно тестирует Postgres и libSQL на Ample. `tool/dbbench/DELETE` удаляет воркер.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/dbbench/**'
+      - '.github/workflows/dbbench-worker.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    environment: secret
+    timeout-minutes: 25
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Delete test worker
+        if: hashFiles('tool/dbbench/DELETE') != ''
+        working-directory: tool/dbbench/worker
+        run: wrangler delete --name arumediatv-dbbench --force
+
+      - name: Deploy test worker
+        if: hashFiles('tool/dbbench/DELETE') == ''
+        working-directory: tool/dbbench/worker
+        run: |
+          wrangler deploy 2>&1 | tee /tmp/deploy.log
+          grep -o 'https://[A-Za-z0-9.-]*workers.dev' /tmp/deploy.log | head -1 > /tmp/url.txt
+          echo "URL=$(cat /tmp/url.txt)"
+
+      - name: Load test (Postgres first, then libSQL)
+        if: hashFiles('tool/dbbench/DELETE') == ''
+        env:
+          AMPLE_URL: https://7xx659f87f2y.ample.run
+          CHAOS_TOKEN: 970f8a0cd9939874
+        run: |
+          export WORKER_URL=$(cat /tmp/url.txt)
+          [ -n "$WORKER_URL" ] || { echo "worker URL topilmadi"; exit 1; }
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "$WORKER_URL/run?engine=ping&n=1") && [ "$code" = 200 ] && break
+            sleep 4
+          done
+          echo "worker ready: $WORKER_URL (http $code)"
+          for e in ping pg lite; do curl -sS -m 60 "$WORKER_URL/run?engine=$e&op=read&n=10&seed=0" >/dev/null; done
+          python3 tool/dbbench/load.py
