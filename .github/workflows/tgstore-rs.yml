@@ -12,6 +12,7 @@ on:
       - 'ARUmultiplatform/tgstore/bot.enc'
       - 'ARUmultiplatform/tgstore/channels.txt'
       - 'ARUmultiplatform/tgstore/supabase.enc'
+      - 'ARUmultiplatform/tgstore/WIPE_ONCE'
       - 'ARUmultiplatform/tgstore/supabase/**'
       - '.github/workflows/tgstore-rs.yml'
   workflow_dispatch:
@@ -119,7 +120,7 @@ jobs:
           sys.exit(0 if j.get('ok') else 1)
           PY
 
-      - name: Bazani tozalash kerakmi? (bir martalik: ARUmultiplatform/tgstore/WIPE_ONCE)
+      - name: "Bazani tozalash kerakmi? (bir martalik, fayl WIPE_ONCE)"
         if: env.SB == '1'
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev
