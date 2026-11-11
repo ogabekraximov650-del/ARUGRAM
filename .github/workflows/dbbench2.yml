@@ -1,0 +1,107 @@
+name: DB bench 2 (Neon vs D1 vs Turso via Worker)
+
+# UZ: Vaqtinchalik worker `arumediatv-dbbench2` ni deploy qiladi va Neon (Hyperdrive/HTTP), D1, Turso kechikishini o'lchaydi.
+#     `tool/dbbench2/DELETE` fayli bo'lsa worker va Hyperdrive sozlamasi O'CHIRILADI.
+# EN: Deploys a temporary worker and measures Neon (Hyperdrive/HTTP) vs D1 vs Turso. `tool/dbbench2/DELETE` removes the worker + Hyperdrive config.
+# RU: Разворачивает временный воркер и измеряет Neon (Hyperdrive/HTTP), D1 и Turso. `tool/dbbench2/DELETE` удаляет воркер и Hyperdrive.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/dbbench2/**'
+      - '.github/workflows/dbbench2.yml'
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    environment: secret
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Delete test worker and Hyperdrive config
+        if: hashFiles('tool/dbbench2/DELETE') != ''
+        working-directory: tool/dbbench2/worker
+        run: |
+          wrangler delete --name arumediatv-dbbench2 --force || true
+          ID=$(wrangler hyperdrive list 2>/dev/null | grep -i dbbench-neon | grep -o '[0-9a-f]\{32\}' | head -1 || true)
+          [ -n "$ID" ] && wrangler hyperdrive delete "$ID" || echo "hyperdrive config topilmadi"
+
+      - name: Prepare (secrets, Hyperdrive, wrangler.toml)
+        if: hashFiles('tool/dbbench2/DELETE') == ''
+        working-directory: tool/dbbench2/worker
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          NEON=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../neon.enc | tr -d '[:space:]')
+          [ -n "$NEON" ] || { echo "::error::neon.enc ochilmadi"; exit 1; }
+          echo "::add-mask::$NEON"
+          DIRECT=$(printf '%s' "$NEON" | sed 's/-pooler//' | sed 's/?.*$/?sslmode=require/')
+          echo "::add-mask::$DIRECT"
+          echo "NEON=$NEON" >> "$GITHUB_ENV"
+          # Turso: jonli baza (faqat O'QISH uchun)
+          U="${{ secrets.TURSO_URL }}"; T="${{ secrets.TURSO_TOKEN }}"
+          if [ -f ../../migrate/new_turso.enc ]; then
+            NT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../../migrate/new_turso.enc 2>/dev/null || true)
+            NU=$(printf '%s' "$NT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
+            NK=$(printf '%s' "$NT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)
+            if [ -n "$NU" ] && [ -n "$NK" ]; then U="$NU"; T="$NK"; fi
+          fi
+          echo "::add-mask::$U"; echo "::add-mask::$T"
+          echo "TURSO_URL=$U" >> "$GITHUB_ENV"; echo "TURSO_TOKEN=$T" >> "$GITHUB_ENV"
+          # Hyperdrive (to'g'ridan-to'g'ri, pooler'siz manzil bilan)
+          HD=""
+          if OUT=$(wrangler hyperdrive create dbbench-neon --connection-string="$DIRECT" 2>&1); then
+            HD=$(printf '%s' "$OUT" | grep -o '[0-9a-f]\{32\}' | head -1)
+            echo "Hyperdrive yaratildi: $HD"
+          else
+            echo "::warning::Hyperdrive yaratilmadi: $(printf '%s' "$OUT" | tail -3)"
+          fi
+          {
+            echo 'name = "arumediatv-dbbench2"'
+            echo 'main = "src/index.js"'
+            echo 'compatibility_date = "2024-09-23"'
+            echo 'compatibility_flags = ["nodejs_compat"]'
+            echo 'workers_dev = true'
+            echo '[[d1_databases]]'
+            echo 'binding = "DB"'
+            echo 'database_name = "dbbench-temp"'
+            echo 'database_id = "27d44f20-ae96-491b-9737-ee46c8117a05"'
+            if [ -n "$HD" ]; then
+              echo '[[hyperdrive]]'
+              echo 'binding = "HD"'
+              echo "id = \"$HD\""
+            fi
+          } > wrangler.toml
+          npm install --no-audit --no-fund 2>&1 | tail -2
+
+      - name: Deploy and set secrets
+        if: hashFiles('tool/dbbench2/DELETE') == ''
+        working-directory: tool/dbbench2/worker
+        run: |
+          wrangler deploy 2>&1 | tee /tmp/deploy.log
+          grep -o 'https://[A-Za-z0-9.-]*workers.dev' /tmp/deploy.log | head -1 > /tmp/url.txt
+          printf '%s' "$NEON" | wrangler secret put NEON_URL
+          printf '%s' "$TURSO_URL" | wrangler secret put TURSO_URL
+          printf '%s' "$TURSO_TOKEN" | wrangler secret put TURSO_TOKEN
+          echo "URL=$(cat /tmp/url.txt)"
+
+      - name: Benchmark
+        if: hashFiles('tool/dbbench2/DELETE') == ''
+        run: |
+          export WORKER_URL=$(cat /tmp/url.txt)
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -A dbbench2/1.0 -w '%{http_code}' "$WORKER_URL/run?engine=d1&op=read&n=1") && [ "$code" = 200 ] && break
+            sleep 4
+          done
+          echo "worker ready: $WORKER_URL (http $code)"
+          python3 tool/dbbench2/bench.py
