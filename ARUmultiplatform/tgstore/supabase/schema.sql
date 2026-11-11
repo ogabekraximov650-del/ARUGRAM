@@ -199,10 +199,10 @@ begin
   update kv_chunks set msg_id = 0 where msg_id = any(p_ids);
   delete from kv_gc where msg_id = any(p_ids);
   if p_final then
-    delete from kv_chunks;
-    delete from kv_tables;
-    delete from kv_gc;
-    delete from kv_marks;
+    delete from kv_chunks where true;
+    delete from kv_tables where true;
+    delete from kv_gc where true;
+    delete from kv_marks where true;
   end if;
   return jsonb_build_object('ok', true);
 end $$;
