@@ -127,19 +127,25 @@ jobs:
       - name: Postgres (Ample) orqali haqiqiy so'rovlar tekshiruvi
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev
-          for i in $(seq 1 12); do
-            C=$(curl -s -o /tmp/pg.json -m 90 -w '%{http_code}' -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__pgcheck" || true)
-            echo "urinish $i: $C"; [ "$C" = "200" ] && break; sleep 10
+          FAIL=0
+          for P in 1 2 3; do
+            for i in $(seq 1 12); do
+              C=$(curl -s -o /tmp/pg$P.json -m 90 -w '%{http_code}' -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__pgcheck?part=$P" || true)
+              echo "bo'lak $P urinish $i: $C"; [ "$C" = "200" ] && break; sleep 10
+            done
+            python3 -c "import json,sys;j=json.load(open('/tmp/pg$P.json'));print(json.dumps(j,indent=1,ensure_ascii=False));sys.exit(0 if j.get('ok') else 1)" || FAIL=1
           done
-          python3 -c "import json;j=json.load(open('/tmp/pg.json'));print(json.dumps(j,indent=1,ensure_ascii=False));import sys;sys.exit(0 if j.get('ok') else 1)"
+          exit $FAIL
 
       - name: Doira tizimi quruq sinovi (sovuq qatorlar so'rovlari PostgreSQL'da ishlaydimi)
+        if: always()
         continue-on-error: true
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev
           curl -sS -m 90 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__circle?force=1&dry=1" | tee /tmp/circle.json; echo
 
       - name: Katalog nusxasi (Telegram) - nashr va o'qish tekshiruvi
+        if: always()
         continue-on-error: true
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev

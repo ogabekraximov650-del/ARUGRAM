@@ -14700,6 +14700,9 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             ("cleanup-2", "DELETE FROM app_config WHERE cfg_key = ?", vec![TursoArg::text("pgcheck")]),
             ("cleanup-3", "DELETE FROM stats_daily WHERE metric = ?", vec![TursoArg::text("pgcheck")]),
         ];
+        // UZ: Cloudflare bepul rejasi bitta so'rovda 50 ta tashqi chaqiruvga ruxsat beradi: sinov `?part=1..3` bo'laklarga bo'lingan. EN/RU: split into parts for the 50-subrequest limit.
+        let part: usize = url.query_pairs().find(|(k, _)| k == "part").and_then(|(_, v)| v.parse().ok()).unwrap_or(0);
+        let steps: Vec<_> = if part == 0 { steps } else { steps.into_iter().enumerate().filter(|(i, _)| i / 5 + 1 == part).map(|(_, x)| x).collect() };
         let mut out = Vec::new();
         let mut all_ok = true;
         for (name, sql, args) in steps {
@@ -14711,7 +14714,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         let report = json!({"ok": all_ok, "steps": out});
         // UZ: natija `app_config` ga ham yoziladi (CI logi ko'rinmasa ham o'qish mumkin). EN/RU: result also stored in app_config.
         let _ = turso_exec(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
-            vec![TursoArg::text("__pgcheck"), TursoArg::text(&report.to_string())]).await;
+            vec![TursoArg::text(&format!("__pgcheck{part}")), TursoArg::text(&report.to_string())]).await;
         return Response::from_json(&report);
     }
     // tgstore: katalog nusxasi (STORE kaliti bilan): `?publish=1` (yoki `&force=1`) nashr, aks holda holat.
