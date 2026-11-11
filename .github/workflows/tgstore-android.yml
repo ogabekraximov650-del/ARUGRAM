@@ -125,6 +125,9 @@ jobs:
           cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/tgstore-test-32bit-$N.apk"
           gradle --no-daemon :app:assembleUserRelease -PonlyAbi=arm64-v8a
           cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/tgstore-test-64bit-$N.apk"
+          # UZ: ADMIN varianti (anime/epizod yuklash uchun) — 32 bit. EN/RU: the admin flavor (32-bit) for uploading content.
+          gradle --no-daemon :app:assembleAdminRelease -PonlyAbi=armeabi-v7a
+          cp app/build/outputs/apk/admin/release/app-admin-release.apk "$OUT/tgstore-admin-32bit-$N.apk"
 
           for f in "$OUT"/*.apk; do
             echo "== $f"; ls -la "$f"
