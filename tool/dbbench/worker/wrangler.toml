@@ -1,0 +1,7 @@
+name = "arumediatv-dbbench"
+main = "index.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+[vars]
+AMPLE_URL = "https://gvyxk26cxp3k.ample.run"
