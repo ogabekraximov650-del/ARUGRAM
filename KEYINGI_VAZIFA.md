@@ -7268,3 +7268,11 @@ Sabab (jonli jurnaldan, `tgstore-tail.yml`): `POST /api/sync` 8 jadvalga yozardi
 1 MB dan oshgach o'zi bo'linadi). Jadvallararo yozuv bitta atomik `kv_commit` da. Kamchilik: hamma yozuv bitta `rev` ga bog'langan (to'qnashuvda butun SQL qayta bajariladi) — ko'p foydalanuvchida yozuv navbati kerak.
 `_schema` va sinov jadvallari alohida qoladi. Eski (jadvalma-jadval) ma'lumot ko'chirilmaydi: `WIPE_ONCE=2` bilan bir marta tozalanadi.
 Jonli jurnal: `tgstore-tail.yml` (qo'lda ishga tushiriladi; `tgs_w` qatorlari jadval/put/del/to'qnashuvni ko'rsatadi). CPU 10 ms chegarasi bu hisobda ishlamaydi (so'rovlar 100–220 ms CPU bilan muvaffaqiyatli).
+
+### tgstore: Supabase'da FAQAT BITTA jadval `DB_CHUNK` (2026-11, yangilanish)
+
+Ro'yxat bitta jadvalga yig'ildi (`tgstore/supabase/schema.sql`): `DB_CHUNK`, har qator = bitta bo'lak (`db_1_v1`, `db_2_v1`, ...) yoki yordamchi qator (`kind`: chunk | gc | mark | auth | ping).
+Bo'lak 1 MB ga to'lsa `db_<n+1>_v1` yaratiladi; o'zgarsa versiya oshadi (`db_1_v2`), eskisi 1 daqiqadan keyin Telegram'dan o'chadi (cron har 10 daqiqada). "Jadval" tushunchasi endi ro'yxatda yo'q:
+hamma qator bitta tartiblangan kalit fazosida (`<jadval>\x1e<qator kaliti>`), bo'laklar shu fazoni ketma-ket oraliqlarga bo'ladi. To'qnashuv nazorati bo'laklar bo'yicha (`kv_commit`: o'qilgan/o'zgargan bo'laklar tirik bo'lishi shart, aks holda hech narsa o'zgarmaydi).
+Eski jadvallardan ko'chirish `schema.sql` ichida (tirik bo'laklar saqlanadi). Worker: `kvsb.rs` (RPC), `kvdb.rs` (bo'laklar), `kvsql.rs` (SQL ko'prigi).
+Ilova: paketlab yuborish (`SyncQueue`) 5 daqiqaga o'zgartirildi; yuborilmagan tarix/sevimli o'zgarishlari ro'yxatlarda darhol ko'rinadi (`LibraryStore.overlay*`, `applyHistory`).

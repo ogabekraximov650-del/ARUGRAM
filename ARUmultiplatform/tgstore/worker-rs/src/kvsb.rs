@@ -1,26 +1,21 @@
-//! UZ: tgstore RO'YXATI Supabase (Postgres) da — DO o'rniga. Faqat bo'lak nomi/file_id/kalit/oraliq. PostgREST `rpc/<funksiya>` orqali.
-//!     Atomik commit (bir nechta jadval bitta tranzaksiyada) `kv_commit` funksiyasida (`tgstore/supabase/schema.sql`).
-//! EN: the tgstore REGISTRY lives in Supabase (Postgres) instead of a Durable Object. Names/file_id/keys/ranges only, via PostgREST RPC.
-//! RU: REESTR tgstore v Supabase (Postgres) vmesto DO. Tolko imena/file_id/klyuchi/diapazony.
+//! UZ: tgstore RO'YXATI Supabase (Postgres) da — FAQAT BITTA JADVAL `DB_CHUNK`: har qator = bitta bo'lak fayli (`db_1_v1`, `db_2_v1`, ...) yoki yordamchi qator
+//!     (eski fayl navbati, kesh belgisi). Bo'lak 1 MB ga to'lsa keyingi `db_<n+1>_v1` yaratiladi. Atomik almashtirish `kv_commit` funksiyasida (`tgstore/supabase/schema.sql`).
+//! EN: the tgstore REGISTRY lives in Supabase (Postgres) as ONE table `DB_CHUNK`: one row per chunk file (`db_1_v1`, `db_2_v1`, ...) or helper row (old-file queue, cache mark).
+//!     When a chunk fills up (1 MB) the next `db_<n+1>_v1` is created. The atomic swap is in the `kv_commit` function.
+//! RU: REESTR tgstore v Supabase (Postgres) — TOLKO ODNA TABLITSA `DB_CHUNK`: odna stroka = odin fayl chanka (`db_1_v1`, `db_2_v1`, ...) ili sluzhebnaya stroka.
 
 use crate::kvreg::{ChunkMeta, TableMeta};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 use worker::*;
 
 /// UZ: almashtirilgan eski fayl shuncha vaqtdan keyin o'chiriladi. EN/RU: delay before deleting a replaced file.
 pub const GC_DELAY_MS: i64 = 60_000;
 
-pub struct TableCommit {
-    pub tbl: String,
-    pub rev: u64,
-    pub remove: Vec<u64>,
-    pub add: Vec<ChunkMeta>,
-}
-
 pub enum CommitResult {
-    Ok(BTreeMap<String, TableMeta>),
-    Conflict(String),
+    /// UZ: muvaffaqiyat — yangi ro'yxat. EN/RU: success with the new list.
+    Ok(TableMeta),
+    /// UZ: to'qnashuv — o'qilgan/o'zgartirilgan bo'laklardan biri boshqa yozuvchi tomonidan almashtirilgan. EN/RU: a chunk we read/changed was replaced by another writer.
+    Conflict,
 }
 
 fn cfg(env: &Env) -> Result<(String, String)> {
@@ -33,7 +28,7 @@ fn cfg(env: &Env) -> Result<(String, String)> {
 
 pub async fn rpc(env: &Env, func: &str, mut body: Value) -> Result<Value> {
     let (url, key) = cfg(env)?;
-    // UZ: har chaqiruvga maxfiy kalit (`STORE_KEY`) qo'shiladi; bazada faqat uning xeshi (`kv_auth`). EN/RU: every call carries the secret STORE_KEY.
+    // UZ: har chaqiruvga maxfiy kalit (`STORE_KEY`) qo'shiladi; bazada faqat uning xeshi. EN/RU: every call carries the secret STORE_KEY.
     let tok = crate::tg_secret(env, "STORE_KEY");
     if let Some(o) = body.as_object_mut() { o.insert("p_tok".into(), json!(tok)); }
     let h = Headers::new();
@@ -54,21 +49,20 @@ pub async fn rpc(env: &Env, func: &str, mut body: Value) -> Result<Value> {
     Err(Error::RustError(format!("supabase {func} {last}")))
 }
 
-pub async fn get_many(env: &Env, tables: &[String]) -> Result<BTreeMap<String, TableMeta>> {
-    let v = rpc(env, "kv_get_many", json!({"p_tbls": tables})).await?;
-    serde_json::from_value(v).map_err(|e| Error::RustError(format!("meta: {e}")))
+fn parse_list(v: &Value) -> TableMeta {
+    serde_json::from_value(v.clone()).unwrap_or_default()
 }
 
-/// UZ: bir nechta jadval ro'yxatini ATOMIK almashtiradi (hammasi yoki hech narsa). EN/RU: atomic multi-table registry swap.
-pub async fn commit(env: &Env, now: i64, tables: Vec<TableCommit>) -> Result<CommitResult> {
-    let t: Vec<Value> = tables.iter().map(|c| json!({"tbl": c.tbl, "rev": c.rev, "remove": c.remove, "add": c.add})).collect();
-    let r = rpc(env, "kv_commit", json!({"p": {"now": now, "gc_delay": GC_DELAY_MS, "tables": t}})).await?;
-    if r["ok"] == json!(true) {
-        let metas: BTreeMap<String, TableMeta> = serde_json::from_value(r["metas"].clone()).unwrap_or_default();
-        Ok(CommitResult::Ok(metas))
-    } else {
-        Ok(CommitResult::Conflict(r["conflict"].as_str().unwrap_or("").to_string()))
-    }
+/// UZ: hamma tirik bo'laklar ro'yxati (kalit oralig'i bo'yicha tartiblangan). EN/RU: all live chunks, sorted by key range.
+pub async fn list(env: &Env) -> Result<TableMeta> {
+    Ok(parse_list(&rpc(env, "kv_list", json!({})).await?))
+}
+
+/// UZ: bo'laklarni ATOMIK almashtiradi. `read` — o'qilgan bo'laklar (hali tirik bo'lishi shart), `remove` — olib tashlanadiganlar, `add` — yangilari.
+///     Biri allaqachon boshqa yozuvchi tomonidan almashtirilgan bo'lsa HECH NARSA o'zgarmaydi (`Conflict`). EN/RU: atomic chunk swap with a read-set check.
+pub async fn commit(env: &Env, now: i64, read: &[String], remove: &[String], add: &[ChunkMeta]) -> Result<CommitResult> {
+    let r = rpc(env, "kv_commit", json!({"p": {"now": now, "gc_delay": GC_DELAY_MS, "read": read, "remove": remove, "add": add}})).await?;
+    if r["ok"] == json!(true) { Ok(CommitResult::Ok(parse_list(&r["list"]))) } else { Ok(CommitResult::Conflict) }
 }
 
 pub async fn gc_take(env: &Env, now: i64) -> Result<Vec<i64>> {
@@ -87,7 +81,7 @@ pub async fn marks(env: &Env, bump: &[String], at: i64, get: &[String]) -> Resul
     Ok(r["v"].as_object().map(|m| m.iter().filter_map(|(k, x)| Some((k.clone(), x.as_i64()?))).collect()).unwrap_or_default())
 }
 
-/// UZ: kunlik "uyg'otish" so'rovi (Toshkent 05:00). EN/RU: daily keep-alive ping.
+/// UZ: kunlik "uyg'otish" so'rovi (Toshkent 05:05). EN/RU: daily keep-alive ping.
 pub async fn ping(env: &Env) -> Result<Value> {
     rpc(env, "kv_ping", json!({})).await
 }
@@ -101,10 +95,4 @@ pub async fn wipe_take(env: &Env, limit: i64) -> Result<Vec<i64>> {
 pub async fn wipe_done(env: &Env, ids: &[i64], fin: bool) -> Result<()> {
     rpc(env, "kv_wipe_done", json!({"p_ids": ids, "p_final": fin})).await?;
     Ok(())
-}
-
-/// UZ: jadvalni ro'yxatdan olib tashlaydi, Telegram'dan o'chiriladigan xabar raqamlarini qaytaradi. EN/RU: drop a table, return its message ids.
-pub async fn drop_table(env: &Env, table: &str) -> Result<Vec<i64>> {
-    let r = rpc(env, "kv_drop_table", json!({"p_tbl": table})).await?;
-    Ok(r["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default())
 }

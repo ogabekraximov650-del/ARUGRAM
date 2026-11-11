@@ -6,7 +6,7 @@
 
 use crate::kvfmt::{self, Op, View, TARGET_CHUNK};
 use crate::kvreg::{route, ChunkMeta, TableMeta};
-use crate::kvsb::{self, CommitResult, TableCommit};
+use crate::kvsb::{self, CommitResult};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -41,40 +41,29 @@ fn hex_key(h: &str) -> Result<[u8; 32]> {
 
 fn err<T>(m: impl Into<String>) -> Result<T> { Err(Error::RustError(m.into())) }
 
+/// UZ: HAMMA jadvallar BITTA tartiblangan kalit fazosida: kalit = `<jadval>\u{1e}<qator kaliti>`. Bo'laklar shu fazoni ketma-ket bo'laklarga bo'ladi.
+/// EN: ALL tables share ONE ordered keyspace: key = `<table>\u{1e}<row key>`; chunks split that space into consecutive ranges. RU: odno prostranstvo klyuchey.
+pub fn key_of(table: &str, key: &str) -> String { format!("{table}\u{1e}{key}") }
+/// [lo, hi): jadvalning hamma kalitlari / all keys of the table / vse klyuchi tablitsy
+pub fn range_of(table: &str) -> (String, String) { (format!("{table}\u{1e}"), format!("{table}\u{1f}")) }
+pub fn strip(table: &str, key: &str) -> String { key.get(table.len() + 1..).unwrap_or("").to_string() }
+
+/// UZ: bo'lak nomi: `db_<raqam>_v<versiya>` (1 MB ga to'lsa keyingi raqam). EN: chunk name. RU: imya chanka.
+pub fn chunk_label(no: u64, ver: u64) -> String { format!("db_{no}_v{ver}") }
+
+/// UZ: kesh/xotira kaliti: nom + kalitning boshi (tozalashdan keyin nom takrorlansa ham eski kesh olinmasin). EN/RU: cache key = name + key prefix.
+fn cache_name(c: &ChunkMeta) -> String { format!("{}_{}", c.name, c.key.get(..8).unwrap_or("")) }
+
 /// UZ: ro'yxat, HAR DOIM yangi (yozish uchun). EN: always fresh (for writes). RU: vsegda svezhiy (dlya zapisi).
-pub async fn meta(env: &Env, table: &str) -> Result<TableMeta> {
-    let mut m = kvsb::get_many(env, &[table.to_string()]).await?;
-    let t = m.remove(table).unwrap_or_default();
-    METAS.with(|c| c.borrow_mut().insert(table.to_string(), (t.clone(), now_ms())));
-    Ok(t)
-}
-
-/// UZ: o'qish uchun ro'yxat: nusxa yangi bo'lsa Supabase'ga bormaydi. EN: registry for reads, served from the copy while fresh. RU: dlya chteniya.
-pub async fn meta_cached(env: &Env, table: &str) -> Result<TableMeta> {
-    if let Some(m) = METAS.with(|c| c.borrow().get(table).filter(|(_, at)| now_ms() - *at < META_TTL_MS).map(|(m, _)| m.clone())) {
-        return Ok(m);
-    }
-    meta(env, table).await
-}
-
-/// UZ: bir nechta jadval ro'yxati BITTA chaqiruvda (yangi). EN/RU: several tables in one call (fresh).
-pub async fn metas(env: &Env, tables: &[String], fresh: bool) -> Result<std::collections::BTreeMap<String, TableMeta>> {
-    let now = now_ms();
-    let mut out = std::collections::BTreeMap::new();
-    let mut need: Vec<String> = Vec::new();
-    for t in tables {
-        let hit = if fresh { None } else { METAS.with(|c| c.borrow().get(t).filter(|(_, at)| now - *at < META_TTL_MS).map(|(m, _)| m.clone())) };
-        match hit { Some(m) => { out.insert(t.clone(), m); } None => need.push(t.clone()) }
-    }
-    if !need.is_empty() {
-        let got = kvsb::get_many(env, &need).await?;
-        for t in need {
-            let m = got.get(&t).cloned().unwrap_or_default();
-            METAS.with(|c| c.borrow_mut().insert(t.clone(), (m.clone(), now_ms())));
-            out.insert(t, m);
+pub async fn meta_all(env: &Env, fresh: bool) -> Result<TableMeta> {
+    if !fresh {
+        if let Some(m) = METAS.with(|c| c.borrow().get("*").filter(|(_, at)| now_ms() - *at < META_TTL_MS).map(|(m, _)| m.clone())) {
+            return Ok(m);
         }
     }
-    Ok(out)
+    let t = kvsb::list(env).await?;
+    METAS.with(|c| c.borrow_mut().insert("*".to_string(), (t.clone(), now_ms())));
+    Ok(t)
 }
 
 async fn download(env: &Env, file_id: &str) -> Result<Vec<u8>> {
@@ -116,53 +105,55 @@ fn hot_put(name: &str, v: Rc<View>) {
 
 /// UZ: bo'lakni ochadi: xotira -> kesh -> Telegram. EN: opens a chunk. RU: otkryvaet chank.
 pub async fn load_chunk(env: &Env, c: &ChunkMeta) -> Result<(Rc<View>, &'static str)> {
-    if let Some(v) = HOT.with(|h| h.borrow().get(&c.name).cloned()) { return Ok((v, "isolate")); }
+    let cname = cache_name(c);
+    if let Some(v) = HOT.with(|h| h.borrow().get(&cname).cloned()) { return Ok((v, "isolate")); }
     let key = hex_key(&c.key)?;
-    let (sealed, src) = match Cache::default().get(&cache_req(&c.name)?, false).await? {
+    let (sealed, src) = match Cache::default().get(&cache_req(&cname)?, false).await? {
         Some(mut hit) => (hit.bytes().await?, "cache"),
         None => {
             let b = download(env, &c.file_id).await?;
-            cache_put(&c.name, &b).await;
+            cache_put(&cname, &b).await;
             (b, "telegram")
         }
     };
     let plain = kvfmt::open(&key, &sealed).map_err(Error::RustError)?;
     let v = Rc::new(View::parse(plain).map_err(Error::RustError)?);
-    hot_put(&c.name, v.clone());
+    hot_put(&cname, v.clone());
     Ok((v, src))
 }
 
 /// UZ: bitta yozuv — faqat kerakli bo'lak ochiladi. EN: one record, only its chunk is opened. RU: odna zapis.
 pub async fn get(env: &Env, table: &str, key: &str) -> Result<Option<Value>> {
-    let m = meta_cached(env, table).await?;
-    let Some(i) = route(&m.chunks, key) else { return Ok(None) };
+    let m = meta_all(env, false).await?;
+    let k = key_of(table, key);
+    let Some(i) = route(&m.chunks, &k) else { return Ok(None) };
     let (v, _) = load_chunk(env, &m.chunks[i]).await?;
-    v.get(key).map_err(Error::RustError)
+    v.get(&k).map_err(Error::RustError)
 }
 
-/// UZ: [lo, hi) oralig'i (bir nechta bo'lakni kesib o'tishi mumkin). EN: range scan across chunks. RU: diapazon po chankam.
+/// UZ: jadval ichidagi [lo, hi) oralig'i (bir nechta bo'lakni kesib o'tishi mumkin). EN: range scan inside a table. RU: diapazon vnutri tablitsy.
 pub async fn scan(env: &Env, table: &str, lo: &str, hi: Option<&str>, limit: usize, rev: bool) -> Result<Vec<(String, Value)>> {
-    let m = meta_cached(env, table).await?;
-    let mut idx: Vec<usize> = (0..m.chunks.len())
-        .filter(|&i| m.chunks[i].max.as_str() >= lo && hi.map_or(true, |h| m.chunks[i].min.as_str() < h))
-        .collect();
+    let m = meta_all(env, false).await?;
+    let (tlo, thi) = range_of(table);
+    let lo_k = if lo.is_empty() { tlo } else { key_of(table, lo) };
+    let hi_k = hi.map(|h| key_of(table, h)).unwrap_or(thi);
+    let mut idx: Vec<usize> = (0..m.chunks.len()).filter(|&i| m.chunks[i].max.as_str() >= lo_k.as_str() && m.chunks[i].min.as_str() < hi_k.as_str()).collect();
     if rev { idx.reverse(); }
     let mut out = Vec::new();
     for i in idx {
         if out.len() >= limit { break; }
         let (v, _) = load_chunk(env, &m.chunks[i]).await?;
-        out.extend(v.range(lo, hi, limit - out.len(), rev).map_err(Error::RustError)?);
+        out.extend(v.range(&lo_k, Some(hi_k.as_str()), limit - out.len(), rev).map_err(Error::RustError)?.into_iter().map(|(k, x)| (strip(table, &k), x)));
     }
     Ok(out)
 }
 
-/// UZ: jadvalning HAMMA qatori (SQL ko'prigi uchun). EN: all rows (for the SQL bridge). RU: vse stroki.
+/// UZ: jadvalning HAMMA qatori. EN: all rows of a table. RU: vse stroki.
 pub async fn all_rows(env: &Env, table: &str) -> Result<Vec<(String, Value)>> {
     scan(env, table, "", None, usize::MAX, false).await
 }
 
 struct Upload {
-    table: String,
     no: u64,
     ver: u64,
     name: String,
@@ -174,106 +165,122 @@ struct Upload {
     plain: Vec<u8>,
 }
 
-async fn upload(env: &Env, u: Upload) -> Result<(String, ChunkMeta, Vec<u8>)> {
+async fn upload(env: &Env, u: Upload) -> Result<(ChunkMeta, Vec<u8>)> {
     let (file_id, msg_id) = crate::vd::tg_send_document(&token(env), channel(env), &u.name, "", &u.sealed).await?;
-    cache_put(&u.name, &u.sealed).await;
-    Ok((u.table, ChunkMeta { no: u.no, ver: u.ver, name: u.name, file_id, msg_id, key: u.key_hex, min: u.min, max: u.max, rows: u.rows, size: u.sealed.len() as u64 }, u.plain))
+    let cm = ChunkMeta { no: u.no, ver: u.ver, name: u.name, file_id, msg_id, key: u.key_hex, min: u.min, max: u.max, rows: u.rows, size: u.sealed.len() as u64 };
+    cache_put(&cache_name(&cm), &u.sealed).await;
+    Ok((cm, u.plain))
 }
 
 /// UZ: bitta jadvalga yozish (to'qnashuvda qayta uriniladi). EN: write to one table, retried on conflict. RU: zapis v odnu tablitsu.
 pub async fn commit(env: &Env, table: &str, ops: Vec<Op>) -> Result<()> {
     for _attempt in 0..4 {
-        if commit_multi(env, vec![TableOps { table: table.to_string(), ops: ops.clone(), expect: None }]).await? { return Ok(()); }
+        if commit_multi(env, vec![TableOps { table: table.to_string(), ops: ops.clone(), read: None }]).await? { return Ok(()); }
     }
-    err("yozish: ro'yxat to'qnashuvi (4 urinish)")
+    err("yozish: to'qnashuv (4 urinish)")
 }
 
 pub struct TableOps {
     pub table: String,
+    /// UZ: kalitlar jadval ichidagi (prefikssiz). EN/RU: keys are table-local (no prefix).
     pub ops: Vec<Op>,
-    /// UZ: berilsa va ro'yxat `rev` i boshqacha bo'lsa — `false` (chaqiruvchi qayta hisoblashi kerak). EN/RU: expected registry rev.
-    pub expect: Option<u64>,
+    /// UZ: o'qilgan bo'laklar nomlari (SQL ko'prigi): ular hali tirik bo'lishi shart, aks holda `false` (qayta hisoblash kerak). EN/RU: read-set chunk names.
+    pub read: Option<Vec<String>>,
 }
 
-/// UZ: bir nechta jadvalga ATOMIK yozish: avval hamma yangi fayllar yuklanadi, keyin ro'yxat BITTA tranzaksiyada almashadi (yo hammasi, yo hech biri).
-/// `false` — to'qnashuv (boshqa yozuvchi o'zgartirgan). EN: atomic multi-table write; `false` on conflict. RU: atomarnaya zapis v neskolko tablits.
+/// UZ: bir nechta jadvalga ATOMIK yozish: o'zgargan bo'laklar BITTA yuklashda (kichik jadvallar bitta bo'lakni baham ko'radi), keyin ro'yxat BITTA tranzaksiyada almashadi.
+/// `false` — to'qnashuv (boshqa yozuvchi o'qilgan/o'zgargan bo'lakni almashtirgan). EN: atomic multi-table write; `false` on conflict. RU: atomarnaya zapis.
 pub async fn commit_multi(env: &Env, items: Vec<TableOps>) -> Result<bool> {
-    let items: Vec<TableOps> = items.into_iter().filter(|i| !i.ops.is_empty()).collect();
-    if items.is_empty() { return Ok(true); }
-    let names: Vec<String> = items.iter().map(|i| i.table.clone()).collect();
-    let ms = metas(env, &names, true).await?;
+    let mut read: Vec<String> = Vec::new();
+    let mut ops: Vec<Op> = Vec::new();
+    for it in items {
+        if let Some(r) = it.read { for n in r { if !read.contains(&n) { read.push(n); } } }
+        for op in it.ops {
+            ops.push(match op { Op::Put(k, v) => Op::Put(key_of(&it.table, &k), v), Op::Del(k) => Op::Del(key_of(&it.table, &k)) });
+        }
+    }
+    if ops.is_empty() { return Ok(true); }
+    let m = meta_all(env, true).await?;
+    // UZ: o'qilgan bo'laklardan biri allaqachon almashtirilgan bo'lsa — yuklamasdan to'xtaymiz. EN/RU: stale read-set -> stop before uploading.
+    if read.iter().any(|n| !m.chunks.iter().any(|c| &c.name == n)) { return Ok(false); }
+    let mut groups: BTreeMap<usize, Vec<Op>> = BTreeMap::new();
+    for op in &ops {
+        let k = match op { Op::Put(k, _) | Op::Del(k) => k };
+        groups.entry(route(&m.chunks, k).unwrap_or(usize::MAX)).or_default().push(op.clone());
+    }
+    let mut remove: Vec<String> = Vec::new();
     let mut specs: Vec<Upload> = Vec::new();
-    let mut plan: Vec<(String, u64, Vec<u64>)> = Vec::new(); // (jadval, rev, olib tashlanadigan raqamlar)
-    for it in &items {
-        let m = &ms[&it.table];
-        if let Some(e) = it.expect { if m.rev != e { return Ok(false); } }
-        let mut groups: BTreeMap<usize, Vec<Op>> = BTreeMap::new();
-        for op in &it.ops {
-            let k = match op { Op::Put(k, _) | Op::Del(k) => k };
-            groups.entry(route(&m.chunks, k).unwrap_or(usize::MAX)).or_default().push(op.clone());
-        }
-        let mut remove: Vec<u64> = Vec::new();
-        let mut next_no = m.next_no.max(1);
-        for (idx, gops) in groups {
-            let (base, old) = if idx == usize::MAX {
-                (Rc::new(View::parse(kvfmt::encode(&[]).map_err(Error::RustError)?).map_err(Error::RustError)?), None)
-            } else {
-                (load_chunk(env, &m.chunks[idx]).await?.0, Some(&m.chunks[idx]))
+    let mut next_no = m.next_no.max(1);
+    for (idx, gops) in groups {
+        let (base, old) = if idx == usize::MAX {
+            (Rc::new(View::parse(kvfmt::encode(&[]).map_err(Error::RustError)?).map_err(Error::RustError)?), None)
+        } else {
+            (load_chunk(env, &m.chunks[idx]).await?.0, Some(&m.chunks[idx]))
+        };
+        let outs = base.apply(&gops, TARGET_CHUNK).map_err(Error::RustError)?;
+        if let Some(o) = old { remove.push(o.name.clone()); }
+        for (i, (plain, min, max)) in outs.into_iter().enumerate() {
+            // UZ: birinchi qism eski raqamni saqlaydi (db_1_v1 -> db_1_v2), 1 MB dan oshib bo'linsa keyingi raqam (db_2_v1) ochiladi. EN/RU: split -> next number.
+            let (no, ver) = match (i, old) {
+                (0, Some(o)) => (o.no, o.ver + 1),
+                _ => { let n = next_no; next_no += 1; (n, 1) }
             };
-            let outs = base.apply(&gops, TARGET_CHUNK).map_err(Error::RustError)?;
-            if let Some(o) = old { remove.push(o.no); }
-            for (i, (plain, min, max)) in outs.into_iter().enumerate() {
-                let (no, ver) = match (i, old) {
-                    (0, Some(o)) => (o.no, o.ver + 1),
-                    _ => { let n = next_no; next_no += 1; (n, 1) }
-                };
-                let key_hex = crate::random_hex(64);
-                let key = hex_key(&key_hex)?;
-                let sealed = kvfmt::seal(&key, &plain).map_err(Error::RustError)?;
-                let rows = View::parse(plain.clone()).map_err(Error::RustError)?.len() as u32;
-                specs.push(Upload { table: it.table.clone(), no, ver, name: format!("{}_{}", kvfmt::chunk_name(&it.table, no, ver), &key_hex[..8]), sealed, key_hex, min, max, rows, plain });
-            }
+            let key_hex = crate::random_hex(64);
+            let key = hex_key(&key_hex)?;
+            let sealed = kvfmt::seal(&key, &plain).map_err(Error::RustError)?;
+            let rows = View::parse(plain.clone()).map_err(Error::RustError)?.len() as u32;
+            specs.push(Upload { no, ver, name: chunk_label(no, ver), sealed, key_hex, min, max, rows, plain });
         }
-        plan.push((it.table.clone(), m.rev, remove));
     }
     let results = futures_util::future::join_all(specs.into_iter().map(|u| upload(env, u))).await;
-    let mut adds: BTreeMap<String, Vec<ChunkMeta>> = BTreeMap::new();
+    let mut adds: Vec<ChunkMeta> = Vec::new();
     let mut views: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut failed: Option<Error> = None;
     for r in results {
-        let (table, cm, plain) = r?;
-        views.push((cm.name.clone(), plain));
-        adds.entry(table).or_default().push(cm);
+        match r { Ok((cm, plain)) => { views.push((cache_name(&cm), plain)); adds.push(cm); } Err(e) => failed = Some(e) }
     }
-    let commits: Vec<TableCommit> = plan.into_iter().map(|(tbl, rev, remove)| {
-        let add = adds.remove(&tbl).unwrap_or_default();
-        TableCommit { tbl, rev, remove, add }
-    }).collect();
-    let uploaded: Vec<i64> = commits.iter().flat_map(|c| c.add.iter().map(|a| a.msg_id)).collect();
-    let committed = kvsb::commit(env, now_ms(), commits).await;
+    if let Some(e) = failed {
+        let ids: Vec<i64> = adds.iter().map(|a| a.msg_id).collect();
+        tg_delete_many(env, &ids).await;
+        return Err(e);
+    }
+    let uploaded: Vec<i64> = adds.iter().map(|a| a.msg_id).collect();
+    let committed = kvsb::commit(env, now_ms(), &read, &remove, &adds).await;
     // UZ: to'qnashuv yoki xato — yuklangan fayllar ro'yxatga kirmadi: DARHOL o'chiriladi (yetim fayl qolmasin). EN/RU: delete uploads that never made it into the registry.
     if !matches!(committed, Ok(CommitResult::Ok(_))) { tg_delete_many(env, &uploaded).await; }
     match committed? {
-        CommitResult::Ok(metas) => {
-            METAS.with(|c| { let mut c = c.borrow_mut(); for (t, m) in metas { c.insert(t, (m, now_ms())); } });
+        CommitResult::Ok(list) => {
+            METAS.with(|c| { c.borrow_mut().insert("*".to_string(), (list, now_ms())); });
             for (name, plain) in views {
                 if let Ok(v) = View::parse(plain) { hot_put(&name, Rc::new(v)); }
             }
             Ok(true)
         }
-        // UZ: to'qnashuv — yuklangan fayllar ro'yxatga kirmadi (yetim, keyin tozalanadi). EN/RU: conflict; uploaded files stay orphans.
-        CommitResult::Conflict(_) => Ok(false),
+        CommitResult::Conflict => Ok(false),
     }
 }
 
-/// UZ: jadvalning bir xil `rev` dagi to'liq surati. `fresh=false` — o'qish uchun (keshlangan ro'yxat), `true` — yozishdan oldin. EN/RU: consistent snapshot.
-pub async fn snapshot(env: &Env, table: &str, fresh: bool) -> Result<(u64, Vec<(String, Value)>)> {
-    let m = if fresh { meta(env, table).await? } else { meta_cached(env, table).await? };
-    let mut out = Vec::new();
-    for c in &m.chunks {
-        let (v, _) = load_chunk(env, c).await?;
-        out.extend(v.range("", None, usize::MAX, false).map_err(Error::RustError)?);
+/// UZ: bir nechta jadvalning to'liq surati BITTA ro'yxatdan; har bo'lak bir marta ochiladi. Qaytadi: o'qilgan bo'laklar nomlari (yozishda tekshiriladi) va har jadval qatorlari.
+///     `fresh=false` — o'qish (keshlangan ro'yxat), `true` — yozishdan oldin. EN/RU: consistent snapshot of several tables.
+pub async fn snapshot_tables(env: &Env, tables: &[String], fresh: bool) -> Result<(Vec<String>, Vec<Vec<(String, Value)>>)> {
+    let m = meta_all(env, fresh).await?;
+    let mut loaded: HashMap<usize, Rc<View>> = HashMap::new();
+    let mut read: Vec<String> = Vec::new();
+    let mut out = Vec::with_capacity(tables.len());
+    for t in tables {
+        let (lo, hi) = range_of(t);
+        let mut rows = Vec::new();
+        for (i, c) in m.chunks.iter().enumerate() {
+            if c.max.as_str() < lo.as_str() || c.min.as_str() >= hi.as_str() { continue; }
+            let v = match loaded.get(&i) {
+                Some(v) => v.clone(),
+                None => { let (v, _) = load_chunk(env, c).await?; loaded.insert(i, v.clone()); read.push(c.name.clone()); v }
+            };
+            rows.extend(v.range(&lo, Some(hi.as_str()), usize::MAX, false).map_err(Error::RustError)?.into_iter().map(|(k, x)| (strip(t, &k), x)));
+        }
+        out.push(rows);
     }
-    Ok((m.rev, out))
+    Ok((read, out))
 }
 
 /// UZ: bir nechta xabarni BITTA chaqiruvda o'chiradi (`deleteMessages`, 100 tagacha) — ichki chaqiruvlarni tejaydi. Xato bo'lsa `false`. EN/RU: bulk delete.
@@ -304,27 +311,6 @@ pub async fn gc(env: &Env) -> Result<Value> {
     Ok(json!({"deleted": deleted, "pending": pending}))
 }
 
-/// UZ: UMUMIY JAMLAMA: bir nechta kalit oralig'ini (har biri bitta jadval) BIR xil `rev` dagi bitta ro'yxatdan o'qiydi; har bo'lak bir marta ochiladi.
-///     `fresh=false` — o'qish (keshlangan ro'yxat), `true` — yozishdan oldin. EN: reads several key ranges from one consistent registry snapshot. RU: chtenie diapazonov.
-pub async fn snapshot_ranges(env: &Env, table: &str, ranges: &[(String, String)], fresh: bool) -> Result<(u64, Vec<Vec<(String, Value)>>)> {
-    let m = if fresh { meta(env, table).await? } else { meta_cached(env, table).await? };
-    let mut loaded: HashMap<usize, Rc<View>> = HashMap::new();
-    let mut out = Vec::with_capacity(ranges.len());
-    for (lo, hi) in ranges {
-        let mut rows = Vec::new();
-        for (i, c) in m.chunks.iter().enumerate() {
-            if c.max.as_str() < lo.as_str() || c.min.as_str() >= hi.as_str() { continue; }
-            let v = match loaded.get(&i) {
-                Some(v) => v.clone(),
-                None => { let (v, _) = load_chunk(env, c).await?; loaded.insert(i, v.clone()); v }
-            };
-            rows.extend(v.range(lo, Some(hi.as_str()), usize::MAX, false).map_err(Error::RustError)?);
-        }
-        out.push(rows);
-    }
-    Ok((m.rev, out))
-}
-
 /// UZ: izolyat keshlarini tozalaydi (ro'yxat nusxasi, ochilgan bo'laklar, fayl yo'llari). EN/RU: clears isolate caches.
 pub fn clear_caches() {
     HOT.with(|h| h.borrow_mut().clear());
@@ -352,12 +338,12 @@ pub async fn wipe(env: &Env) -> Result<Value> {
     Ok(json!({"done": false, "deleted": deleted}))
 }
 
-/// UZ: bitta jadvalni butunlay olib tashlaydi (fayllari ham). EN/RU: drops one table with its files.
+/// UZ: bitta jadvalning hamma qatorini o'chiradi (yangi bo'laklar bilan; eski versiyalar GC navbatiga tushadi). EN/RU: deletes all rows of a table.
 pub async fn drop_table(env: &Env, table: &str) -> Result<usize> {
-    let ids = kvsb::drop_table(env, table).await?;
-    tg_delete_many(env, &ids).await;
-    METAS.with(|m| m.borrow_mut().remove(table));
-    Ok(ids.len())
+    let rows = all_rows(env, table).await?;
+    let n = rows.len();
+    if n > 0 { commit(env, table, rows.into_iter().map(|(k, _)| Op::Del(k)).collect()).await?; }
+    Ok(n)
 }
 
 /// UZ: `/__kv/selftest` — yozish, o'qish, tahrir, o'chirish, bo'linish, GC; faqat hisoblar (soat so'rov ichida to'xtab turadi).
@@ -372,8 +358,10 @@ pub async fn selftest(env: &Env) -> Result<Value> {
     let ops: Vec<Op> = (0..300).map(|i| Op::Put(format!("{i:08}"), json!({"i": i, "pad": pad, "name": format!("Qism {i} ўзбек")}))).collect();
     let w = commit(env, &table, ops).await;
     rec("yozish 300 qator", w.is_ok(), format!("{:?}", w.as_ref().err().map(|e| e.to_string())));
-    let m = meta(env, &table).await?;
-    rec("bo'laklarga bo'linish", m.chunks.len() >= 2, format!("{} bo'lak, rev {}", m.chunks.len(), m.rev));
+    let all = meta_all(env, true).await?;
+    let (tlo, thi) = range_of(&table);
+    let m = TableMeta { rev: 0, next_no: all.next_no, chunks: all.chunks.iter().filter(|c| c.max.as_str() >= tlo.as_str() && c.min.as_str() < thi.as_str()).cloned().collect() };
+    rec("bo'laklarga bo'linish", m.chunks.len() >= 2, format!("{} bo'lak: {}", m.chunks.len(), m.chunks.iter().map(|c| c.name.clone()).collect::<Vec<_>>().join(",")));
     let ordered = m.chunks.windows(2).all(|w| w[0].max < w[1].min);
     rec("kalit oraliqlari kesishmaydi", ordered, m.chunks.iter().map(|c| format!("{}:{}..{}", c.no, c.min, c.max)).collect::<Vec<_>>().join(" "));
 
@@ -400,7 +388,7 @@ pub async fn selftest(env: &Env) -> Result<Value> {
 
     // 5) xotirasiz o'qish (kesh/Telegram'dan) — ko'rinishlar tozalanadi
     HOT.with(|h| h.borrow_mut().clear());
-    let m2 = meta(env, &table).await?;
+    let m2 = meta_all(env, true).await?;
     let (_, src) = load_chunk(env, &m2.chunks[0]).await?;
     rec("xotira tozalangach qayta ochish", true, format!("manba: {src}"));
 

@@ -131,8 +131,9 @@ class LibraryStore(
                 val failed = !fav.ok || !hist.ok
                 _state.update { s ->
                     s.copy(
-                        favorites = if (fav.ok) parseFavorites(fav.json) else s.favorites,
-                        history = if (hist.ok) parseHistory(hist.json) else s.history,
+                        // Yuborilmagan (paketdagi) o'zgarishlar server ro'yxatiga qo'shib ko'rsatiladi — 5 daqiqalik kutish ekranda sezilmasin.
+                        favorites = if (fav.ok) overlayFavorites(parseFavorites(fav.json), s.favorites) else s.favorites,
+                        history = if (hist.ok) overlayHistory(parseHistory(hist.json), s.history) else s.history,
                         loading = false,
                         loaded = true,
                         error = if (failed) (fav.error ?: hist.error ?: "Server bilan bog'lanib bo'lmadi") else null,
@@ -146,6 +147,45 @@ class LibraryStore(
                 lock.unlock()
             }
         }
+    }
+
+    /** Server ro'yxatiga hali yuborilmagan sevimli o'zgarishlarini qo'llaydi (o'chirilgan — yo'qoladi, qo'shilgan — mahalliy holatdan olinadi). */
+    private fun overlayFavorites(server: List<Season>, local: List<Season>): List<Season> {
+        val pend = uz.arumediatv.com.AppServices.sync.pendingFavorites()
+        if (pend.isEmpty()) return server
+        val out = server.filterNot { pend["${it.animeId}:${it.seasonId}"] == false }.toMutableList()
+        for ((k, on) in pend) {
+            if (!on) continue
+            if (out.any { it.key == k }) continue
+            local.firstOrNull { it.key == k }?.let { out.add(0, it) }
+        }
+        return out
+    }
+
+    /** Server ro'yxatiga hali yuborilmagan tarix o'zgarishlarini qo'llaydi: yashirilganlar olinadi, yangi ko'rilganlar mahalliy (yangiroq) holati bilan ko'rsatiladi. */
+    private fun overlayHistory(server: List<HistoryItem>, local: List<HistoryItem>): List<HistoryItem> {
+        val pend = uz.arumediatv.com.AppServices.sync.pendingHistory()
+        if (pend.isEmpty()) return server
+        val out = server.toMutableList()
+        for (p in pend) {
+            val same: (HistoryItem) -> Boolean = { it.animeId == p.animeId && it.seasonId == p.seasonId && it.epizodId == p.epizodId }
+            if (p.deleted) { out.removeAll(same); continue }
+            val mine = local.firstOrNull(same) ?: continue
+            val i = out.indexOfFirst(same)
+            if (i >= 0) out.removeAt(i)
+            out.add(0, mine)
+        }
+        return out.sortedByDescending { it.updatedAt }
+    }
+
+    /** Pleyerda qism ko'rildi: tarix ro'yxati serverga yuborilishini kutmasdan darhol yangilanadi (yuborish keyin, bitta paket bilan). */
+    fun applyHistory(item: HistoryItem) {
+        _state.update { s ->
+            val rest = s.history.filterNot { it.animeId == item.animeId && it.seasonId == item.seasonId && it.epizodId == item.epizodId }
+            val prev = s.history.firstOrNull { it.animeId == item.animeId && it.seasonId == item.seasonId && it.epizodId == item.epizodId }
+            s.copy(history = listOf(item.copy(views = maxOf(item.views, prev?.views ?: 0), thumbUrl = item.thumbUrl.ifBlank { prev?.thumbUrl ?: "" })) + rest)
+        }
+        scope.launch { saveCurrent() }
     }
 
     /** Pleyerda yurakcha bosildi: ro'yxat server javobini kutmasdan o'zgaradi (60 soniyalik "yangi" belgisi ham tushadi). */

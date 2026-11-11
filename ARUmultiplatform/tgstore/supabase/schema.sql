@@ -1,194 +1,159 @@
--- UZ: tgstore RO'YXATI (Supabase / Postgres). FAQAT bo'lak nomi, Telegram file_id, ochish kaliti va kalit oralig'i. Ma'lumotning o'zi YO'Q.
--- EN: tgstore REGISTRY (Supabase / Postgres). ONLY chunk name, Telegram file_id, decryption key and key range. NO data.
--- RU: REESTR tgstore (Supabase / Postgres). TOLKO imya chanka, file_id, klyuch i diapazon. Dannykh NET.
+-- UZ: tgstore RO'YXATI (Supabase / Postgres): FAQAT BITTA JADVAL "DB_CHUNK". Har qator = bitta bo'lak fayli (db_1_v1, db_2_v1, ...) yoki yordamchi qator.
+--     Bo'lak 1 MB ga to'lsa worker keyingisini (db_2_v1) yaratadi; o'zgarganda versiya oshadi (db_1_v2), eskisi 1 daqiqadan keyin Telegram'dan o'chadi.
+--     Ma'lumotning o'zi YO'Q: faqat nom, Telegram file_id, ochish kaliti va kalit oralig'i.
+-- EN: tgstore REGISTRY (Supabase / Postgres): ONE TABLE "DB_CHUNK". One row per chunk file (db_1_v1, db_2_v1, ...) or helper row. When a chunk reaches 1 MB the worker
+--     creates the next one (db_2_v1); a change bumps the version (db_1_v2) and the old one is deleted from Telegram after a minute. No data here, only name/file_id/key/range.
+-- RU: REESTR tgstore: ODNA TABLITSA "DB_CHUNK". Odna stroka = odin fayl chanka (db_1_v1, db_2_v1, ...) ili sluzhebnaya stroka.
 --
--- UZ: XAVFSIZLIK: jadvallarda RLS yoqilgan va siyosat YO'Q (ochiq kalit bilan to'g'ridan-to'g'ri o'qib/yozib BO'LMAYDI). Hamma funksiya `security definer`
---     va birinchi parametri `p_tok` — maxfiy kalit (worker'dagi `STORE_KEY`); bazada uning faqat SHA-256 xeshi (`kv_auth`). service_role kaliti KERAK EMAS.
--- EN: SECURITY: RLS on with no policies (the public key cannot read/write tables). Every function is `security definer` and requires `p_tok`
---     (the worker's secret `STORE_KEY`); only its SHA-256 hash is stored (`kv_auth`). No service_role key needed.
+-- UZ: `kind`: 'chunk' (bo'lak) | 'gc' (o'chiriladigan eski fayl) | 'mark' (kesh belgisi) | 'auth' (maxfiy kalit xeshi) | 'ping' (kunlik uyg'otish).
+-- UZ: XAVFSIZLIK: RLS yoqilgan, siyosat YO'Q (ochiq kalit bilan jadvalni to'g'ridan-to'g'ri o'qib/yozib BO'LMAYDI). Hamma funksiya `security definer` va birinchi parametri `p_tok`
+--     (workerdagi `STORE_KEY`); bazada faqat uning SHA-256 xeshi. service_role kaliti KERAK EMAS.
+-- EN: SECURITY: RLS on, no policies. Every function is `security definer` and needs `p_tok`; only its SHA-256 hash is stored. No service_role key needed.
 
-create table if not exists kv_tables (
-  tbl      text primary key,
-  rev      bigint not null default 0,
-  next_no  bigint not null default 1
+create table if not exists "DB_CHUNK" (
+  name    text primary key,                 -- chunk: db_<no>_v<ver> | gc:<msg_id> | mark:<key> | auth | ping
+  kind    text not null default 'chunk',
+  no      bigint,
+  ver     bigint,
+  file_id text,
+  msg_id  bigint,
+  key     text,                             -- AES-256-GCM kaliti (hex) / decryption key
+  kmin    text,
+  kmax    text,
+  rows    int    default 0,
+  size    bigint default 0,
+  due     bigint,                           -- gc: o'chirish vaqti (ms)
+  val     bigint,                           -- mark / ping qiymati
+  note    text,                             -- auth: sha256(STORE_KEY)
+  at      timestamptz default now()
 );
+create index if not exists db_chunk_kind_kmin on "DB_CHUNK" (kind, kmin);
+alter table "DB_CHUNK" enable row level security;
 
-create table if not exists kv_chunks (
-  tbl      text   not null,
-  no       bigint not null,
-  ver      bigint not null,
-  name     text   not null,
-  file_id  text   not null,
-  msg_id   bigint not null default 0,
-  key      text   not null,
-  kmin     text   not null,
-  kmax     text   not null,
-  rows     int    not null default 0,
-  size     bigint not null default 0,
-  primary key (tbl, no)
-);
-create index if not exists kv_chunks_range on kv_chunks (tbl, kmin);
+-- ── Eski jadvallardan KO'CHIRISH (bo'lsa): tirik bo'laklar saqlanadi, qolgan eski fayllar o'chirish navbatiga tushadi ──────────────────────────────
+do $$
+begin
+  if to_regclass('public.kv_chunks') is not null then
+    insert into "DB_CHUNK"(name, kind, no, ver, file_id, msg_id, key, kmin, kmax, rows, size)
+      select 'db_' || no || '_v' || ver, 'chunk', no, ver, file_id, msg_id, key, kmin, kmax, rows, size from kv_chunks where tbl = 'pool'
+      on conflict do nothing;
+    insert into "DB_CHUNK"(name, kind, msg_id, due)
+      select 'gc:' || msg_id, 'gc', msg_id, 0 from kv_chunks where tbl <> 'pool' and msg_id <> 0
+      on conflict do nothing;
+  end if;
+  if to_regclass('public.kv_gc') is not null then
+    insert into "DB_CHUNK"(name, kind, msg_id, due) select 'gc:' || msg_id, 'gc', msg_id, due from kv_gc on conflict do nothing;
+  end if;
+end $$;
 
--- UZ: almashtirilgan eski fayllar (Telegram'dan keyinroq o'chiriladi) / EN: replaced files to delete later / RU: starye fayly na udalenie
-create table if not exists kv_gc (
-  msg_id bigint primary key,
-  name   text,
-  due    bigint not null
-);
+insert into "DB_CHUNK"(name, kind, note) values ('auth', 'auth', 'f874232e514ca8c0475e091aea63bfe731c4ca6e34b6f5db04c25480251e36d0')
+  on conflict (name) do update set note = excluded.note;
+insert into "DB_CHUNK"(name, kind, val) values ('ping', 'ping', 0) on conflict do nothing;
 
--- UZ: keshni bekor qilish belgilari (production `MarkHub` o'rniga) / EN: cache-invalidation marks (instead of the MarkHub DO)
-create table if not exists kv_marks (
-  k text primary key,
-  v bigint not null default 0
-);
-
-create table if not exists kv_auth (
-  id int primary key default 1,
-  h  text not null   -- sha256(STORE_KEY) hex
-);
-alter table kv_auth enable row level security;
+-- ── Funksiyalar / Functions ─────────────────────────────────────────────────────────────────────────────────────
 
 create or replace function kv_check(p_tok text) returns void
 language plpgsql stable security definer set search_path = public as $$
 begin
-  if p_tok is null or encode(sha256(convert_to(p_tok, 'utf8')), 'hex') is distinct from (select h from kv_auth where id = 1) then
+  if p_tok is null or encode(sha256(convert_to(p_tok, 'utf8')), 'hex') is distinct from (select note from "DB_CHUNK" where name = 'auth') then
     raise exception 'unauthorized' using errcode = '28000';
   end if;
 end $$;
 
--- UZ: kunlik "uyg'otish" (bepul reja 7 kun so'rovsiz to'xtatiladi) / EN: daily keep-alive
-create table if not exists kv_ping (
-  id int primary key default 1,
-  at timestamptz not null default now(),
-  n  bigint not null default 0
-);
-insert into kv_ping(id) values (1) on conflict do nothing;
-
-alter table kv_tables enable row level security;
-alter table kv_chunks enable row level security;
-alter table kv_gc     enable row level security;
-alter table kv_marks  enable row level security;
-alter table kv_ping   enable row level security;
-
--- ── Funksiyalar / Functions ─────────────────────────────────────────────────────────────────────────────────────
-
--- UZ: bir nechta jadvalning ro'yxati bir chaqiruvda: {"tbl": {"rev":..,"next_no":..,"chunks":[...]}}
-create or replace function kv_get_many(p_tok text, p_tbls text[]) returns jsonb
-language sql stable security definer set search_path = public as $$
-  select coalesce(jsonb_object_agg(t,
-    jsonb_build_object(
-      'rev',     coalesce((select rev from kv_tables where tbl = t), 0),
-      'next_no', coalesce((select next_no from kv_tables where tbl = t), 1),
-      'chunks',  coalesce((select jsonb_agg(jsonb_build_object(
-                    'no', c.no, 'ver', c.ver, 'name', c.name, 'file_id', c.file_id, 'msg_id', c.msg_id,
-                    'key', c.key, 'min', c.kmin, 'max', c.kmax, 'rows', c.rows, 'size', c.size) order by c.kmin)
-                  from kv_chunks c where c.tbl = t), '[]'::jsonb)
-    )), '{}'::jsonb)
-  from unnest(p_tbls) as t, (select kv_check(p_tok)) _a;
-$$;
-
--- UZ: ATOMIK commit — bir nechta jadval bitta tranzaksiyada. p = {"now": ms, "gc_delay": ms,
---     "tables":[{"tbl","rev","remove":[no..],"add":[{no,ver,name,file_id,msg_id,key,min,max,rows,size}]}]}
---     Biror jadvalning `rev` i mos kelmasa HECH NARSA o'zgarmaydi: {"ok":false,"conflict":"<jadval>"}.
--- EN: ATOMIC multi-table commit; a stale `rev` on any table changes nothing and reports the conflict.
-create or replace function kv_commit(p_tok text, p jsonb) returns jsonb
+-- UZ: hamma tirik bo'laklar (kalit oralig'i bo'yicha tartiblangan) va keyingi bo'lak raqami / all live chunks and the next chunk number
+create or replace function kv_list(p_tok text) returns jsonb
 language plpgsql security definer set search_path = public as $$
-declare
-  t jsonb; tb text; cur bigint; item jsonb; n bigint; order_tbls text[];
 begin
   perform kv_check(p_tok);
-  -- jadvallarni tartib bilan qulflaymiz (deadlock bo'lmasin)
-  select array_agg(x->>'tbl' order by x->>'tbl') into order_tbls from jsonb_array_elements(p->'tables') x;
-  foreach tb in array order_tbls loop
-    insert into kv_tables(tbl) values (tb) on conflict do nothing;
-    perform 1 from kv_tables where tbl = tb for update;
-  end loop;
-  -- 1) tekshiruv
-  for t in select * from jsonb_array_elements(p->'tables') loop
-    select rev into cur from kv_tables where tbl = t->>'tbl';
-    if cur <> (t->>'rev')::bigint then
-      return jsonb_build_object('ok', false, 'conflict', t->>'tbl');
-    end if;
-  end loop;
-  -- 2) qo'llash
-  for t in select * from jsonb_array_elements(p->'tables') loop
-    tb := t->>'tbl';
-    insert into kv_gc(msg_id, name, due)
-      select c.msg_id, c.name, (p->>'now')::bigint + (p->>'gc_delay')::bigint
-      from kv_chunks c
-      where c.tbl = tb and c.msg_id <> 0
-        and c.no in (select (v)::bigint from jsonb_array_elements_text(t->'remove') v)
+  return jsonb_build_object(
+    'rev', 0,
+    'next_no', coalesce((select max(no) from "DB_CHUNK" where kind = 'chunk'), 0) + 1,
+    'chunks', coalesce((select jsonb_agg(jsonb_build_object(
+                'no', no, 'ver', ver, 'name', name, 'file_id', file_id, 'msg_id', msg_id,
+                'key', key, 'min', kmin, 'max', kmax, 'rows', rows, 'size', size) order by kmin)
+              from "DB_CHUNK" where kind = 'chunk'), '[]'::jsonb));
+end $$;
+
+-- UZ: bo'laklarni ATOMIK almashtirish. p = {"now","gc_delay","read":[nom..],"remove":[nom..],"add":[{no,ver,name,file_id,msg_id,key,min,max,rows,size}]}
+--     `read` va `remove` dagi bo'laklar hali tirik bo'lishi shart, yangi nomlar band bo'lmasligi shart; aks holda HECH NARSA o'zgarmaydi: {"ok":false}.
+-- EN: ATOMIC chunk swap with a read-set check (a stale read/remove or a taken new name changes nothing).
+create or replace function kv_commit(p_tok text, p jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare names text[]; rem text[]; item jsonb;
+begin
+  perform kv_check(p_tok);
+  perform pg_advisory_xact_lock(424201);
+  rem := array(select jsonb_array_elements_text(coalesce(p->'remove', '[]'::jsonb)));
+  names := array(select jsonb_array_elements_text(coalesce(p->'read', '[]'::jsonb)) union select unnest(rem));
+  if coalesce(array_length(names, 1), 0) > 0
+     and (select count(*) from "DB_CHUNK" where kind = 'chunk' and name = any(names)) <> array_length(names, 1) then
+    return jsonb_build_object('ok', false, 'conflict', 'stale');
+  end if;
+  if exists (select 1 from "DB_CHUNK" c where c.kind = 'chunk' and c.name in (select a->>'name' from jsonb_array_elements(coalesce(p->'add', '[]'::jsonb)) a)
+             and not (c.name = any(rem))) then
+    return jsonb_build_object('ok', false, 'conflict', 'name');
+  end if;
+  insert into "DB_CHUNK"(name, kind, msg_id, due)
+    select 'gc:' || msg_id, 'gc', msg_id, (p->>'now')::bigint + (p->>'gc_delay')::bigint
+    from "DB_CHUNK" where kind = 'chunk' and msg_id <> 0 and name = any(rem)
     on conflict do nothing;
-    delete from kv_chunks where tbl = tb and no in (select (v)::bigint from jsonb_array_elements_text(t->'remove') v);
-    for item in select * from jsonb_array_elements(t->'add') loop
-      n := (item->>'no')::bigint;
-      delete from kv_chunks where tbl = tb and no = n;
-      insert into kv_chunks(tbl, no, ver, name, file_id, msg_id, key, kmin, kmax, rows, size)
-      values (tb, n, (item->>'ver')::bigint, item->>'name', item->>'file_id', coalesce((item->>'msg_id')::bigint, 0),
-              item->>'key', item->>'min', item->>'max', coalesce((item->>'rows')::int, 0), coalesce((item->>'size')::bigint, 0));
-      update kv_tables set next_no = greatest(next_no, n + 1) where tbl = tb;
-    end loop;
-    update kv_tables set rev = rev + 1 where tbl = tb;
+  delete from "DB_CHUNK" where kind = 'chunk' and name = any(rem);
+  for item in select * from jsonb_array_elements(coalesce(p->'add', '[]'::jsonb)) loop
+    insert into "DB_CHUNK"(name, kind, no, ver, file_id, msg_id, key, kmin, kmax, rows, size)
+    values (item->>'name', 'chunk', (item->>'no')::bigint, (item->>'ver')::bigint, item->>'file_id', coalesce((item->>'msg_id')::bigint, 0),
+            item->>'key', item->>'min', item->>'max', coalesce((item->>'rows')::int, 0), coalesce((item->>'size')::bigint, 0));
   end loop;
-  return jsonb_build_object('ok', true, 'metas', kv_get_many(p_tok, order_tbls));
+  return jsonb_build_object('ok', true, 'list', kv_list(p_tok));
 end $$;
 
 create or replace function kv_gc_take(p_tok text, p_now bigint) returns jsonb
-language sql stable security definer set search_path = public as $$
-  select jsonb_build_object(
-    'due', coalesce((select jsonb_agg(jsonb_build_object('msg_id', msg_id, 'name', name)) from (select * from kv_gc where due <= p_now order by due limit 50) g), '[]'::jsonb),
-    'pending', (select count(*) from kv_gc))
-  from (select kv_check(p_tok)) _a;
-$$;
+language plpgsql security definer set search_path = public as $$
+begin
+  perform kv_check(p_tok);
+  return jsonb_build_object(
+    'due', coalesce((select jsonb_agg(jsonb_build_object('msg_id', msg_id)) from (select msg_id from "DB_CHUNK" where kind = 'gc' and due <= p_now order by due limit 100) g), '[]'::jsonb),
+    'pending', (select count(*) from "DB_CHUNK" where kind = 'gc'));
+end $$;
 
 create or replace function kv_gc_done(p_tok text, p_ids bigint[]) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform kv_check(p_tok);
-  delete from kv_gc where msg_id = any(p_ids);
-  return jsonb_build_object('ok', true, 'pending', (select count(*) from kv_gc));
+  delete from "DB_CHUNK" where kind = 'gc' and msg_id = any(p_ids);
+  return jsonb_build_object('ok', true, 'pending', (select count(*) from "DB_CHUNK" where kind = 'gc'));
 end $$;
 
--- UZ: keshni bekor qilish belgilari: p = {"bump":[k..], "at": ms, "get":[k..]} -> {"v": {k: n}}  (production `MarkHub` bilan bir xil ma'no: monoton)
+-- UZ: keshni bekor qilish belgilari: p = {"bump":[k..], "at": ms, "get":[k..]} -> {"v": {k: n}} (monoton)
 create or replace function kv_marks(p_tok text, p jsonb) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare kk text; at_ bigint := coalesce((p->>'at')::bigint, 0);
 begin
   perform kv_check(p_tok);
   for kk in select jsonb_array_elements_text(coalesce(p->'bump', '[]'::jsonb)) loop
-    insert into kv_marks(k, v) values (kk, greatest(at_, 1))
-    on conflict (k) do update set v = greatest(excluded.v, kv_marks.v + 1);
+    insert into "DB_CHUNK"(name, kind, val) values ('mark:' || kk, 'mark', greatest(at_, 1))
+    on conflict (name) do update set val = greatest(excluded.val, "DB_CHUNK".val + 1);
   end loop;
   return jsonb_build_object('v', coalesce((
-    select jsonb_object_agg(m.k, m.v) from kv_marks m
-    where m.k in (select jsonb_array_elements_text(coalesce(p->'get', '[]'::jsonb)))), '{}'::jsonb));
+    select jsonb_object_agg(substr(m.name, 6), m.val) from "DB_CHUNK" m
+    where m.kind = 'mark' and m.name in (select 'mark:' || x from jsonb_array_elements_text(coalesce(p->'get', '[]'::jsonb)) x)), '{}'::jsonb));
 end $$;
 
 create or replace function kv_ping(p_tok text) returns jsonb
 language plpgsql security definer set search_path = public as $$
 begin
   perform kv_check(p_tok);
-  update kv_ping set at = now(), n = n + 1 where id = 1;
-  return (select jsonb_build_object('at', at, 'n', n) from kv_ping where id = 1);
+  update "DB_CHUNK" set val = coalesce(val, 0) + 1, at = now() where name = 'ping';
+  return (select jsonb_build_object('at', at, 'n', val) from "DB_CHUNK" where name = 'ping');
 end $$;
 
--- UZ: funksiyalarni ochiq kalit ham chaqira oladi, lekin `p_tok` bo'lmasa `unauthorized`. `kv_check` ni tashqaridan chaqirib bo'lmaydi.
--- EN: the public key may call them, but without a valid `p_tok` they fail with `unauthorized`.
-revoke all on function kv_check(text) from public, anon, authenticated;
-revoke all on function kv_get_many(text, text[]), kv_commit(text, jsonb), kv_gc_take(text, bigint), kv_gc_done(text, bigint[]), kv_marks(text, jsonb), kv_ping(text) from public;
-grant execute on function kv_get_many(text, text[]), kv_commit(text, jsonb), kv_gc_take(text, bigint), kv_gc_done(text, bigint[]), kv_marks(text, jsonb), kv_ping(text) to anon, authenticated, service_role;
--- UZ: xesh alohida o'rnatiladi (maxfiy kalit repoga yozilmaydi): insert into kv_auth(id, h) values (1, '<sha256(STORE_KEY)>') on conflict (id) do update set h = excluded.h;
--- UZ: tozalash va jadvalni olib tashlash funksiyalari (tgstore). / EN: wipe and drop-table functions. / RU: funktsii ochistki.
+-- UZ: to'liq tozalash: Telegram'dan o'chiriladigan xabar raqamlari (navbatdagi p_limit ta), keyin belgilash va oxirida jadvalni bo'shatish
 create or replace function kv_wipe_take(p_tok text, p_limit int) returns jsonb
 language plpgsql security definer set search_path = public as $$
 declare ids bigint[];
 begin
   perform kv_check(p_tok);
   select coalesce(array_agg(m), '{}') into ids from (
-    select msg_id as m from kv_chunks where msg_id <> 0
-    union
-    select msg_id from kv_gc where msg_id <> 0
-    limit p_limit) x;
+    select msg_id as m from "DB_CHUNK" where kind in ('chunk', 'gc') and msg_id <> 0 limit p_limit) x;
   return jsonb_build_object('ids', to_jsonb(ids));
 end $$;
 
@@ -196,29 +161,21 @@ create or replace function kv_wipe_done(p_tok text, p_ids bigint[], p_final bool
 language plpgsql security definer set search_path = public as $$
 begin
   perform kv_check(p_tok);
-  update kv_chunks set msg_id = 0 where msg_id = any(p_ids);
-  delete from kv_gc where msg_id = any(p_ids);
+  update "DB_CHUNK" set msg_id = 0 where kind = 'chunk' and msg_id = any(p_ids);
+  delete from "DB_CHUNK" where kind = 'gc' and msg_id = any(p_ids);
   if p_final then
-    delete from kv_chunks where true;
-    delete from kv_tables where true;
-    delete from kv_gc where true;
-    delete from kv_marks where true;
+    delete from "DB_CHUNK" where kind in ('chunk', 'gc', 'mark');
   end if;
   return jsonb_build_object('ok', true);
 end $$;
 
-create or replace function kv_drop_table(p_tok text, p_tbl text) returns jsonb
-language plpgsql security definer set search_path = public as $$
-declare ids bigint[];
-begin
-  perform kv_check(p_tok);
-  select coalesce(array_agg(msg_id), '{}') into ids from kv_chunks where tbl = p_tbl and msg_id <> 0;
-  delete from kv_chunks where tbl = p_tbl;
-  delete from kv_tables where tbl = p_tbl;
-  return jsonb_build_object('ids', to_jsonb(ids));
-end $$;
+revoke all on function kv_check(text) from public, anon, authenticated;
+revoke all on function kv_list(text), kv_commit(text, jsonb), kv_gc_take(text, bigint), kv_gc_done(text, bigint[]), kv_marks(text, jsonb), kv_ping(text),
+                       kv_wipe_take(text, int), kv_wipe_done(text, bigint[], boolean) from public;
+grant execute on function kv_list(text), kv_commit(text, jsonb), kv_gc_take(text, bigint), kv_gc_done(text, bigint[]), kv_marks(text, jsonb), kv_ping(text),
+                          kv_wipe_take(text, int), kv_wipe_done(text, bigint[], boolean) to anon, authenticated, service_role;
 
-revoke all on function kv_wipe_take(text, int), kv_wipe_done(text, bigint[], boolean), kv_drop_table(text, text) from public;
-grant execute on function kv_wipe_take(text, int), kv_wipe_done(text, bigint[], boolean), kv_drop_table(text, text) to anon, authenticated, service_role;
-
--- UZ: kv_wipe_done "where true" bilan yangilandi (Supabase shartsiz DELETE ni bloklaydi).
+-- ── Eski jadval va funksiyalarni olib tashlash / drop the old tables and functions ────────────────────────────────────────────────────────────────────
+drop function if exists kv_get_many(text, text[]);
+drop function if exists kv_drop_table(text, text);
+drop table if exists kv_tables, kv_chunks, kv_gc, kv_marks, kv_auth, kv_ping cascade;
