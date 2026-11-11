@@ -55,7 +55,9 @@ async function runOne(client, st) {
   let tr = trCache.get(st.sql);
   if (!tr) { const r = translate(st.sql, schemaView); tr = { sql: finalSql(r), kind: r.kind, table: r.table }; if (tr.kind !== 'CREATE' && tr.kind !== 'ALTER') trCache.set(st.sql, tr); }
   const values = (st.args || []).map((a) => (a === null || a.type === 'null' || a.value === undefined ? null : a.type === 'blob' ? Buffer.from(a.base64 || a.value, 'base64') : String(a.value)));
-  const r = await client.query({ text: tr.sql, values, rowMode: 'array' });
+  // UZ: `dry` — faqat tahlil (EXPLAIN): so'rov bajarilmaydi, sintaksis/ustun xatolari aniqlanadi (production SQL'ni tekshirish uchun). EN/RU: dry = EXPLAIN only.
+  const text = st.dry && tr.kind !== 'CREATE' && tr.kind !== 'ALTER' ? `EXPLAIN ${tr.sql}` : tr.sql;
+  const r = await client.query({ text, values, rowMode: 'array' });
   if (tr.kind === 'CREATE' || tr.kind === 'ALTER') schemaCache.clear();
   const fields = r.fields || [];
   const out = {

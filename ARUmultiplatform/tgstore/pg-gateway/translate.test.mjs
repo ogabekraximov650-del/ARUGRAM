@@ -48,3 +48,27 @@ test('UPDATE ... RETURNING and DELETE keep shape', () => {
   assert.equal(T('UPDATE epizod_db SET ready_at=? WHERE anime_id=? RETURNING *'), 'UPDATE epizod_db SET ready_at=$1 WHERE anime_id=$2 RETURNING *');
   assert.equal(T('DELETE FROM users_db WHERE id=?'), 'DELETE FROM users_db WHERE id=$1');
 });
+
+test('GLOB becomes a regex match', () => {
+  const r = T("SELECT 1 FROM t WHERE SUBSTR(u,6) NOT GLOB '*[^0-9]*' AND a GLOB 'x?*'");
+  assert.ok(r.includes("!~ '^.*[^0-9].*$'"), r);
+  assert.ok(r.includes("~ '^x..*$'"), r);
+});
+
+test('CAST AS INTEGER is lenient like SQLite', () => {
+  const r = T('SELECT 1 FROM app_config WHERE CAST(app_config.cfg_value AS INTEGER) < ?');
+  assert.ok(r.includes("CASE WHEN (app_config.cfg_value)::text ~ '^-{0,1}[0-9]{1,18}$' THEN (app_config.cfg_value)::text::bigint ELSE 0 END"), r);
+  assert.ok(r.endsWith('< $1'), r);
+});
+
+test('strftime on unix seconds', () => {
+  const r = T("SELECT strftime('%Y-%m-%dT%H', (created_at + 18000000) / 1000, 'unixepoch') AS b, COUNT(*) FROM users_db GROUP BY b");
+  assert.ok(r.includes("to_char(to_timestamp((created_at + 18000000) / 1000) AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24')"), r);
+});
+
+test('numbered ?N placeholders and boolean sums', () => {
+  assert.equal(T('UPDATE t SET a=?1, b=?3 WHERE c=?2'), 'UPDATE t SET a=$1, b=$3 WHERE c=$2');
+  const r = T("SELECT (instr(done,',360p,')>0)+(instr(done,',480p,')>0) AS k FROM encode_jobs");
+  assert.ok(r.includes("((strpos(done,',360p,')>0)::int)+((strpos(done,',480p,')>0)::int)"), r);
+  assert.ok(T("SELECT 1 FROM t WHERE a=1 AND instr(x,'y')>0").includes("AND strpos(x,'y')>0"));
+});

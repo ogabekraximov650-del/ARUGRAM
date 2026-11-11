@@ -79,6 +79,65 @@ export function groupConcat(t) {
   return out + t.slice(last);
 }
 
+
+/** CAST(x AS INTEGER): SQLite matn bo'lsa 0 beradi, Postgres esa xato — shuning uchun xavfsiz shakl. EN/RU: SQLite-style lenient CAST to integer. */
+export function castInteger(t) {
+  const re = /\bCAST\s*\(/gi;
+  let out = '', last = 0, m;
+  while ((m = re.exec(t))) {
+    const open = m.index + m[0].length - 1;
+    const close = matchParen(t, open);
+    if (close < 0) break;
+    const inner = t.slice(open + 1, close);
+    const mm = inner.match(/^([\s\S]*)\s+AS\s+INTEGER\s*$/i);
+    if (!mm) continue;
+    const x = castInteger(mm[1]);
+    out += t.slice(last, m.index) + `(CASE WHEN (${x})::text ~ '^-{0,1}[0-9]{1,18}$' THEN (${x})::text::bigint ELSE 0 END)`;
+    last = close + 1; re.lastIndex = close + 1;
+  }
+  return out + t.slice(last);
+}
+
+/** x [NOT] GLOB 'pattern' -> x [!~|~] '^regex$' (andoza satri `strs` ichida almashtiriladi). EN/RU: GLOB -> POSIX regex. */
+export function globToRegex(p) {
+  let out = '^', inBr = false;
+  for (const ch of p) {
+    if (inBr) { out += ch; if (ch === ']') inBr = false; continue; }
+    if (ch === '[') { inBr = true; out += ch; }
+    else if (ch === '*') out += '.*';
+    else if (ch === '?') out += '.';
+    else if ('.+(){}|^$\\'.includes(ch)) out += '\\' + ch;
+    else out += ch;
+  }
+  return out + '$';
+}
+export function globOps(t, strs) {
+  return t.replace(/\b(NOT\s+)?GLOB\s+\u0001(\d+)\u0001/gi, (_, not, i) => {
+    const lit = strs[+i];
+    strs[+i] = "'" + globToRegex(lit.slice(1, -1).replace(/''/g, "'")).replace(/'/g, "''") + "'";
+    return `${not ? '!~' : '~'} \u0001${i}\u0001`;
+  });
+}
+
+/** strftime('fmt', expr, 'unixepoch') -> to_char(to_timestamp(expr) AT TIME ZONE 'UTC', 'fmt'). EN/RU: SQLite strftime for unix seconds. */
+export function strftimeOps(t, strs) {
+  const re = /\bstrftime\s*\(/gi;
+  let out = '', last = 0, m;
+  while ((m = re.exec(t))) {
+    const open = m.index + m[0].length - 1;
+    const close = matchParen(t, open);
+    if (close < 0) break;
+    const args = splitArgs(t.slice(open + 1, close));
+    const fm = args[0] && args[0].trim().match(/^\u0001(\d+)\u0001$/);
+    if (!fm || args.length < 3) continue;
+    const fmt = strs[+fm[1]].slice(1, -1).replace(/%Y/g, 'YYYY').replace(/%m/g, 'MM').replace(/%d/g, 'DD').replace(/%H/g, 'HH24').replace(/%M/g, 'MI').replace(/%S/g, 'SS').replace(/T/g, '"T"');
+    strs.push("'" + fmt.replace(/'/g, "''") + "'");
+    out += t.slice(last, m.index) + `to_char(to_timestamp(${args[1].trim()}) AT TIME ZONE 'UTC', \u0001${strs.length - 1}\u0001)`;
+    last = close + 1; re.lastIndex = close + 1;
+  }
+  return out + t.slice(last);
+}
+
 const firstWord = (t) => (t.trim().match(/^[A-Za-z]+/) || [''])[0].toUpperCase();
 
 /** CREATE TABLE / ALTER TABLE turlari: INTEGER -> BIGINT (millisekund vaqtlar 32 bitga sig'maydi), INTEGER PRIMARY KEY -> identity. */
@@ -132,8 +191,13 @@ export function translate(sql, schema) {
   }
   t = scalarMinMax(t);
   t = groupConcat(t);
+  t = castInteger(t);
+  t = globOps(t, strs);
+  t = strftimeOps(t, strs);
   t = t.replace(/\bLIKE\b/gi, 'ILIKE').replace(/\bNOT\s+ILIKE\b/gi, 'NOT ILIKE');
   t = t.replace(/\binstr\s*\(([^,()]+),([^()]+)\)/gi, 'strpos($1,$2)').replace(/\bifnull\s*\(/gi, 'COALESCE(');
+  // UZ: SQLite'da `(instr(..)>0)+(instr(..)>0)` mantiqiy qiymatlarni qo'shadi; Postgres'da boolean + boolean yo'q -> ::int. EN/RU: boolean arithmetic.
+  t = t.replace(/\((strpos\([^()]*\)\s*>\s*0)\)(?=\s*\+)/gi, '(($1)::int)').replace(/(\+\s*)\((strpos\([^()]*\)\s*>\s*0)\)/gi, '$1(($2)::int)');
   if (/^\s*(INSERT|REPLACE)\b/i.test(t)) {
     let ignore = false, replace = false;
     t = t.replace(/^\s*INSERT\s+OR\s+IGNORE\s+INTO\b/i, () => { ignore = true; return 'INSERT INTO'; });
@@ -160,6 +224,6 @@ export function translate(sql, schema) {
 }
 
 /** `?` -> `$1, $2, ...` (satr literallari allaqachon olib tashlangan). */
-export function numberParams(t) { let n = 0; return t.replace(/\?/g, () => `$${++n}`); }
+export function numberParams(t) { let n = 0; return t.replace(/\?(\d+)?/g, (_, d) => (d ? `$${d}` : `$${++n}`)); }
 
 export const finalSql = (r) => unmask(r.text, r.strs);
