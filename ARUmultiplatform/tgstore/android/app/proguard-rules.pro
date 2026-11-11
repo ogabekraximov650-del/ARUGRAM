@@ -31,5 +31,3 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
 -dontwarn javax.annotation.**
-
-// UZ: 32 bitli APK ham yig'iladi (armeabi-v7a). EN: a 32-bit APK is built as well.
