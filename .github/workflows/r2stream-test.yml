@@ -1,0 +1,95 @@
+name: R2 streaming test (Postgres dump -> R2)
+
+# UZ: ~1.5-2 GB Postgres ma'lumotini oqim bilan siqib R2 ga (`arumediatv/dbtest/`) yuklaydi va 50 daqiqalik imzolangan GET havolasini jurnalga chiqaradi
+#     (Ample'dan oqim bilan o'qishni sinash uchun). `tool/r2test/CLEAN` fayli bo'lsa `dbtest/` o'chiriladi.
+# EN: Streams a ~1.5-2 GB gzipped Postgres dump into R2 (`arumediatv/dbtest/`) and prints a 50-min presigned GET URL for the streaming-read test.
+#     If `tool/r2test/CLEAN` exists the `dbtest/` prefix is deleted instead.
+# RU: Потоком грузит ~1.5-2 ГБ дампа Postgres в R2 (`arumediatv/dbtest/`) и печатает presigned GET на 50 минут. Если есть `tool/r2test/CLEAN` — префикс удаляется.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tool/r2test/**'
+      - '.github/workflows/r2stream-test.yml'
+
+jobs:
+  r2test:
+    runs-on: ubuntu-latest
+    environment: secret
+    timeout-minutes: 40
+    env:
+      BUCKET: arumediatv
+      PREFIX: dbtest/
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: R2 keys
+        run: |
+          K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+          R2K=""
+          if [ -f tool/r2/r2_keys.enc ]; then
+            R2K=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/r2/r2_keys.enc 2>/dev/null | tr -d '[:space:]')
+          fi
+          if [ -z "$R2K" ] && [ -n "${{ secrets.R2_ACCESS_KEY_ID }}" ]; then
+            R2K="${{ secrets.R2_ACCESS_KEY_ID }}:${{ secrets.R2_SECRET_ACCESS_KEY }}"
+          fi
+          case "$R2K" in *:*) ;; *) echo "R2 kalitlari topilmadi"; exit 1;; esac
+          AK="${R2K%%:*}"; SK="${R2K#*:}"
+          echo "::add-mask::$AK"; echo "::add-mask::$SK"
+          ACCT=$(printf '%s' "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" | tr -d '[:space:]')
+          echo "::add-mask::$ACCT"
+          {
+            echo "AWS_ACCESS_KEY_ID=$AK"
+            echo "AWS_SECRET_ACCESS_KEY=$SK"
+            echo "AWS_DEFAULT_REGION=auto"
+            echo "ENDPOINT=https://$ACCT.r2.cloudflarestorage.com"
+          } >> "$GITHUB_ENV"
+          echo "R2 kalitlari tayyor"
+
+      - name: Clean dbtest/ prefix
+        if: hashFiles('tool/r2test/CLEAN') != ''
+        run: |
+          aws s3 rm "s3://$BUCKET/$PREFIX" --recursive --endpoint-url "$ENDPOINT"
+          echo "--- qolgan obyektlar:"
+          aws s3 ls "s3://$BUCKET/$PREFIX" --endpoint-url "$ENDPOINT" || true
+
+      - name: Generate Postgres data (~30M rows)
+        if: hashFiles('tool/r2test/CLEAN') == ''
+        run: |
+          sudo apt-get update -qq >/dev/null
+          sudo apt-get install -y -qq postgresql >/dev/null
+          sudo systemctl start postgresql
+          sudo -u postgres psql -qc "create database bench"
+          t0=$(date +%s)
+          sudo -u postgres psql -q bench <<'SQL'
+          set synchronous_commit = off;
+          create unlogged table watch_log (
+            id bigint, user_id int, anime_id int, season_id int, ep int, pos_ms int, title text, created timestamptz);
+          insert into watch_log
+            select g, (g * 7919) % 100000, (g * 104729) % 5000, 1 + g % 4, 1 + g % 120, (g * 31) % 1400000,
+                   md5(g::text) || md5((g * 3)::text), now() - (g % 100000) * interval '1 minute'
+            from generate_series(1, 30000000) g;
+          analyze watch_log;
+          SQL
+          echo "generate: $(( $(date +%s) - t0 )) s"
+          sudo -u postgres psql -Atc "select count(*) from watch_log" bench
+          sudo -u postgres psql -Atc "select pg_size_pretty(pg_total_relation_size('watch_log'))" bench
+
+      - name: Dump -> gzip -> R2 (streaming upload, nothing on disk)
+        if: hashFiles('tool/r2test/CLEAN') == ''
+        shell: bash
+        run: |
+          set -o pipefail
+          t0=$(date +%s)
+          sudo -u postgres pg_dump -Fp bench \
+            | tee >(wc -c > /tmp/raw.bytes) >(sha256sum | cut -d' ' -f1 > /tmp/raw.sha) \
+            | gzip -1 \
+            | aws s3 cp - "s3://$BUCKET/${PREFIX}pg-test.sql.gz" --endpoint-url "$ENDPOINT" --only-show-errors
+          sleep 2
+          echo "dump+upload: $(( $(date +%s) - t0 )) s"
+          echo "uncompressed bytes: $(cat /tmp/raw.bytes)"
+          echo "uncompressed sha256: $(cat /tmp/raw.sha)"
+          aws s3api head-object --bucket "$BUCKET" --key "${PREFIX}pg-test.sql.gz" --endpoint-url "$ENDPOINT" --query 'ContentLength' --output text | sed 's/^/object bytes (gz): /'
+          echo "PRESIGNED_GET_URL:"
+          aws s3 presign "s3://$BUCKET/${PREFIX}pg-test.sql.gz" --expires-in 3000 --endpoint-url "$ENDPOINT"
