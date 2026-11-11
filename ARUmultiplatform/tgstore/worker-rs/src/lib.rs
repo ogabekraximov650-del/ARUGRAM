@@ -14674,7 +14674,11 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 Err(e) => { all_ok = false; out.push(json!({"step": name, "ok": false, "error": e.to_string()})); }
             }
         }
-        return Response::from_json(&json!({"ok": all_ok, "steps": out}));
+        let report = json!({"ok": all_ok, "steps": out});
+        // UZ: natija `app_config` ga ham yoziladi (CI logi ko'rinmasa ham o'qish mumkin). EN/RU: result also stored in app_config.
+        let _ = turso_exec(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
+            vec![TursoArg::text("__pgcheck"), TursoArg::text(&report.to_string())]).await;
+        return Response::from_json(&report);
     }
     // tgstore: kvdb tekshiruvi (STORE kaliti bilan). EN: kvdb self-test. RU: samoproverka kvdb.
     if path.starts_with("/__kv/") {
