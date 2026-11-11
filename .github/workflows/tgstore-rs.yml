@@ -1,0 +1,83 @@
+name: tgstore-rs worker (Rust) — yig'ish, deploy, SQL tekshiruvi
+
+# UZ: `ARUmultiplatform/tgstore/worker-rs/**` o'zgarganda: cargo test -> WASM yig'ish -> `tgstore-rs` worker deploy -> `/__sqlcheck`.
+#     Production `arumediatv` ga tegilmaydi, cron yo'q.
+# EN: On changes under `ARUmultiplatform/tgstore/worker-rs/**`: cargo test -> WASM build -> deploy `tgstore-rs` -> `/__sqlcheck`.
+# RU: Pri izmenenii worker-rs: cargo test -> sborka WASM -> deploy `tgstore-rs` -> `/__sqlcheck`.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/tgstore/worker-rs/**'
+      - 'ARUmultiplatform/tgstore/bot.enc'
+      - 'ARUmultiplatform/tgstore/channels.txt'
+      - '.github/workflows/tgstore-rs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tgstore-rs
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: secret
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/tgstore/worker-rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: rustup target add wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/tgstore/worker-rs -> target"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Birlik testlari (bo'lak formati va hokazo)
+        run: cargo test --lib kvfmt
+
+      - name: worker-build va wrangler
+        run: |
+          cargo install worker-build --locked
+          npm install -g wrangler
+
+      - name: WASM yig'ish (SQLite WASM bilan)
+        run: worker-build --release
+
+      - name: Deploy va sirlar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          SK=$(printf '%s' "$K:tgstore" | sha256sum | cut -c1-32)
+          echo "::add-mask::$SK"
+          wrangler deploy
+          printf '%s' "$SK" | wrangler secret put STORE_KEY
+          # UZ: ilova so'rov imzosi production bilan bir xil bo'lishi uchun. EN: same app-signature secret as production. RU: tot zhe sekret podpisi.
+          if [ -n "$APP_SIGN_SECRET" ]; then printf '%s' "$APP_SIGN_SECRET" | wrangler secret put APP_SIGN_SECRET; fi
+          echo "KEY=$SK" >> "$GITHUB_ENV"
+
+      - name: Xotiradagi SQLite WASM workerda ishlaydimi?
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          for i in $(seq 1 24); do
+            C=$(curl -s -o /dev/null -w '%{http_code}' -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__sqlcheck" || true)
+            echo "kutish $i: $C"; [ "$C" = "200" ] && break; sleep 5
+          done
+          curl -sS -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__sqlcheck" | tee /tmp/sqlcheck.json; echo
+          python3 - <<'PY'
+          import json,sys
+          j=json.load(open('/tmp/sqlcheck.json'))
+          print(json.dumps(j,indent=1,ensure_ascii=False))
+          sys.exit(0 if j.get('ok') else 1)
+          PY

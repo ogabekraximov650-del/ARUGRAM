@@ -35,6 +35,8 @@ use worker::*;
 // Emoji, GIF va stiker to'plamlari (`packs.rs` boshidagi izohga qarang).
 mod packs;
 mod kvfmt;
+#[cfg(target_arch = "wasm32")]
+mod sqlmem;
 mod emojifont;
 mod videoassets;
 mod channels;
@@ -14597,6 +14599,12 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let url = req.url()?;
     let path = url.path().to_string();
     let method = req.method();
+
+    // tgstore: xotiradagi SQLite ishlashini tekshirish (STORE kaliti bilan). EN: in-memory SQLite self-check. RU: samoproverka SQLite v pamyati.
+    #[cfg(target_arch = "wasm32")]
+    if path == "/__sqlcheck" {
+        return sqlmem::selfcheck(&req, &env);
+    }
 
     // ── FAQAT ILOVADAN (foydalanuvchi talabi) ────────────────
     //

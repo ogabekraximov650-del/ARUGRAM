@@ -31,6 +31,10 @@ ctr = "0.10"
 rmp-serde = "1"
 aes-gcm = "0.10"
 
+# tgstore: xotiradagi SQLite (WASM) — production SQL o'zgarishsiz bajariladi. Faqat wasm32 da.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sqlite-wasm-rs = { version = "0.6", features = ["wasm-bindgen"] }
+
 [profile.release]
 # WASM hajmini kamaytirish va tezlikni oshirish
 opt-level = "s"

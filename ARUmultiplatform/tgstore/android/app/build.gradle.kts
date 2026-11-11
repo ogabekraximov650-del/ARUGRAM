@@ -25,7 +25,8 @@ android {
         versionName = "0.1.0"
 
         // Server manzili BITTA joyda. Yangi worker nomi: `arumediatv`.
-        buildConfigField("String", "API_BASE", "\"https://arumediatv.uzcom.workers.dev\"")
+        // UZ: test ilova TEST worker (`tgstore-rs`) ga ulanadi; production ga tegmaydi. EN: the test app talks to the TEST worker. RU: test-prilozhenie rabotaet s TEST-worker.
+        buildConfigField("String", "API_BASE", "\"https://tgstore-rs.uzcom.workers.dev\"")
         // UZ: tgstore test worker va kalit (kalitni CI beradi: sha256(ENCODE_TOKEN:tgstore)). EN: test worker + key (given by CI). RU: test-worker i klyuch (daet CI).
         buildConfigField("String", "TGSTORE_URL", "\"https://tgstore-test.uzcom.workers.dev\"")
         buildConfigField("String", "TGSTORE_KEY", "\"${System.getenv("TGSTORE_KEY") ?: ""}\"")

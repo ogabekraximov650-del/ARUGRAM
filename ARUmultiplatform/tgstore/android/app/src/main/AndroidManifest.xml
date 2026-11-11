@@ -38,16 +38,14 @@
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|smallestScreenSize|uiMode"
-            android:windowSoftInputMode="adjustResize" />
-
-        <!-- UZ: bu nusxada ishga tushuvchi ekran — tgstore sinovi. EN: the launcher screen of this copy — tgstore test. RU: zapuskaemyy ekran etoy kopii — test tgstore. -->
-        <activity
-            android:name=".tgstore.TgStoreActivity"
-            android:exported="true">
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- UZ: tgstore sinov ekrani (qo'shimcha, launcher emas): `adb shell am start -n uz.arumediatv.tgstore/uz.arumediatv.com.tgstore.TgStoreActivity`. EN: extra test screen. RU: dop. test-ekran. -->
+        <activity android:name=".tgstore.TgStoreActivity" android:exported="true" />
     </application>
 </manifest>
