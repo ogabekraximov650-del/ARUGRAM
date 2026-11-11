@@ -106,10 +106,8 @@ jobs:
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
 
           # HOZIRCHA faqat Admin 32 bit. (Keyin qaytariladi: Admin 32+64 va User 32+64 — `git log` da oldingi variantga qarang.)
-          # UZ: FAQAT 32 bit (armeabi-v7a): user va admin. EN: 32-bit only (armeabi-v7a): user and admin.
-          gradle --no-daemon :app:assembleUserRelease -PonlyAbi=armeabi-v7a
-          cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/tgstore-test-32bit-$N.apk"
-          # UZ: ADMIN varianti (anime/epizod yuklash uchun) — 32 bit. EN/RU: the admin flavor (32-bit) for uploading content.
+          # UZ: FAQAT admin 32 bit (armeabi-v7a). EN: admin 32-bit only (armeabi-v7a).
+          # UZ: ADMIN varianti (anime/epizod yuklash uchun) — 32 bit. EN/RU: the admin flavor (32-bit).
           gradle --no-daemon :app:assembleAdminRelease -PonlyAbi=armeabi-v7a
           cp app/build/outputs/apk/admin/release/app-admin-release.apk "$OUT/tgstore-admin-32bit-$N.apk"
 
