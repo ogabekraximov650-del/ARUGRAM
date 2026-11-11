@@ -33,17 +33,25 @@ jobs:
           echo "Kuzatish boshlandi: $(date -u +%H:%M:%S) UTC, $MINUTES daqiqa. Ilovada amalni takrorlang."
           timeout $(( MINUTES * 60 )) wrangler tail tgstore-rs --format json 2>&1 | python3 -u -c '
           import sys,json
-          for line in sys.stdin:
-              line=line.strip()
-              if not line: continue
-              try: e=json.loads(line)
-              except Exception: print(line[:400]); continue
-              req=e.get("event",{}).get("request",{})
-              resp=e.get("event",{}).get("response",{})
-              url=req.get("url","").replace("https://tgstore-rs.uzcom.workers.dev","")
-              logs=[ " ".join(str(x) for x in l.get("message",[]))[:300] for l in e.get("logs",[]) if not " ".join(str(x) for x in l.get("message",[])).startswith(("aru_tq","aru_sv"))]
-              exc=[ (x.get("name","")+": "+str(x.get("message",""))[:400]) for x in e.get("exceptions",[])]
-              print(e.get("outcome"), resp.get("status"), req.get("method"), url[:110], "| CPU:",e.get("cpuTime"), "ms | wall:", e.get("wallTime"), "ms")
-              for l in logs: print("   log:", l)
-              for x in exc: print("   EXC:", x)
+          dec=json.JSONDecoder(); buf=""
+          def show(e):
+              ev=e.get("event") or {}
+              req=ev.get("request") or {}; resp=ev.get("response") or {}
+              url=str(req.get("url","")).replace("https://tgstore-rs.uzcom.workers.dev","")
+              msgs=[" ".join(str(x) for x in (l.get("message") or [])) for l in (e.get("logs") or [])]
+              logs=[m[:300] for m in msgs if not m.startswith(("aru_tq","aru_sv"))]
+              exc=[str(x.get("name",""))+": "+str(x.get("message",""))[:500] for x in (e.get("exceptions") or [])]
+              print(e.get("outcome"), resp.get("status"), req.get("method"), url[:110], "| CPU:", e.get("cpuTime"), "ms | wall:", e.get("wallTime"), "ms", flush=True)
+              for l in logs: print("   log:", l, flush=True)
+              for x in exc: print("   EXC:", x, flush=True)
+          for chunk in sys.stdin:
+              buf += chunk
+              while True:
+                  buf = buf.lstrip()
+                  if not buf: break
+                  try: obj, idx = dec.raw_decode(buf)
+                  except ValueError: break
+                  buf = buf[idx:]
+                  if isinstance(obj, dict): show(obj)
+                  else: print(str(obj)[:300], flush=True)
           ' || true
