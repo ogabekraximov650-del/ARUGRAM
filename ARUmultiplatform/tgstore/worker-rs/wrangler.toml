@@ -16,8 +16,14 @@ binding = "AI"
 bindings = [
   { name = "ENCODE_LIVE", class_name = "EncodeLive" },
   { name = "MARK_HUB", class_name = "MarkHub" },
+  # UZ: tgstore ro'yxati — faqat bo'lak nomi/file_id/kalit. EN: registry (names/file_id/keys only). RU: reestr.
+  { name = "KV_REG", class_name = "KvRegistry" },
 ]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["EncodeLive", "MarkHub"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["KvRegistry"]

@@ -57,12 +57,23 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
+          BOT_SECRET: ${{ secrets.TGSTORE_BOT_TOKEN }}
         run: |
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           SK=$(printf '%s' "$K:tgstore" | sha256sum | cut -c1-32)
           echo "::add-mask::$SK"
           wrangler deploy
           printf '%s' "$SK" | wrangler secret put STORE_KEY
+          # UZ: bot tokeni (bot.enc yoki TGSTORE_BOT_TOKEN secret) va kanallar (channels.txt): CHANNEL_ID = baza bo'laklari, MIRROR_CHANNEL_ID = fayl kanali.
+          if [ -n "${BOT_SECRET:-}" ]; then BOT=$(printf '%s' "$BOT_SECRET" | tr -d '[:space:]')
+          else BOT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../bot.enc | tr -d '[:space:]'); fi
+          echo "::add-mask::$BOT"
+          DB=$(grep -E '^CHANNEL_ID=' ../channels.txt | head -1 | cut -d= -f2- | tr -d '[:space:]')
+          FL=$(grep -E '^MIRROR_CHANNEL_ID=' ../channels.txt | head -1 | cut -d= -f2- | tr -d '[:space:]')
+          printf '%s' "$BOT" | wrangler secret put TELEGRAM_BOT_TOKEN
+          printf '%s' "$DB" | wrangler secret put KV_CHANNEL_ID
+          printf '%s' "$FL" | wrangler secret put TG_CHANNEL_ID
+          printf '%s' "$FL" | wrangler secret put VD_CHANNEL_ID
           # UZ: ilova so'rov imzosi production bilan bir xil bo'lishi uchun. EN: same app-signature secret as production. RU: tot zhe sekret podpisi.
           if [ -n "$APP_SIGN_SECRET" ]; then printf '%s' "$APP_SIGN_SECRET" | wrangler secret put APP_SIGN_SECRET; fi
           echo "KEY=$SK" >> "$GITHUB_ENV"
@@ -79,5 +90,19 @@ jobs:
           import json,sys
           j=json.load(open('/tmp/sqlcheck.json'))
           print(json.dumps(j,indent=1,ensure_ascii=False))
+          sys.exit(0 if j.get('ok') else 1)
+          PY
+
+      - name: kvdb o'z-o'zini tekshirish (haqiqiy Telegram bilan)
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          S=$(date +%s)
+          curl -sS -m 120 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__kv/selftest" | tee /tmp/kv.json; echo
+          echo "devor vaqti: $(( $(date +%s) - S )) s"
+          python3 - <<'PY'
+          import json,sys
+          j=json.load(open('/tmp/kv.json'))
+          for s in j.get('steps',[]): print(('OK  ' if s['ok'] else 'XATO'), s['step'], '-', s['note'])
+          if 'error' in j: print('XATO', j['error'])
           sys.exit(0 if j.get('ok') else 1)
           PY

@@ -35,6 +35,8 @@ use worker::*;
 // Emoji, GIF va stiker to'plamlari (`packs.rs` boshidagi izohga qarang).
 mod packs;
 mod kvfmt;
+mod kvreg;
+mod kvdb;
 #[cfg(target_arch = "wasm32")]
 mod sqlmem;
 mod emojifont;
@@ -14604,6 +14606,25 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     #[cfg(target_arch = "wasm32")]
     if path == "/__sqlcheck" {
         return sqlmem::selfcheck(&req, &env);
+    }
+    // tgstore: kvdb tekshiruvi (STORE kaliti bilan). EN: kvdb self-test. RU: samoproverka kvdb.
+    if path.starts_with("/__kv/") {
+        let key = tg_secret(&env, "STORE_KEY");
+        let got = req.headers().get("authorization").ok().flatten().unwrap_or_default();
+        if key.is_empty() || got != format!("Bearer {key}") {
+            return Response::error("unauthorized", 401);
+        }
+        return match path.as_str() {
+            "/__kv/selftest" => match kvdb::selftest(&env).await {
+                Ok(v) => Response::from_json(&v),
+                Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),
+            },
+            "/__kv/gc" => match kvdb::gc(&env).await {
+                Ok(v) => Response::from_json(&v),
+                Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),
+            },
+            _ => Response::error("not found", 404),
+        };
     }
 
     // ── FAQAT ILOVADAN (foydalanuvchi talabi) ────────────────

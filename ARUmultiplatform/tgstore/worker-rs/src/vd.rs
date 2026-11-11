@@ -956,7 +956,7 @@ pub(crate) async fn img(env: &Env, name: &str) -> Result<Response> {
 // ── KICHIK FAYLLAR (<= 18 MiB): worker O'ZI shifrlab Telegram'ga saqlaydi (R2 va Actions kerak emas) ──
 
 /// Bot API `sendDocument` (qo'lda yig'ilgan multipart): `(file_id, message_id)`. Telegram 429 bersa bir marta qisqa kutib qayta uriniladi.
-async fn tg_send_document(token: &str, channel: i64, name: &str, caption: &str, data: &[u8]) -> Result<(String, i64)> {
+pub(crate) async fn tg_send_document(token: &str, channel: i64, name: &str, caption: &str, data: &[u8]) -> Result<(String, i64)> {
     if token.is_empty() || channel == 0 {
         return Err(Error::RustError("bot tokeni yoki kanal yo'q".into()));
     }
