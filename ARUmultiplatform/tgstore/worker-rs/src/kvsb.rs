@@ -25,13 +25,17 @@ pub enum CommitResult {
 
 fn cfg(env: &Env) -> Result<(String, String)> {
     let url = crate::tg_secret(env, "SUPABASE_URL");
+    // UZ: ochiq (publishable/anon) kalit yetarli — service_role KERAK EMAS (xavfsizlik `p_tok` da). EN/RU: the public key is enough.
     let key = crate::tg_secret(env, "SUPABASE_KEY");
     if url.is_empty() || key.is_empty() { return Err(Error::RustError("SUPABASE_URL/SUPABASE_KEY yo'q".into())); }
     Ok((url.trim_end_matches('/').to_string(), key))
 }
 
-pub async fn rpc(env: &Env, func: &str, body: Value) -> Result<Value> {
+pub async fn rpc(env: &Env, func: &str, mut body: Value) -> Result<Value> {
     let (url, key) = cfg(env)?;
+    // UZ: har chaqiruvga maxfiy kalit (`STORE_KEY`) qo'shiladi; bazada faqat uning xeshi (`kv_auth`). EN/RU: every call carries the secret STORE_KEY.
+    let tok = crate::tg_secret(env, "STORE_KEY");
+    if let Some(o) = body.as_object_mut() { o.insert("p_tok".into(), json!(tok)); }
     let h = Headers::new();
     h.set("apikey", &key)?;
     h.set("Authorization", &format!("Bearer {key}"))?;
