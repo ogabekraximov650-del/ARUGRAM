@@ -14642,6 +14642,40 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
     if path == "/__sqlcheck" {
         return sqlmem::selfcheck(&req, &env);
     }
+    // tgstore: Postgres darvozasi orqali haqiqiy so'rovlar tekshiruvi (STORE kaliti bilan). EN: real-query check via the PG gateway. RU: proverka cherez shlyuz PG.
+    if path == "/__pgcheck" {
+        let key = tg_secret(&env, "STORE_KEY");
+        let got = req.headers().get("authorization").ok().flatten().unwrap_or_default();
+        if key.is_empty() || got != format!("Bearer {key}") { return Response::error("unauthorized", 401); }
+        ensure_db(&env).await;
+        let steps: Vec<(&str, &str, Vec<TursoArg>)> = vec![
+            ("insert-returning", "INSERT INTO users_db (id,telegram_id,username,first_name,last_name,is_banned,created_at,last_login_at,profile_done) VALUES (?,?,?,?,'',0,?,?,1) RETURNING *",
+                vec![TursoArg::int(900001), TursoArg::int(900001), TursoArg::text("pgcheck"), TursoArg::text("PG Check"), TursoArg::int(1762900000000), TursoArg::int(1762900000000)]),
+            ("max-scalar", "SELECT COALESCE(MAX(id), 0) AS m FROM users_db", vec![]),
+            ("scalar-minmax", "SELECT MAX(created_at, ?) AS m FROM users_db WHERE id = ?", vec![TursoArg::int(5), TursoArg::int(900001)]),
+            ("replace", "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)", vec![TursoArg::text("pgcheck"), TursoArg::text("a")]),
+            ("replace-again", "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)", vec![TursoArg::text("pgcheck"), TursoArg::text("b")]),
+            ("ignore", "INSERT OR IGNORE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)", vec![TursoArg::text("pgcheck"), TursoArg::text("c")]),
+            ("upsert-add", "INSERT INTO stats_daily (day, metric, value) VALUES (?, ?, 1) ON CONFLICT(day, metric) DO UPDATE SET value = value + 1", vec![TursoArg::text("2000-01-01"), TursoArg::text("pgcheck")]),
+            ("upsert-add-2", "INSERT INTO stats_daily (day, metric, value) VALUES (?, ?, 1) ON CONFLICT(day, metric) DO UPDATE SET value = value + 1", vec![TursoArg::text("2000-01-01"), TursoArg::text("pgcheck")]),
+            ("group-by", "SELECT metric, SUM(value) AS v, COUNT(*) AS c FROM stats_daily GROUP BY metric ORDER BY v DESC LIMIT 5", vec![]),
+            ("like", "SELECT id FROM users_db WHERE LOWER(username) LIKE ? LIMIT 1", vec![TursoArg::text("pgch%")]),
+            ("update", "UPDATE users_db SET balance = balance + ? WHERE id = ?", vec![TursoArg::int(7), TursoArg::int(900001)]),
+            ("balance", "SELECT balance FROM users_db WHERE id = ?", vec![TursoArg::int(900001)]),
+            ("cleanup-1", "DELETE FROM users_db WHERE id = ?", vec![TursoArg::int(900001)]),
+            ("cleanup-2", "DELETE FROM app_config WHERE cfg_key = ?", vec![TursoArg::text("pgcheck")]),
+            ("cleanup-3", "DELETE FROM stats_daily WHERE metric = ?", vec![TursoArg::text("pgcheck")]),
+        ];
+        let mut out = Vec::new();
+        let mut all_ok = true;
+        for (name, sql, args) in steps {
+            match turso_exec(&env, sql, args).await {
+                Ok(r) => out.push(json!({"step": name, "ok": true, "rows": r["rows"], "affected": r["affected_row_count"]})),
+                Err(e) => { all_ok = false; out.push(json!({"step": name, "ok": false, "error": e.to_string()})); }
+            }
+        }
+        return Response::from_json(&json!({"ok": all_ok, "steps": out}));
+    }
     // tgstore: kvdb tekshiruvi (STORE kaliti bilan). EN: kvdb self-test. RU: samoproverka kvdb.
     if path.starts_with("/__kv/") {
         let key = tg_secret(&env, "STORE_KEY");

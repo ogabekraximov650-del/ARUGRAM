@@ -124,6 +124,15 @@ jobs:
           sys.exit(0 if j.get('ok') else 1)
           PY
 
+      - name: Postgres (Ample) orqali haqiqiy so'rovlar tekshiruvi
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          for i in $(seq 1 12); do
+            C=$(curl -s -o /tmp/pg.json -m 90 -w '%{http_code}' -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__pgcheck" || true)
+            echo "urinish $i: $C"; [ "$C" = "200" ] && break; sleep 10
+          done
+          python3 -c "import json;j=json.load(open('/tmp/pg.json'));print(json.dumps(j,indent=1,ensure_ascii=False));import sys;sys.exit(0 if j.get('ok') else 1)"
+
       - name: "Bazani tozalash kerakmi? (bir martalik, fayl WIPE_ONCE)"
         if: env.SB == '1'
         run: |
