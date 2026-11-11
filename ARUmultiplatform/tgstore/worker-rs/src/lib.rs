@@ -14655,6 +14655,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         if key.is_empty() || got != format!("Bearer {key}") { return Response::error("unauthorized", 401); }
         ensure_db(&env).await;
         let steps: Vec<(&str, &str, Vec<TursoArg>)> = vec![
+            ("pre-cleanup", "DELETE FROM users_db WHERE id = ?", vec![TursoArg::int(900001)]),
             ("insert-returning", "INSERT INTO users_db (id,telegram_id,username,first_name,last_name,is_banned,created_at,last_login_at,profile_done) VALUES (?,?,?,?,'',0,?,?,1) RETURNING *",
                 vec![TursoArg::int(900001), TursoArg::int(900001), TursoArg::text("pgcheck"), TursoArg::text("PG Check"), TursoArg::int(1762900000000), TursoArg::int(1762900000000)]),
             ("max-scalar", "SELECT COALESCE(MAX(id), 0) AS m FROM users_db", vec![]),
