@@ -252,7 +252,7 @@ async fn run_dml(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value
     for _attempt in 0..5 {
         let m = Mem::open().map_err(db_err)?;
         replay_schema(&m, &involved)?;
-        let snaps = futures_util::future::join_all(involved.iter().map(|t| crate::kvdb::snapshot(env, t))).await;
+        let snaps = futures_util::future::join_all(involved.iter().map(|t| crate::kvdb::snapshot(env, t, !writes.is_empty()))).await;
         let mut revs: BTreeMap<String, u64> = BTreeMap::new();
         let mut olds: BTreeMap<String, BTreeMap<String, Value>> = BTreeMap::new();
         for (t, s) in involved.iter().zip(snaps) {
@@ -272,15 +272,15 @@ async fn run_dml(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value
             }
             results.push(v);
         }
-        let mut conflict = false;
+        // UZ: HAMMA yozilgan jadvallar bitta atomik tranzaksiyada (ro'yxat Supabase'da). EN/RU: all written tables in one atomic commit.
+        let mut items: Vec<crate::kvdb::TableOps> = Vec::new();
         for t in &writes {
             let has_pk = !pk_cols(&m, t)?.is_empty();
             let new = dump(&m, t, has_pk)?;
             let ops = diff(&olds[t], &new);
-            if ops.is_empty() { continue; }
-            if !crate::kvdb::commit_try(env, t, ops, Some(revs[t])).await? { conflict = true; break; }
+            if !ops.is_empty() { items.push(crate::kvdb::TableOps { table: t.clone(), ops, expect: Some(revs[t]) }); }
         }
-        if conflict { continue; }
+        if !crate::kvdb::commit_multi(env, items).await? { continue; }
         let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
         crate::turso_after(env, &sqls, &results).await;
         return Ok(results);

@@ -22,8 +22,6 @@ binding = "AI"
 bindings = [
   { name = "ENCODE_LIVE", class_name = "EncodeLive" },
   { name = "MARK_HUB", class_name = "MarkHub" },
-  # UZ: tgstore ro'yxati — faqat bo'lak nomi/file_id/kalit. EN: registry (names/file_id/keys only). RU: reestr.
-  { name = "KV_REG", class_name = "KvRegistry" },
 ]
 
 [[migrations]]
@@ -33,3 +31,12 @@ new_sqlite_classes = ["EncodeLive", "MarkHub"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["KvRegistry"]
+
+# UZ: ro'yxat Supabase'ga ko'chdi — DO sinfi o'chiriladi (DO qimmat). EN: registry moved to Supabase — the DO class is deleted. RU: reestr v Supabase.
+[[migrations]]
+tag = "v3"
+deleted_classes = ["KvRegistry"]
+
+# UZ: kuniga bir marta, Toshkent 05:00 (= 00:00 UTC): Supabase "uyg'otish" + GC. EN: daily at 05:00 Tashkent (00:00 UTC): keep-alive + GC.
+[triggers]
+crons = ["0 0 * * *"]

@@ -11,6 +11,8 @@ on:
       - 'ARUmultiplatform/tgstore/worker-rs/**'
       - 'ARUmultiplatform/tgstore/bot.enc'
       - 'ARUmultiplatform/tgstore/channels.txt'
+      - 'ARUmultiplatform/tgstore/supabase.enc'
+      - 'ARUmultiplatform/tgstore/supabase/**'
       - '.github/workflows/tgstore-rs.yml'
   workflow_dispatch:
 
@@ -58,6 +60,8 @@ jobs:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
           BOT_SECRET: ${{ secrets.TGSTORE_BOT_TOKEN }}
+          SB_URL_SECRET: ${{ secrets.TGSTORE_SUPABASE_URL }}
+          SB_KEY_SECRET: ${{ secrets.TGSTORE_SUPABASE_KEY }}
         run: |
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           SK=$(printf '%s' "$K:tgstore" | sha256sum | cut -c1-32)
@@ -74,6 +78,22 @@ jobs:
           printf '%s' "$DB" | wrangler secret put KV_CHANNEL_ID
           printf '%s' "$FL" | wrangler secret put TG_CHANNEL_ID
           printf '%s' "$FL" | wrangler secret put VD_CHANNEL_ID
+          # UZ: ro'yxat Supabase'da. `tgstore/supabase.enc` = JSON {"url","key"} (service_role; ENCODE_TOKEN bilan shifrlangan) yoki GitHub secret'lar
+          #     TGSTORE_SUPABASE_URL / TGSTORE_SUPABASE_KEY. EN/RU: registry in Supabase; credentials from supabase.enc or secrets.
+          SBU="${SB_URL_SECRET:-}"; SBK="${SB_KEY_SECRET:-}"
+          if [ -z "$SBU" ] && [ -s ../supabase.enc ]; then
+            SBJ=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../supabase.enc 2>/dev/null || true)
+            SBU=$(printf '%s' "$SBJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
+            SBK=$(printf '%s' "$SBJ" | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])' 2>/dev/null || true)
+          fi
+          if [ -n "$SBU" ] && [ -n "$SBK" ]; then
+            echo "::add-mask::$SBK"
+            printf '%s' "$SBU" | wrangler secret put SUPABASE_URL
+            printf '%s' "$SBK" | wrangler secret put SUPABASE_KEY
+            echo "SB=1" >> "$GITHUB_ENV"
+          else
+            echo "⚠️  Supabase sirlari yo'q (supabase.enc / TGSTORE_SUPABASE_*) — kvdb va SQL sinovlari o'tkazib yuboriladi"
+          fi
           # UZ: R2 (faqat fayl/rasm/video; baza R2'da EMAS) — production bilan bir xil kalitlar, lekin `tgstore/` prefiksida. EN/RU: R2 keys, own prefix.
           printf '%s' "${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" | tr -d '[:space:]' | wrangler secret put R2_ACCOUNT_ID
           if [ -f ../../../tool/r2/r2_keys.enc ]; then
@@ -99,7 +119,8 @@ jobs:
           sys.exit(0 if j.get('ok') else 1)
           PY
 
-      - name: kvdb o'z-o'zini tekshirish (haqiqiy Telegram bilan)
+      - name: kvdb o'z-o'zini tekshirish (haqiqiy Telegram + Supabase bilan)
+        if: env.SB == '1'
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev
           S=$(date +%s)
@@ -114,6 +135,7 @@ jobs:
           PY
 
       - name: SQL ko'prigi (production sxemasi va turso_* chaqiruvlari bo'laklar ustida)
+        if: env.SB == '1'
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev
           S=$(date +%s)

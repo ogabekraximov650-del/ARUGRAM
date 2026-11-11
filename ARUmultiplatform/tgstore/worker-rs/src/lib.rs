@@ -36,6 +36,7 @@ use worker::*;
 mod packs;
 mod kvfmt;
 mod kvreg;
+mod kvsb;
 mod kvdb;
 mod kvsql;
 #[cfg(target_arch = "wasm32")]
@@ -307,6 +308,10 @@ fn mark_do_disable(until: i64) {
 /// yangilaydi va `get` kalitlarining qiymatlarini qaytaradi.
 async fn mark_do_call(env: &Env, bump: &[String], at: i64, get: &[String])
     -> Option<std::collections::HashMap<String, i64>> {
+    // tgstore: belgilar Supabase'da (MarkHub DO o'rniga). EN: marks live in Supabase instead of the MarkHub DO. RU: metki v Supabase.
+    if kvsql::enabled(env) {
+        return kvsb::marks(env, bump, at.max(1), get).await.ok();
+    }
     let remember = || {
         MARK_PENDING.with(|p| {
             let mut p = p.borrow_mut();
@@ -14274,6 +14279,14 @@ async fn cleanup_orphan_history(env: &Env) {
 
 #[event(scheduled)]
 async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    // tgstore: cron kuniga BIR marta (Toshkent 05:00 = 00:00 UTC): Supabase'ni "uyg'otadi" (bepul reja 7 kun so'rovsiz to'xtaydi) va eski
+    // bo'laklarni tozalaydi. Production vazifalari (kodlash, botlar) bu nusxada ISHLAMAYDI. EN/RU: daily keep-alive + GC only.
+    if kvsql::enabled(&env) {
+        let p = kvsb::ping(&env).await;
+        let g = kvdb::gc(&env).await;
+        console_log!("tgstore cron: ping={:?} gc={:?}", p.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()), g.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
+        return;
+    }
     // Kodlash navbati BIRINCHI: Cloudflare bitta chaqiruvda ~50 ta ichki so'rovga ruxsat beradi (subrequest). Quyidagi bot/navbatlar ularni
     // ishlatib bo'lgach 720p/1080p workflow'lari ishga tushmay qolardi (har 10 daqiqada bitta-ikkita sifat, "oxirgi sifat kech boshlanadi").
     let msg = encode_kick_full(&env, true).await;
