@@ -34,6 +34,7 @@ use worker::*;
 
 // Emoji, GIF va stiker to'plamlari (`packs.rs` boshidagi izohga qarang).
 mod packs;
+mod kvfmt;
 mod emojifont;
 mod videoassets;
 mod channels;

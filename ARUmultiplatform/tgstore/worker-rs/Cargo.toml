@@ -27,6 +27,9 @@ sha2 = "0.10"
 # AES-128-CTR — e'lon muqovasini ochish uchun (`announce.rs`); versiyalar `rust/` bilan bir xil.
 aes = "0.9"
 ctr = "0.10"
+# tgstore: bo'lak fayllari — MessagePack (ixcham, tez) va AES-256-GCM (har bo'lak versiyasiga alohida kalit)
+rmp-serde = "1"
+aes-gcm = "0.10"
 
 [profile.release]
 # WASM hajmini kamaytirish va tezlikni oshirish
