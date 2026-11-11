@@ -14699,7 +14699,13 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         } else {
             circle::run(&env, q.contains_key("force"), q.contains_key("dry")).await
         };
-        return match r { Ok(v) => Response::from_json(&v), Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})) };
+        let report = match r { Ok(v) => v, Err(e) => json!({"ok": false, "error": e.to_string()}) };
+        if q.contains_key("dry") {
+            // UZ: sinov natijasi `app_config` ga yoziladi (CI logi ochilmasa ham o'qish mumkin). EN/RU: dry-run report kept in app_config.
+            let _ = turso_exec(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
+                vec![TursoArg::text("__circle"), TursoArg::text(&report.to_string())]).await;
+        }
+        return Response::from_json(&report);
     }
     // tgstore: kvdb tekshiruvi (STORE kaliti bilan). EN: kvdb self-test. RU: samoproverka kvdb.
     if path.starts_with("/__kv/") {

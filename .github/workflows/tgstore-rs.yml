@@ -133,6 +133,12 @@ jobs:
           done
           python3 -c "import json;j=json.load(open('/tmp/pg.json'));print(json.dumps(j,indent=1,ensure_ascii=False));import sys;sys.exit(0 if j.get('ok') else 1)"
 
+      - name: Doira tizimi quruq sinovi (sovuq qatorlar so'rovlari PostgreSQL'da ishlaydimi)
+        continue-on-error: true
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          curl -sS -m 90 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__circle?force=1&dry=1" | tee /tmp/circle.json; echo
+
       - name: "Bazani tozalash kerakmi? (bir martalik, fayl WIPE_ONCE)"
         if: env.SB == '1'
         run: |
