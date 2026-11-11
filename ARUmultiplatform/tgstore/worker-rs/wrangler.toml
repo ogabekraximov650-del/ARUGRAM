@@ -37,6 +37,6 @@ new_sqlite_classes = ["KvRegistry"]
 tag = "v3"
 deleted_classes = ["KvRegistry"]
 
-# UZ: Toshkent 05:05 (= 00:05 UTC) — Supabase "uyg'otish" + GC; har 10 daqiqada — eski fayllarni tozalash (GC). EN: daily at 05:00 Tashkent (00:00 UTC): keep-alive + GC.
+# UZ: BITTA cron (bepul reja 5 ta cron bilan cheklangan): har 10 daqiqada (:05, :15, ...) eski fayllarni tozalash (GC); 00:05 UTC (= Toshkent 05:05) da qo'shimcha Supabase "uyg'otish". EN: daily at 05:00 Tashkent (00:00 UTC): keep-alive + GC.
 [triggers]
-crons = ["5 0 * * *", "*/10 * * * *"]
+crons = ["5-55/10 * * * *"]
