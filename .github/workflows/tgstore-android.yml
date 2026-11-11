@@ -45,7 +45,7 @@ jobs:
       - name: Rust (stable + Android targetlari)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android
+          targets: armv7-linux-androideabi, aarch64-linux-android
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -60,7 +60,7 @@ jobs:
           APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
         run: |
           if [ -z "$APP_SIGN_SECRET" ]; then echo "⚠️  APP_SIGN_SECRET yo'q — yadro imzosiz yig'ilmoqda"; fi
-          cargo ndk -t arm64-v8a -o ../app/src/main/jniLibs build --release
+          cargo ndk -t armeabi-v7a -t arm64-v8a -o ../app/src/main/jniLibs build --release
           ls -la ../app/src/main/jniLibs/*/
 
       # 16 KB sahifali qurilmalar (Android 15+): 64 bitli .so ning LOAD segmentlari 16 KB ga tekislangan bo'lishi shart.
@@ -119,8 +119,12 @@ jobs:
           APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
 
           # HOZIRCHA faqat Admin 32 bit. (Keyin qaytariladi: Admin 32+64 va User 32+64 — `git log` da oldingi variantga qarang.)
+          # UZ: ikkita APK — 32 bit (armeabi-v7a, eski/32 bitli telefonlar: o'rnatilmasa shu) va 64 bit (arm64-v8a). Asosiy ilova ham 32 bit yig'iladi.
+          # EN: two APKs — 32-bit and 64-bit. A phone with a 32-bit CPU cannot install the 64-bit one ("app not installed").
+          gradle --no-daemon :app:assembleUserRelease -PonlyAbi=armeabi-v7a
+          cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/tgstore-test-32bit-$N.apk"
           gradle --no-daemon :app:assembleUserRelease -PonlyAbi=arm64-v8a
-          cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/tgstore-test-$N.apk"
+          cp app/build/outputs/apk/user/release/app-user-release.apk "$OUT/tgstore-test-64bit-$N.apk"
 
           for f in "$OUT"/*.apk; do
             echo "== $f"; ls -la "$f"
