@@ -7276,3 +7276,12 @@ Bo'lak 1 MB ga to'lsa `db_<n+1>_v1` yaratiladi; o'zgarsa versiya oshadi (`db_1_v
 hamma qator bitta tartiblangan kalit fazosida (`<jadval>\x1e<qator kaliti>`), bo'laklar shu fazoni ketma-ket oraliqlarga bo'ladi. To'qnashuv nazorati bo'laklar bo'yicha (`kv_commit`: o'qilgan/o'zgargan bo'laklar tirik bo'lishi shart, aks holda hech narsa o'zgarmaydi).
 Eski jadvallardan ko'chirish `schema.sql` ichida (tirik bo'laklar saqlanadi). Worker: `kvsb.rs` (RPC), `kvdb.rs` (bo'laklar), `kvsql.rs` (SQL ko'prigi).
 Ilova: paketlab yuborish (`SyncQueue`) 5 daqiqaga o'zgartirildi; yuborilmagan tarix/sevimli o'zgarishlari ro'yxatlarda darhol ko'rinadi (`LibraryStore.overlay*`, `applyHistory`).
+
+## tgstore: baza = Ample PostgreSQL (2026-11)
+
+- **Nima:** test ilova (`tgstore-rs`) bazasi Telegram bo'laklaridan (kv) Ample'dagi boshqariladigan PostgreSQL'ga (`tgstore-pg`) o'tkazildi — ko'p foydalanuvchiga chidash uchun. Production Worker kodi O'ZGARMAGAN: `ARUmultiplatform/tgstore/pg-gateway/` (Node) Turso `POST /v2/pipeline` formatini qabul qilib, SQLite lahjasini Postgres'ga tarjima qiladi (`translate.mjs`, testlar: `node --test`) va Turso shaklida javob beradi. Worker'da `TURSO_URL` = darvoza manzili, `TURSO_TOKEN` = kalit (`sha256(ENCODE_TOKEN:tgstore)[:32]`), `DB_BACKEND="pg"` (cron production vazifalarini ishlatmaydi).
+- **Kalit:** darvozada birinchi `POST /setkey` kalitni o'rnatadi (CI qiladi); Ample'da vaqtincha `ADMIN_KEY` env bor (sinov uchun) — keyin olib tashlansin.
+- **Admin paneli:** `GET /api/admin/db` (faqat admin) -> darvozaning `/usage` (`used_bytes`, `limit_bytes`, `percent`); ilovada "Baza hajmi" kartasi `0,00 MB / 1024,00 MB` va foiz. Limit: Ample env `DB_LIMIT_MB`.
+- **Ample:** darvoza `tgstore-pg-gw` (server `tgstore-reg`ning ichida; Free reja 2 GiB to'lgan), baza `tgstore-pg`. Eski `tgstore-reg` ilovasi o'chirildi.
+- **Xavf:** PG qat'iyroq (GROUP BY, boolean, `rowid`, `strftime`) — xatolar darvoza loglarida (`ample_logs`, "SQL XATO").
+- Telegram bo'lak tizimi (kvdb/kvsql/Supabase) kodda qoladi (zaxira/arxiv uchun), jonli ma'lumot uchun ishlatilmaydi.

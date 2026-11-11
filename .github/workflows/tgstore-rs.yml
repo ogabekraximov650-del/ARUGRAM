@@ -91,7 +91,6 @@ jobs:
             echo "::add-mask::$SBK"
             printf '%s' "$SBU" | wrangler secret put SUPABASE_URL
             printf '%s' "$SBK" | wrangler secret put SUPABASE_KEY
-            echo "SB=1" >> "$GITHUB_ENV"
           else
             echo "⚠️  Supabase sirlari yo'q (supabase.enc / TGSTORE_SUPABASE_*) — kvdb va SQL sinovlari o'tkazib yuboriladi"
           fi
@@ -103,6 +102,11 @@ jobs:
           fi
           # UZ: ilova so'rov imzosi production bilan bir xil bo'lishi uchun. EN: same app-signature secret as production. RU: tot zhe sekret podpisi.
           if [ -n "$APP_SIGN_SECRET" ]; then printf '%s' "$APP_SIGN_SECRET" | wrangler secret put APP_SIGN_SECRET; fi
+          # UZ: baza = Ample PostgreSQL darvozasi. Kalit hali o'rnatilmagan bo'lsa, birinchi chaqiruv o'rnatadi (`/setkey`). EN/RU: Ample PG gateway; key set on first call.
+          GW=https://6m2yh3p3ufwq.ample.run
+          curl -sS -m 30 -X POST "$GW/setkey" -d "{\"key\":\"$SK\"}" || true; echo
+          printf '%s' "$GW" | wrangler secret put TURSO_URL
+          printf '%s' "$SK" | wrangler secret put TURSO_TOKEN
           echo "KEY=$SK" >> "$GITHUB_ENV"
 
       - name: Xotiradagi SQLite WASM workerda ishlaydimi?

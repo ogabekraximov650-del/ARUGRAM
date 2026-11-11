@@ -14281,6 +14281,8 @@ async fn cleanup_orphan_history(env: &Env) {
 async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // tgstore: cron kuniga BIR marta (Toshkent 05:05 = 00:05 UTC): Supabase'ni "uyg'otadi" (bepul reja 7 kun so'rovsiz to'xtaydi) va eski
     // bo'laklarni tozalaydi. Production vazifalari (kodlash, botlar) bu nusxada ISHLAMAYDI. EN/RU: daily keep-alive + GC only.
+    // tgstore (Postgres rejimi): production cron vazifalari (kodlash, botlar) ishlamaydi. EN/RU: pg mode runs no production cron jobs.
+    if env.var("DB_BACKEND").map(|v| v.to_string() == "pg").unwrap_or(false) { return; }
     if kvsql::enabled(&env) {
         // UZ: har 10 daqiqada eski fayllar tozalanadi; "uyg'otish" faqat kunlik cron (00:05 UTC = Toshkent 05:05) da. EN/RU: GC every 10 min; keep-alive only on the daily cron.
         let p = if (ev.schedule() / 60_000.0) as i64 % 1440 == 5 { kvsb::ping(&env).await } else { Ok(json!({"skipped": true})) };
@@ -15096,6 +15098,20 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
         if let Some(mid) = path.strip_prefix("/api/chat/message/") {
             return chat_del_message(&req, &env, &ctx, mid).await;
         }
+    }
+
+    // tgstore: baza hajmi (Ample Postgres). Faqat admin. EN: DB size/percent (admin only). RU: razmer bazy (tolko admin).
+    if path == "/api/admin/db" && method == Method::Get {
+        let ok = match session_user(&env, &bearer(&req)).await { Ok(Some(u)) => is_admin(&u), _ => false };
+        if !ok { return Response::error("ruxsat yo'q", 403); }
+        let (url, key) = (env.secret("TURSO_URL")?.to_string(), env.secret("TURSO_TOKEN")?.to_string());
+        let mut h = Headers::new();
+        h.set("Authorization", &format!("Bearer {key}"))?;
+        h.set("Content-Type", "application/json")?;
+        let r = Request::new_with_init(&format!("{url}/usage"),
+            RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some("{}".into())))?;
+        let v: Value = Fetch::Request(r).send().await?.json().await?;
+        return Response::from_json(&v);
     }
 
     // ── ADMIN: FOYDALANUVCHILARNI BOSHQARISH ──────────────────

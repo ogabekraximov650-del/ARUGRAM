@@ -97,6 +97,7 @@ fun AdminHubScreen(onBack: () -> Unit, onOpen: (AdminSection) -> Unit) {
             Icon(AruIcons.AdminPanel, null, tint = Color.White.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            DbUsageCard()
             AdminSection.entries.forEach { s ->
                 val shape = RoundedCornerShape(20.dp)
                 val badge = if (s == AdminSection.CHATS) unread else 0
@@ -180,5 +181,37 @@ fun AdminThreadsScreen(onBack: () -> Unit, onOpenThread: (ChatThread) -> Unit) {
             dismissButton = { TextButton(onClick = { del = null }) { Text("Bekor qilish") } },
             containerColor = AruColors.Surface,
         )
+    }
+}
+
+/** Baza hajmi: "12,34 MB / 1024,00 MB" va foiz (server: Ample PostgreSQL). */
+@Composable
+private fun DbUsageCard() {
+    var used by remember { mutableStateOf<Double?>(null) }
+    var limit by remember { mutableStateOf(0.0) }
+    var pct by remember { mutableStateOf(0.0) }
+    var failed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val r = AppServices.admin.get("/api/admin/db")
+        val j = r.json
+        if (r.ok && j != null) {
+            used = j.optDouble("used_bytes") / 1048576.0
+            limit = j.optDouble("limit_bytes") / 1048576.0
+            pct = j.optDouble("percent")
+        } else failed = true
+    }
+    fun f(x: Double) = String.format(java.util.Locale.US, "%.2f", x).replace('.', ',')
+    val shape = RoundedCornerShape(20.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).padding(horizontal = 20.dp, vertical = 16.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Baza hajmi", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+            Text(if (used != null) "${f(pct)}%" else if (failed) "xato" else "...", color = AruColors.Accent2, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        }
+        Spacer(Modifier.height(8.dp))
+        Box(Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)).background(AruColors.CardAlt)) {
+            Box(Modifier.fillMaxWidth((pct / 100.0).coerceIn(0.0, 1.0).toFloat()).height(8.dp).background(AruColors.Accent2))
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(used?.let { "${f(it)} MB / ${f(limit)} MB" } ?: "0,00 MB", color = Color.White.copy(alpha = 0.55f), fontSize = 12.sp)
     }
 }
