@@ -64,10 +64,31 @@ async fn published_at(env: &Env) -> i64 {
     at
 }
 
-/// UZ: bu so'rovlarni nusxadan o'qish mumkinmi (Postgres rejimi, katalog, nusxa bor, sxema tiklandi). EN/RU: can these statements be served from the copy.
-pub async fn can_read(env: &Env, sqls: &[&str]) -> bool {
+thread_local! {
+    /// (to'lish foizi, tekshirilgan vaqt). EN/RU: (fill percent, checked_at).
+    static PCT: RefCell<(f64, i64)> = RefCell::new((0.0, 0));
+}
+
+/// UZ: Ample hajmi doira chegarasiga (70%) yetdimi: yetgunicha o'qish Ample'dan, keyin Telegram nusxa + kesh orqali. Natija 60 soniya eslab qolinadi. Tekshirib bo'lmasa — `false` (Ample'dan).
+/// EN/RU: is Ample at the circle threshold; below it reads go to Ample, above it through the Telegram copy + cache.
+pub async fn circle_on(env: &Env) -> bool {
+    let (pct, at) = PCT.with(|p| *p.borrow());
+    if at > 0 && now_ms() - at < 60_000 { return pct >= crate::circle::THRESHOLD; }
+    let pct = crate::circle::usage(env).await.ok().and_then(|u| u["percent"].as_f64()).unwrap_or(0.0);
+    PCT.with(|p| *p.borrow_mut() = (pct, now_ms()));
+    pct >= crate::circle::THRESHOLD
+}
+
+/// UZ: nusxa mavjudmi va so'rov uni o'qiy oladimi (hajmga qaramay) — Ample yiqilganda zaxira yo'li. EN/RU: usable copy regardless of fill (Ample-down fallback).
+pub async fn can_read_any(env: &Env, sqls: &[&str]) -> bool {
     if !is_pg(env) || sqls.is_empty() || !sqls.iter().all(|s| catalog_only(s)) { return false; }
     published_at(env).await > 0 && kvsql::load_schema(env).await
+}
+
+/// UZ: bu so'rovlarni nusxadan o'qish kerakmi: katalog so'rovi, doira yoqilgan (>= 70%) va nusxa tayyor. EN/RU: serve these statements from the copy now.
+pub async fn can_read(env: &Env, sqls: &[&str]) -> bool {
+    if !is_pg(env) || sqls.is_empty() || !sqls.iter().all(|s| catalog_only(s)) { return false; }
+    circle_on(env).await && can_read_any(env, sqls).await
 }
 
 fn ddl_for(table: &str, cols: &[String], pk: &[&str]) -> String {

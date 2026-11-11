@@ -7301,3 +7301,5 @@ Ilova: paketlab yuborish (`SyncQueue`) 5 daqiqaga o'zgartirildi; yuborilmagan ta
 - **Kechikish:** katalog o'zgarishi o'qishda ~5 daqiqagacha kechikadi (admin yozuvi darhol Ample'da).
 - **Fayllar:** `worker-rs/src/snap.rs`, `kvsql::load_schema`, `lib.rs` (`turso_exec` / `turso_many` yo'naltiradi, `turso_exec_pg` — Ample), cron `*/5`. Yo'llar: `/__snap` (holat), `/__snap?publish=1&force=1`, `/__snap?read=1`.
 - **Keyingi:** domen + Cloudflare Cache Rules (Worker'ni uyg'otmaydigan kesh), ilovada ETag, bazani kunlik zaxira.
+
+- **Yangilanish (o'qish tartibi):** baza `circle::THRESHOLD` (70%) dan kam to'lgan bo'lsa katalog ham Ample'dan o'qiladi; 70% dan keyin Telegram nusxa + kesh orqali (`snap::circle_on`, 60 soniya eslab qolinadi). Nusxa har doim yangilanib turadi (Ample yiqilsa zaxira: `snap::can_read_any`). Arxivlangan sovuq qatorlarni qayta o'qish (`arch_files` + kalit indeksi) hali QURILMAGAN.

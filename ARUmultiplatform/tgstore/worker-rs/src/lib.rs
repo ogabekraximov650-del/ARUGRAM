@@ -562,7 +562,7 @@ async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> 
     match turso_exec_pg(env, sql, args.clone()).await {
         Ok(v) => Ok(v),
         Err(e) => {
-            if !from_copy && snap::can_read(env, &[sql]).await {
+            if !from_copy && snap::can_read_any(env, &[sql]).await {
                 if let Ok(mut v) = kvsql::run(env, &[(sql, args)]).await { return Ok(v.remove(0)); }
             }
             Err(e)
@@ -14729,9 +14729,10 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             // UZ: nusxadan o'qishni tekshirish: so'rov nusxadan bajarildimi va natijasi Ample bilan bir xilmi. EN/RU: verify a read from the copy matches Ample.
             let sql = "SELECT COUNT(*) AS n FROM anime_db";
             let from_copy = snap::can_read(&env, &[sql]).await;
+            let circle_on = snap::circle_on(&env).await;
             let a = turso_exec(&env, sql, vec![]).await.map(|v| scalar(&v));
             let b = turso_exec_pg(&env, sql, vec![]).await.map(|v| scalar(&v));
-            json!({"from_copy": from_copy, "copy_or_routed": a.as_ref().ok(), "ample": b.as_ref().ok(), "same": a.as_ref().ok() == b.as_ref().ok(), "err": a.err().map(|e| e.to_string())})
+            json!({"circle_on": circle_on, "from_copy": from_copy, "copy_or_routed": a.as_ref().ok(), "ample": b.as_ref().ok(), "same": a.as_ref().ok() == b.as_ref().ok(), "err": a.err().map(|e| e.to_string())})
         } else { snap::status(&env).await };
         let _ = turso_exec_pg(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
             vec![TursoArg::text("__snap"), TursoArg::text(&report.to_string())]).await;
