@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use sqlite_wasm_rs as ffi;
 use std::ffi::{c_char, c_int, CStr, CString};
 use std::sync::atomic::{AtomicU32, Ordering};
-use worker::{Env, Request, Response, Result};
+use worker::{js_sys, Env, Request, Response, Result};
 
 static NEXT: AtomicU32 = AtomicU32::new(1);
 
