@@ -304,6 +304,27 @@ pub async fn gc(env: &Env) -> Result<Value> {
     Ok(json!({"deleted": deleted, "pending": pending}))
 }
 
+/// UZ: UMUMIY JAMLAMA: bir nechta kalit oralig'ini (har biri bitta jadval) BIR xil `rev` dagi bitta ro'yxatdan o'qiydi; har bo'lak bir marta ochiladi.
+///     `fresh=false` — o'qish (keshlangan ro'yxat), `true` — yozishdan oldin. EN: reads several key ranges from one consistent registry snapshot. RU: chtenie diapazonov.
+pub async fn snapshot_ranges(env: &Env, table: &str, ranges: &[(String, String)], fresh: bool) -> Result<(u64, Vec<Vec<(String, Value)>>)> {
+    let m = if fresh { meta(env, table).await? } else { meta_cached(env, table).await? };
+    let mut loaded: HashMap<usize, Rc<View>> = HashMap::new();
+    let mut out = Vec::with_capacity(ranges.len());
+    for (lo, hi) in ranges {
+        let mut rows = Vec::new();
+        for (i, c) in m.chunks.iter().enumerate() {
+            if c.max.as_str() < lo.as_str() || c.min.as_str() >= hi.as_str() { continue; }
+            let v = match loaded.get(&i) {
+                Some(v) => v.clone(),
+                None => { let (v, _) = load_chunk(env, c).await?; loaded.insert(i, v.clone()); v }
+            };
+            rows.extend(v.range(lo, Some(hi.as_str()), usize::MAX, false).map_err(Error::RustError)?);
+        }
+        out.push(rows);
+    }
+    Ok((m.rev, out))
+}
+
 /// UZ: izolyat keshlarini tozalaydi (ro'yxat nusxasi, ochilgan bo'laklar, fayl yo'llari). EN/RU: clears isolate caches.
 pub fn clear_caches() {
     HOT.with(|h| h.borrow_mut().clear());

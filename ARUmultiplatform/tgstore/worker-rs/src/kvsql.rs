@@ -18,6 +18,16 @@ use worker::*;
 #[cfg(target_arch = "wasm32")]
 use crate::sqlmem::{Mem, Param};
 
+/// UZ: HAMMA jadval qatorlari BITTA umumiy kalit fazosida (`<jadval>\u{1e}<qator kaliti>`), `pool` ro'yxatida: kichik jadvallar bitta bo'lakni baham ko'radi
+///     (bir amal = bitta yuklash), katta jadvallar 1 MB dan oshgach o'z bo'laklariga bo'linadi. EN: all tables share ONE ordered keyspace in the `pool`
+///     registry table. RU: vse tablitsy v odnom uporyadochennom prostranstve klyuchey.
+pub const POOL: &str = "pool";
+
+pub fn pool_key(table: &str, key: &str) -> String { format!("{table}\u{1e}{key}") }
+/// [lo, hi): jadvalning hamma kalitlari / all keys of the table / vse klyuchi tablitsy
+pub fn pool_range(table: &str) -> (String, String) { (format!("{table}\u{1e}"), format!("{table}\u{1f}")) }
+pub fn pool_strip(table: &str, key: &str) -> String { key.get(table.len() + 1..).unwrap_or("").to_string() }
+
 pub fn enabled(env: &Env) -> bool {
     env.var("DB_BACKEND").map(|v| v.to_string() == "kv").unwrap_or(false)
 }
@@ -260,13 +270,14 @@ async fn run_dml(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value
     for _attempt in 0..5 {
         let m = Mem::open().map_err(db_err)?;
         replay_schema(&m, &involved)?;
-        let snaps = futures_util::future::join_all(involved.iter().map(|t| crate::kvdb::snapshot(env, t, !writes.is_empty()))).await;
-        let mut revs: BTreeMap<String, u64> = BTreeMap::new();
+        // UZ: hamma kerakli jadvallar BITTA ro'yxat suratidan (bir xil `rev`), har bo'lak bir marta ochiladi. EN/RU: one consistent snapshot of the pool.
+        let tables: Vec<String> = involved.iter().cloned().collect();
+        let ranges: Vec<(String, String)> = tables.iter().map(|t| pool_range(t)).collect();
+        let (rev, snaps) = if tables.is_empty() { (0, Vec::new()) } else { crate::kvdb::snapshot_ranges(env, POOL, &ranges, !writes.is_empty()).await? };
         let mut olds: BTreeMap<String, BTreeMap<String, Value>> = BTreeMap::new();
-        for (t, s) in involved.iter().zip(snaps) {
-            let (rev, rows) = s?;
+        for (t, rows) in tables.iter().zip(snaps) {
+            let rows: Vec<(String, Value)> = rows.into_iter().map(|(k, v)| (pool_strip(t, &k), v)).collect();
             load_rows(&m, t, &rows)?;
-            revs.insert(t.clone(), rev);
             olds.insert(t.clone(), rows.into_iter().collect());
         }
         let mut results = Vec::with_capacity(stmts.len());
@@ -280,18 +291,21 @@ async fn run_dml(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value
             }
             results.push(v);
         }
-        // UZ: HAMMA yozilgan jadvallar bitta atomik tranzaksiyada (ro'yxat Supabase'da). EN/RU: all written tables in one atomic commit.
-        let mut items: Vec<crate::kvdb::TableOps> = Vec::new();
+        // UZ: HAMMA yozilgan jadvallarning o'zgarishlari BITTA amalda -> BITTA yuklash (umumiy bo'lak) va bitta atomik ro'yxat almashtirish. EN/RU: one commit.
+        let mut all_ops: Vec<Op> = Vec::new();
         for t in &writes {
             let has_pk = !pk_cols(&m, t)?.is_empty();
             let new = dump(&m, t, has_pk)?;
             let ops = diff(&olds[t], &new);
-            if !ops.is_empty() {
-                let (p, d) = (ops.iter().filter(|o| matches!(o, Op::Put(..))).count(), ops.iter().filter(|o| matches!(o, Op::Del(..))).count());
-                console_log!("tgs_w table={} rows_before={} put={} del={} rev={} attempt={}", t, olds[t].len(), p, d, revs[t], _attempt);
-                items.push(crate::kvdb::TableOps { table: t.clone(), ops, expect: Some(revs[t]) });
-            }
+            if ops.is_empty() { continue; }
+            let (p, d) = (ops.iter().filter(|o| matches!(o, Op::Put(..))).count(), ops.iter().filter(|o| matches!(o, Op::Del(..))).count());
+            console_log!("tgs_w table={} rows_before={} put={} del={} rev={} attempt={}", t, olds[t].len(), p, d, rev, _attempt);
+            all_ops.extend(ops.into_iter().map(|o| match o {
+                Op::Put(k, v) => Op::Put(pool_key(t, &k), v),
+                Op::Del(k) => Op::Del(pool_key(t, &k)),
+            }));
         }
+        let items = vec![crate::kvdb::TableOps { table: POOL.to_string(), ops: all_ops, expect: Some(rev) }];
         if !crate::kvdb::commit_multi(env, items).await? { console_log!("tgs_conflict attempt={}", _attempt); continue; }
         let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
         crate::turso_after(env, &sqls, &results).await;
@@ -373,8 +387,8 @@ pub async fn sqltest(env: &Env, phase: &str) -> Result<Value> {
             rec("250 qator INSERT (bitta paket)", w.is_ok(), format!("{:?}", w.as_ref().err().map(|e| e.to_string())));
             let c = crate::turso_exec(env, "SELECT COUNT(*) FROM anime_db WHERE id>=? AND id<?", range()).await;
             rec("COUNT = 250", matches!(&c, Ok(v) if crate::scalar(v) == 250), format!("{:?}", c.as_ref().map(|v| crate::scalar(v)).map_err(|e| e.to_string())));
-            let m = crate::kvdb::meta(env, "anime_db").await?;
-            rec("anime_db bo'laklarga bo'lingan (>=2)", m.chunks.len() >= 2, format!("{} bo'lak", m.chunks.len()));
+            let m = crate::kvdb::meta(env, POOL).await?;
+            rec("umumiy `pool` bir nechta bo'lakka bo'lingan (>=2)", m.chunks.len() >= 2, format!("{} bo'lak", m.chunks.len()));
             let l = crate::turso_exec(env, "SELECT id,name FROM anime_db WHERE name LIKE ? AND id>=? ORDER BY id DESC LIMIT 3", vec![TursoArg::text("Test anime%ўзбек"), TursoArg::int(base)]).await;
             let ok_l = matches!(&l, Ok(v) if v["rows"].as_array().map_or(false, |r| r.len() == 3) && v["rows"][0][0]["value"] == json!((base + 249).to_string()));
             rec("LIKE + ORDER BY DESC LIMIT", ok_l, String::new());
@@ -446,6 +460,23 @@ mod tests {
         let none = tables_in("SELECT my_anime_db_x FROM t", &known());
         assert!(none.is_empty(), "substring of another identifier must not match");
         assert_eq!(tables_in("INSERT INTO app_config(k) VALUES('anime_db')", &known()).len(), 2, "string literal mention is harmless (extra load only)");
+    }
+
+    #[test]
+    fn pool_keys_keep_tables_in_separate_ranges() {
+        let (lo, hi) = pool_range("season_db");
+        for k in ["", "a", "0922\u{1f}0001", "\u{7f}zzz"] {
+            let pk = pool_key("season_db", k);
+            assert!(pk >= lo && pk < hi, "{pk:?}");
+            assert_eq!(pool_strip("season_db", &pk), k);
+        }
+        // boshqa jadval, hatto nomi shu bilan boshlansa ham, oraliqqa tushmaydi / another table never falls into the range
+        for other in ["season_janr", "season_db2", "season_d", "season"] {
+            let pk = pool_key(other, "x");
+            assert!(!(pk >= lo && pk < hi), "{other}");
+        }
+        let (alo, ahi) = pool_range("a");
+        assert!(!(pool_key("a_b", "k") >= alo && pool_key("a_b", "k") < ahi));
     }
 
     #[test]

@@ -7260,3 +7260,11 @@ Tegilmadi (allaqachon yetarli): izohlar (`mk/at` -> `same`), chat (`since`), Tar
 - Tekshiruv: `tgstore-rs.yml` -> `cargo test` (18 ta), `/__sqlcheck`, `/__kv/selftest`, `/__kv/sqltest` (haqiqiy Telegram bilan).
 
 **Ma'lum cheklovlar:** (1) har yozish = 1 ta Telegram yuklash; Telegram ~20 xabar/daqiqa chegarasi (`429 retry after`) — yozuvlarni birlashtiruvchi navbat kerak; (2) jadvallararo tranzaksiya yo'q (bir paketdagi jadvallar ketma-ket saqlanadi); (3) katta jadvallar worker xotirasiga (128 MB) sig'ishi kerak; (4) Turso'dan ma'lumot ko'chirilmagan (baza bo'sh).
+
+### tgstore-rs: umumiy `pool` (2026-11, yangilanish)
+
+Hamma jadval qatorlari endi BITTA tartiblangan kalit fazosida (`<jadval>\x1e<qator kaliti>`), Supabase ro'yxatida bitta jadval `pool` sifatida (`kvsql.rs`: `POOL`, `pool_key`, `pool_range`).
+Sabab (jonli jurnaldan, `tgstore-tail.yml`): `POST /api/sync` 8 jadvalga yozardi = 8 ta alohida Telegram yuklash = 5–6 soniya; endi bir amal = bitta yuklash (kichik jadvallar bitta bo'lakni baham ko'radi,
+1 MB dan oshgach o'zi bo'linadi). Jadvallararo yozuv bitta atomik `kv_commit` da. Kamchilik: hamma yozuv bitta `rev` ga bog'langan (to'qnashuvda butun SQL qayta bajariladi) — ko'p foydalanuvchida yozuv navbati kerak.
+`_schema` va sinov jadvallari alohida qoladi. Eski (jadvalma-jadval) ma'lumot ko'chirilmaydi: `WIPE_ONCE=2` bilan bir marta tozalanadi.
+Jonli jurnal: `tgstore-tail.yml` (qo'lda ishga tushiriladi; `tgs_w` qatorlari jadval/put/del/to'qnashuvni ko'rsatadi). CPU 10 ms chegarasi bu hisobda ishlamaydi (so'rovlar 100–220 ms CPU bilan muvaffaqiyatli).
