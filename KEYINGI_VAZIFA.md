@@ -7293,3 +7293,11 @@ Ilova: paketlab yuborish (`SyncQueue`) 5 daqiqaga o'zgartirildi; yuborilmagan ta
 - **Yo'llar (STORE kaliti bilan):** `/__circle?force=1&dry=1` (sanash, natija `app_config.__circle` da), `/__circle?files=1` (ro'yxat), `/__circle?restore=ID` (faylni PostgreSQL'ga qaytarish). `/api/admin/db` javobida `circle_at`, `circle_active`.
 - **Fayllar:** `worker-rs/src/circle.rs`. Eski TGK1/Supabase bo'lak tizimi (kvdb) bu yerda ishlatilmaydi.
 - **Qilinmadi (keyingi bosqich):** katta KO'RINADIGAN jadvallar (izoh, tarix, chat) uchun o'qishda arxivdan zaxira yo'li; ular hozir 70% da arxivlanmaydi.
+
+## tgstore: o'qish = Telegram + kesh, yozish = Ample (2026-11)
+
+- **Nima:** katalog jadvallari (`anime_db`, `season_db`, `season_janr`, `epizod_db`) Ample'dan har ~5 daqiqada (o'zgargan bo'lsagina, kamida 2 daqiqa oralig'ida) `kvdb` bo'laklariga nusxalanadi (Telegram fayllari, ro'yxat Supabase `DB_CHUNK`da, sxema `_schema`da, holat `_snap/state`da). Faqat katalogni o'qiydigan SELECT lar (`snap::catalog_only`) nusxadan, xotiradagi SQLite orqali (production SQL o'zgarishsiz) bajariladi. `MAX(` va `FOR UPDATE` li so'rovlar, yozuvlar va shaxsiy jadvallar (users, tarix, balans...) har doim Ample'dan.
+- **Ishonchlilik:** nusxa yo'q yoki o'qish yiqilsa — Ample'dan; Ample yiqilsa — katalog nusxadan.
+- **Kechikish:** katalog o'zgarishi o'qishda ~5 daqiqagacha kechikadi (admin yozuvi darhol Ample'da).
+- **Fayllar:** `worker-rs/src/snap.rs`, `kvsql::load_schema`, `lib.rs` (`turso_exec` / `turso_many` yo'naltiradi, `turso_exec_pg` — Ample), cron `*/5`. Yo'llar: `/__snap` (holat), `/__snap?publish=1&force=1`, `/__snap?read=1`.
+- **Keyingi:** domen + Cloudflare Cache Rules (Worker'ni uyg'otmaydigan kesh), ilovada ETag, bazani kunlik zaxira.

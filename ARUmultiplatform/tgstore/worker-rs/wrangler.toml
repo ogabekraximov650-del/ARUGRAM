@@ -39,4 +39,4 @@ deleted_classes = ["KvRegistry"]
 
 # UZ: BITTA cron (bepul reja 5 ta cron bilan cheklangan): har 10 daqiqada (:05, :15, ...) eski fayllarni tozalash (GC); 00:05 UTC (= Toshkent 05:05) da qo'shimcha Supabase "uyg'otish". EN: daily at 05:00 Tashkent (00:00 UTC): keep-alive + GC.
 [triggers]
-crons = ["5-55/10 * * * *"]
+crons = ["*/5 * * * *"]

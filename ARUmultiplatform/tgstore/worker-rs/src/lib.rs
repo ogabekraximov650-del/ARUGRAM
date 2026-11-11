@@ -40,6 +40,7 @@ mod kvsb;
 mod kvdb;
 mod kvsql;
 mod circle;
+mod snap;
 #[cfg(target_arch = "wasm32")]
 mod sqlmem;
 mod emojifont;
@@ -552,6 +553,24 @@ impl DurableObject for MarkHub {
 }
 
 async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
+    // tgstore: katalogni FAQAT o'qiydigan so'rovlar Telegram nusxasidan (kesh + bot API); Ample'ga murojaat yo'q. Nusxa yiqilsa — Ample'dan; Ample yiqilsa — nusxadan.
+    // EN: catalog-only reads come from the Telegram copy; fall back to Ample, and back again if Ample is down. RU: чтение каталога из копии.
+    let from_copy = snap::can_read(env, &[sql]).await;
+    if from_copy {
+        if let Ok(mut v) = kvsql::run(env, &[(sql, args.clone())]).await { return Ok(v.remove(0)); }
+    }
+    match turso_exec_pg(env, sql, args.clone()).await {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            if !from_copy && snap::can_read(env, &[sql]).await {
+                if let Ok(mut v) = kvsql::run(env, &[(sql, args)]).await { return Ok(v.remove(0)); }
+            }
+            Err(e)
+        }
+    }
+}
+
+async fn turso_exec_pg(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
     if kvsql::enabled(env) {
         return Ok(kvsql::run(env, &[(sql, args)]).await?.remove(0));
     }
@@ -639,6 +658,10 @@ async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
 /// barobar qisqartiradi. Statistika va tarix yozuvi aynan shunday
 /// ishlaydi: 7 ta buyruq — 1 ta so'rov.
 async fn turso_many(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value>> {
+    let sqls: Vec<&str> = stmts.iter().map(|(s, _)| *s).collect();
+    if snap::can_read(env, &sqls).await {
+        if let Ok(v) = kvsql::run(env, stmts).await { return Ok(v); }
+    }
     if kvsql::enabled(env) {
         return kvsql::run(env, stmts).await;
     }
@@ -14287,6 +14310,10 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         // UZ: doira tizimi: baza 70% dan oshsa sovuq qatorlar Telegram'ga ketadi. EN/RU: circle system at >= 70%.
         let r = circle::run(&env, false, false).await;
         console_log!("tgstore circle: {:?}", r.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
+        // UZ: katalog nusxasi (Telegram) yangilanadi, eski bo'laklar tozalanadi. EN/RU: refresh the catalog copy, GC old chunks.
+        let p = snap::publish(&env, false).await;
+        let g = kvdb::gc(&env).await;
+        console_log!("tgstore snap: {:?} gc={:?}", p.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()), g.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
         return;
     }
     if kvsql::enabled(&env) {
@@ -14685,6 +14712,26 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         // UZ: natija `app_config` ga ham yoziladi (CI logi ko'rinmasa ham o'qish mumkin). EN/RU: result also stored in app_config.
         let _ = turso_exec(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
             vec![TursoArg::text("__pgcheck"), TursoArg::text(&report.to_string())]).await;
+        return Response::from_json(&report);
+    }
+    // tgstore: katalog nusxasi (STORE kaliti bilan): `?publish=1` (yoki `&force=1`) nashr, aks holda holat.
+    if path == "/__snap" {
+        let key = tg_secret(&env, "STORE_KEY");
+        let got = req.headers().get("authorization").ok().flatten().unwrap_or_default();
+        if key.is_empty() || got != format!("Bearer {key}") { return Response::error("unauthorized", 401); }
+        let q: std::collections::HashMap<String, String> = url.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let report = if q.contains_key("publish") {
+            match snap::publish(&env, q.contains_key("force")).await { Ok(v) => v, Err(e) => json!({"ok": false, "error": e.to_string()}) }
+        } else if q.contains_key("read") {
+            // UZ: nusxadan o'qishni tekshirish: so'rov nusxadan bajarildimi va natijasi Ample bilan bir xilmi. EN/RU: verify a read from the copy matches Ample.
+            let sql = "SELECT COUNT(*) AS n FROM anime_db";
+            let from_copy = snap::can_read(&env, &[sql]).await;
+            let a = turso_exec(&env, sql, vec![]).await.map(|v| scalar(&v));
+            let b = turso_exec_pg(&env, sql, vec![]).await.map(|v| scalar(&v));
+            json!({"from_copy": from_copy, "copy_or_routed": a.as_ref().ok(), "ample": b.as_ref().ok(), "same": a.as_ref().ok() == b.as_ref().ok(), "err": a.err().map(|e| e.to_string())})
+        } else { snap::status(&env).await };
+        let _ = turso_exec_pg(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
+            vec![TursoArg::text("__snap"), TursoArg::text(&report.to_string())]).await;
         return Response::from_json(&report);
     }
     // tgstore: doira tizimi (STORE kaliti bilan): `?force=1` foizdan qat'i nazar, `?dry=1` faqat sanash, `?files=1` ro'yxat, `?restore=ID` faylni PostgreSQL'ga qaytarish.

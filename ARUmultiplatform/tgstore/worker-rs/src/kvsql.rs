@@ -503,3 +503,18 @@ mod tests {
         assert_eq!(to_turso(&[], &[], 3, true)["rows_written"], 3);
     }
 }
+
+/// UZ: izolyatda sxema bo'sh bo'lsa, uni `_schema` dan (Telegram bo'laklari) tiklaydi. Postgres rejimida katalog nusxasi uchun. EN/RU: restores the schema from `_schema`.
+pub async fn load_schema(env: &Env) -> bool {
+    if READY.with(|r| *r.borrow()) { return true; }
+    if let Ok(Some(v)) = crate::kvdb::get(env, "_schema", "ddl").await {
+        if let Ok(list) = serde_json::from_value::<Vec<(String, String)>>(v["ddl"].clone()) {
+            if !list.is_empty() {
+                SCHEMA.with(|s| *s.borrow_mut() = list);
+                READY.with(|r| *r.borrow_mut() = true);
+                return true;
+            }
+        }
+    }
+    false
+}
