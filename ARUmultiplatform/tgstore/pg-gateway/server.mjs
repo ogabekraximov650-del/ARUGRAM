@@ -17,7 +17,7 @@ const log = (...a) => console.log(new Date().toISOString().slice(11, 23), ...a);
 // int8 / numeric ni qator sifatida olamiz (aniqlik uchun), keyin o'zimiz aylantiramiz
 pg.types.setTypeParser(20, (v) => v);
 pg.types.setTypeParser(1700, (v) => v);
-const pool = new pg.Pool({ connectionString: E.DATABASE_URL, max: 10, idleTimeoutMillis: 30000, ssl: E.PGSSL === '1' ? { rejectUnauthorized: false } : undefined });
+const pool = new pg.Pool({ connectionString: E.DATABASE_URL, max: Number(E.PG_POOL || 40), idleTimeoutMillis: 30000, ssl: E.PGSSL === '1' ? { rejectUnauthorized: false } : undefined });
 pool.on('error', (e) => log('pool error', e.message));
 
 // ── sxema keshi: jadval -> ustunlar va birlamchi kalit ───────────────────────────────────────────────────────────────────────────────────────
@@ -26,7 +26,9 @@ async function loadTable(client, table) {
   const cols = (await client.query('select column_name from information_schema.columns where table_schema=current_schema() and table_name=$1 order by ordinal_position', [table])).rows.map((r) => r.column_name);
   const pk = (await client.query(`select a.attname from pg_index i join pg_attribute a on a.attrelid=i.indrelid and a.attnum=any(i.indkey)
     where i.indrelid=to_regclass($1) and i.indisprimary order by array_position(i.indkey, a.attnum)`, [table])).rows.map((r) => r.attname);
-  schemaCache.set(table, { cols, pk });
+  // UZ: lastval() faqat identity ustuni bor jadvalda kerak (aks holda har INSERT'ga ortiqcha so'rov). EN/RU: lastval only for tables with an identity column.
+  const ident = (await client.query("select 1 from information_schema.columns where table_schema=current_schema() and table_name=$1 and is_identity='YES' limit 1", [table])).rows.length > 0;
+  schemaCache.set(table, { cols, pk, ident });
 }
 const schemaView = { cols: (t) => schemaCache.get(t)?.cols || [], pk: (t) => schemaCache.get(t)?.pk || [] };
 async function ensureTables(client, sql) {
@@ -63,7 +65,7 @@ async function runOne(client, st) {
     rows_read: (r.rows || []).length,
     rows_written: ['INSERT', 'UPDATE', 'DELETE'].includes(tr.kind) ? (r.rowCount || 0) : 0,
   };
-  if (tr.kind === 'INSERT' && !(r.rows || []).length) {
+  if (tr.kind === 'INSERT' && !(r.rows || []).length && schemaCache.get(tr.table)?.ident) {
     try { const l = await client.query('select lastval() as v'); out.last_insert_rowid = String(l.rows[0].v); } catch { /* ketma-ketlik ishlatilmagan */ }
   }
   return out;
