@@ -119,8 +119,20 @@ jobs:
           sys.exit(0 if j.get('ok') else 1)
           PY
 
-      - name: kvdb o'z-o'zini tekshirish (haqiqiy Telegram + Supabase bilan)
+      - name: Bazani tozalash kerakmi? (bir martalik: ARUmultiplatform/tgstore/WIPE_ONCE)
         if: env.SB == '1'
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          if [ -s ../WIPE_ONCE ]; then
+            WID=$(tr -d '[:space:]' < ../WIPE_ONCE)
+            echo "WIPE_ID=$WID" >> "$GITHUB_ENV"
+            R=$(curl -sS -m 60 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__kv/wipe?id=$WID&check=1" || true)
+            echo "tozalash holati: $R"
+            case "$R" in *'"pending":true'*) echo "WIPE_PENDING=1" >> "$GITHUB_ENV" ;; esac
+          fi
+
+      - name: kvdb o'z-o'zini tekshirish (haqiqiy Telegram + Supabase bilan)
+        if: env.SB == '1' && (env.WIPE_PENDING == '1' || github.event_name == 'workflow_dispatch')
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev
           S=$(date +%s)
@@ -135,7 +147,7 @@ jobs:
           PY
 
       - name: SQL ko'prigi (production sxemasi va turso_* chaqiruvlari bo'laklar ustida)
-        if: env.SB == '1'
+        if: env.SB == '1' && (env.WIPE_PENDING == '1' || github.event_name == 'workflow_dispatch')
         run: |
           # UZ: Cloudflare bitta so'rovda cheklangan ichki chaqiruv beradi — sinov bosqichlarga bo'lingan. EN/RU: phases keep each call under the subrequest limit.
           URL=https://tgstore-rs.uzcom.workers.dev
@@ -155,3 +167,18 @@ jobs:
           PY
           done
           exit $FAIL
+
+      # UZ: bir martalik TO'LIQ TOZALASH — Telegram'dagi hamma bo'lak fayllari va ro'yxat o'chadi; jadvallar va fayllar ilovadan birinchi foydalanishda O'ZI yaratiladi.
+      #     Sinovlardan KEYIN ishlaydi (qoldiq qolmasin). `WIPE_ONCE` dagi raqam oshirilsa yana bir marta tozalanadi.
+      # EN: one-shot FULL WIPE after the tests; bump the number in WIPE_ONCE to wipe again. RU: odnorazovaya polnaya ochistka.
+      - name: Bazani to'liq tozalash (bir marta)
+        if: env.SB == '1' && env.WIPE_PENDING == '1'
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          for i in $(seq 1 30); do
+            R=$(curl -sS -m 120 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__kv/wipe?id=$WIPE_ID" || true)
+            echo "tozalash $i: $R"
+            case "$R" in *'"done":true'*) exit 0 ;; esac
+            sleep 2
+          done
+          echo "XATO: tozalash tugamadi"; exit 1

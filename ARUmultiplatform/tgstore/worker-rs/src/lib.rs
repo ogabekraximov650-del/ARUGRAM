@@ -14278,11 +14278,12 @@ async fn cleanup_orphan_history(env: &Env) {
 }
 
 #[event(scheduled)]
-async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
-    // tgstore: cron kuniga BIR marta (Toshkent 05:00 = 00:00 UTC): Supabase'ni "uyg'otadi" (bepul reja 7 kun so'rovsiz to'xtaydi) va eski
+async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    // tgstore: cron kuniga BIR marta (Toshkent 05:05 = 00:05 UTC): Supabase'ni "uyg'otadi" (bepul reja 7 kun so'rovsiz to'xtaydi) va eski
     // bo'laklarni tozalaydi. Production vazifalari (kodlash, botlar) bu nusxada ISHLAMAYDI. EN/RU: daily keep-alive + GC only.
     if kvsql::enabled(&env) {
-        let p = kvsb::ping(&env).await;
+        // UZ: har 10 daqiqada eski fayllar tozalanadi; "uyg'otish" faqat kunlik cron (00:05 UTC = Toshkent 05:05) da. EN/RU: GC every 10 min; keep-alive only on the daily cron.
+        let p = if ev.cron() == "5 0 * * *" { kvsb::ping(&env).await } else { Ok(json!({"skipped": true})) };
         let g = kvdb::gc(&env).await;
         console_log!("tgstore cron: ping={:?} gc={:?}", p.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()), g.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
         return;
@@ -14655,6 +14656,24 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 Ok(v) => Response::from_json(&v),
                 Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),
             },
+            "/__kv/wipe" => {
+                // UZ: `?id=N` — bir martalik tozalash raqami: belgi (`__wipe_id`) N dan kichik bo'lsagina tozalanadi. `check=1` — faqat tekshirish.
+                // EN/RU: one-shot wipe keyed by id; `check=1` only reports whether it is pending.
+                let q: std::collections::HashMap<String, String> = url.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+                let id: i64 = q.get("id").and_then(|v| v.parse().ok()).unwrap_or(0);
+                let done_id = kvsb::marks(&env, &[], 1, &["__wipe_id".to_string()]).await.ok().and_then(|m| m.get("__wipe_id").copied()).unwrap_or(0);
+                let pending = id > 0 && done_id < id;
+                if q.get("check").map(|v| v == "1").unwrap_or(false) || !pending {
+                    return Response::from_json(&json!({"pending": pending, "done": !pending, "applied_id": done_id}));
+                }
+                match kvdb::wipe(&env).await {
+                    Ok(v) => {
+                        if v["done"] == json!(true) { let _ = kvsb::marks(&env, &["__wipe_id".to_string()], id, &[]).await; }
+                        Response::from_json(&v)
+                    }
+                    Err(e) => Response::from_json(&json!({"done": false, "error": e.to_string()})),
+                }
+            }
             "/__kv/gc" => match kvdb::gc(&env).await {
                 Ok(v) => Response::from_json(&v),
                 Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),

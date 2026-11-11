@@ -37,6 +37,6 @@ new_sqlite_classes = ["KvRegistry"]
 tag = "v3"
 deleted_classes = ["KvRegistry"]
 
-# UZ: kuniga bir marta, Toshkent 05:00 (= 00:00 UTC): Supabase "uyg'otish" + GC. EN: daily at 05:00 Tashkent (00:00 UTC): keep-alive + GC.
+# UZ: Toshkent 05:05 (= 00:05 UTC) — Supabase "uyg'otish" + GC; har 10 daqiqada — eski fayllarni tozalash (GC). EN: daily at 05:00 Tashkent (00:00 UTC): keep-alive + GC.
 [triggers]
-crons = ["0 0 * * *"]
+crons = ["5 0 * * *", "*/10 * * * *"]

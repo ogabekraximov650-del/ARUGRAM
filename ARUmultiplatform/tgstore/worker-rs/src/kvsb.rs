@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use worker::*;
 
 /// UZ: almashtirilgan eski fayl shuncha vaqtdan keyin o'chiriladi. EN/RU: delay before deleting a replaced file.
-pub const GC_DELAY_MS: i64 = 120_000;
+pub const GC_DELAY_MS: i64 = 60_000;
 
 pub struct TableCommit {
     pub tbl: String,
@@ -90,4 +90,21 @@ pub async fn marks(env: &Env, bump: &[String], at: i64, get: &[String]) -> Resul
 /// UZ: kunlik "uyg'otish" so'rovi (Toshkent 05:00). EN/RU: daily keep-alive ping.
 pub async fn ping(env: &Env) -> Result<Value> {
     rpc(env, "kv_ping", json!({})).await
+}
+
+/// UZ: tozalash uchun xabar raqamlari (navbatdagi `limit` ta). EN/RU: next batch of message ids to wipe.
+pub async fn wipe_take(env: &Env, limit: i64) -> Result<Vec<i64>> {
+    let r = rpc(env, "kv_wipe_take", json!({"p_limit": limit})).await?;
+    Ok(r["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default())
+}
+
+pub async fn wipe_done(env: &Env, ids: &[i64], fin: bool) -> Result<()> {
+    rpc(env, "kv_wipe_done", json!({"p_ids": ids, "p_final": fin})).await?;
+    Ok(())
+}
+
+/// UZ: jadvalni ro'yxatdan olib tashlaydi, Telegram'dan o'chiriladigan xabar raqamlarini qaytaradi. EN/RU: drop a table, return its message ids.
+pub async fn drop_table(env: &Env, table: &str) -> Result<Vec<i64>> {
+    let r = rpc(env, "kv_drop_table", json!({"p_tbl": table})).await?;
+    Ok(r["ids"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).collect()).unwrap_or_default())
 }

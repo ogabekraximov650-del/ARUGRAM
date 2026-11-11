@@ -231,7 +231,7 @@ pub async fn commit_multi(env: &Env, items: Vec<TableOps>) -> Result<bool> {
                 let key = hex_key(&key_hex)?;
                 let sealed = kvfmt::seal(&key, &plain).map_err(Error::RustError)?;
                 let rows = View::parse(plain.clone()).map_err(Error::RustError)?.len() as u32;
-                specs.push(Upload { table: it.table.clone(), no, ver, name: kvfmt::chunk_name(&it.table, no, ver), sealed, key_hex, min, max, rows, plain });
+                specs.push(Upload { table: it.table.clone(), no, ver, name: format!("{}_{}", kvfmt::chunk_name(&it.table, no, ver), &key_hex[..8]), sealed, key_hex, min, max, rows, plain });
             }
         }
         plan.push((it.table.clone(), m.rev, remove));
@@ -248,7 +248,11 @@ pub async fn commit_multi(env: &Env, items: Vec<TableOps>) -> Result<bool> {
         let add = adds.remove(&tbl).unwrap_or_default();
         TableCommit { tbl, rev, remove, add }
     }).collect();
-    match kvsb::commit(env, now_ms(), commits).await? {
+    let uploaded: Vec<i64> = commits.iter().flat_map(|c| c.add.iter().map(|a| a.msg_id)).collect();
+    let committed = kvsb::commit(env, now_ms(), commits).await;
+    // UZ: to'qnashuv yoki xato — yuklangan fayllar ro'yxatga kirmadi: DARHOL o'chiriladi (yetim fayl qolmasin). EN/RU: delete uploads that never made it into the registry.
+    if !matches!(committed, Ok(CommitResult::Ok(_))) { tg_delete_many(env, &uploaded).await; }
+    match committed? {
         CommitResult::Ok(metas) => {
             METAS.with(|c| { let mut c = c.borrow_mut(); for (t, m) in metas { c.insert(t, (m, now_ms())); } });
             for (name, plain) in views {
@@ -272,17 +276,67 @@ pub async fn snapshot(env: &Env, table: &str, fresh: bool) -> Result<(u64, Vec<(
     Ok((m.rev, out))
 }
 
-/// UZ: eski versiyalarni Telegram'dan o'chiradi. EN: deletes replaced versions from Telegram. RU: udalyaet starye versii.
-pub async fn gc(env: &Env) -> Result<Value> {
-    let due = kvsb::gc_take(env, now_ms()).await?;
-    let mut done: Vec<i64> = Vec::new();
-    for id in due {
-        let res = crate::tg_api_tok(&token(env), "deleteMessage", json!({"chat_id": channel(env), "message_id": id})).await;
-        let gone = match &res { Ok(_) => true, Err(e) => { let s = e.to_string(); s.contains("not found") || s.contains("can't be deleted") } };
-        if gone { done.push(id); }
+/// UZ: bir nechta xabarni BITTA chaqiruvda o'chiradi (`deleteMessages`, 100 tagacha) — ichki chaqiruvlarni tejaydi. Xato bo'lsa `false`. EN/RU: bulk delete.
+pub async fn tg_delete_many(env: &Env, ids: &[i64]) -> bool {
+    let ids: Vec<i64> = ids.iter().copied().filter(|i| *i != 0).collect();
+    let mut ok = true;
+    for batch in ids.chunks(100) {
+        let r = crate::tg_api_tok(&token(env), "deleteMessages", json!({"chat_id": channel(env), "message_ids": batch})).await;
+        if let Err(e) = r {
+            let s = e.to_string();
+            if !(s.contains("not found") || s.contains("can't be deleted")) { ok = false; }
+        }
     }
-    let pending = kvsb::gc_done(env, &done).await?;
-    Ok(json!({"deleted": done.len(), "pending": pending}))
+    ok
+}
+
+/// UZ: almashtirilgan eski versiyalarni Telegram'dan o'chiradi (cron har 10 daqiqada). EN: deletes replaced versions. RU: udalyaet starye versii.
+pub async fn gc(env: &Env) -> Result<Value> {
+    let mut deleted = 0usize;
+    let mut pending = 0i64;
+    for _ in 0..10 {
+        let due = kvsb::gc_take(env, now_ms()).await?;
+        if due.is_empty() { break; }
+        if !tg_delete_many(env, &due).await { return Ok(json!({"deleted": deleted, "error": "telegram"})); }
+        pending = kvsb::gc_done(env, &due).await?;
+        deleted += due.len();
+    }
+    Ok(json!({"deleted": deleted, "pending": pending}))
+}
+
+/// UZ: izolyat keshlarini tozalaydi (ro'yxat nusxasi, ochilgan bo'laklar, fayl yo'llari). EN/RU: clears isolate caches.
+pub fn clear_caches() {
+    HOT.with(|h| h.borrow_mut().clear());
+    METAS.with(|m| m.borrow_mut().clear());
+    PATHS.with(|p| p.borrow_mut().clear());
+}
+
+/// UZ: BAZANI TO'LIQ TOZALASH: Telegram'dagi hamma bo'lak xabarlari o'chiriladi, keyin ro'yxat jadvallari bo'shatiladi. Bir chaqiruvda cheklangan miqdor
+///     ishlanadi (`done:false` bo'lsa qayta chaqiriladi). Jadvallar va fayllar keyin ilova ishlatilganda O'ZI qayta yaratiladi.
+/// EN: FULL WIPE — deletes every chunk message in Telegram, then empties the registry tables; repeat while `done:false`. Everything is recreated on first use.
+/// RU: POLNAYA OCHISTKA — udalyaet vse soobshcheniya chankov v Telegram, zatem ochishchaet reestr; povtoryat poka `done:false`.
+pub async fn wipe(env: &Env) -> Result<Value> {
+    let mut deleted = 0usize;
+    for _ in 0..30 {
+        let ids = kvsb::wipe_take(env, 100).await?;
+        if ids.is_empty() {
+            kvsb::wipe_done(env, &[], true).await?;
+            clear_caches();
+            return Ok(json!({"done": true, "deleted": deleted}));
+        }
+        if !tg_delete_many(env, &ids).await { return Ok(json!({"done": false, "deleted": deleted, "error": "telegram"})); }
+        kvsb::wipe_done(env, &ids, false).await?;
+        deleted += ids.len();
+    }
+    Ok(json!({"done": false, "deleted": deleted}))
+}
+
+/// UZ: bitta jadvalni butunlay olib tashlaydi (fayllari ham). EN/RU: drops one table with its files.
+pub async fn drop_table(env: &Env, table: &str) -> Result<usize> {
+    let ids = kvsb::drop_table(env, table).await?;
+    tg_delete_many(env, &ids).await;
+    METAS.with(|m| m.borrow_mut().remove(table));
+    Ok(ids.len())
 }
 
 /// UZ: `/__kv/selftest` — yozish, o'qish, tahrir, o'chirish, bo'linish, GC; faqat hisoblar (soat so'rov ichida to'xtab turadi).
@@ -333,6 +387,9 @@ pub async fn selftest(env: &Env) -> Result<Value> {
     let g = gc(env).await;
     rec("GC chaqiruvi", g.is_ok(), format!("{:?}", g.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string())));
 
+    // tozalash: sinov jadvali va uning fayllari o'chiriladi / cleanup: the test table and its files are dropped / ochistka
+    let dropped = drop_table(env, &table).await;
+    rec("sinov jadvali o'chirildi", dropped.is_ok(), format!("{:?}", dropped.as_ref().map_err(|e| e.to_string())));
     let ok = steps.iter().all(|s| s["ok"] == json!(true));
     Ok(json!({"ok": ok, "table": table, "steps": steps}))
 }
