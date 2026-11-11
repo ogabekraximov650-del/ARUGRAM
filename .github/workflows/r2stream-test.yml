@@ -62,19 +62,20 @@ jobs:
           sudo systemctl start postgresql
           sudo -u postgres psql -qc "create database bench"
           t0=$(date +%s)
-          sudo -u postgres psql -q bench <<'SQL'
+          sudo -u postgres psql -q -v ON_ERROR_STOP=1 bench <<'SQL'
           set synchronous_commit = off;
           create unlogged table watch_log (
             id bigint, user_id int, anime_id int, season_id int, ep int, pos_ms int, title text, created timestamptz);
           insert into watch_log
             select g, (g * 7919) % 100000, (g * 104729) % 5000, 1 + g % 4, 1 + g % 120, (g * 31) % 1400000,
                    md5(g::text) || md5((g * 3)::text), now() - (g % 100000) * interval '1 minute'
-            from generate_series(1, 30000000) g;
+            from generate_series(1::bigint, 30000000::bigint) g;
           analyze watch_log;
           SQL
           echo "generate: $(( $(date +%s) - t0 )) s"
           sudo -u postgres psql -Atc "select count(*) from watch_log" bench
           sudo -u postgres psql -Atc "select pg_size_pretty(pg_total_relation_size('watch_log'))" bench
+          [ "$(sudo -u postgres psql -Atc 'select count(*) from watch_log' bench)" = "30000000" ] || { echo "ma'lumot to'liq emas"; exit 1; }
 
       - name: Dump -> gzip -> R2 (streaming upload, nothing on disk)
         if: hashFiles('tool/r2test/CLEAN') == ''
