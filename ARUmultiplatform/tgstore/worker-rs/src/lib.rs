@@ -37,6 +37,7 @@ mod packs;
 mod kvfmt;
 mod kvreg;
 mod kvdb;
+mod kvsql;
 #[cfg(target_arch = "wasm32")]
 mod sqlmem;
 mod emojifont;
@@ -545,6 +546,9 @@ impl DurableObject for MarkHub {
 }
 
 async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
+    if kvsql::enabled(env) {
+        return Ok(kvsql::run(env, &[(sql, args)]).await?.remove(0));
+    }
     let url = env.secret("TURSO_URL")?.to_string();
     let token = env.secret("TURSO_TOKEN")?.to_string();
     let body = json!({
@@ -575,6 +579,10 @@ async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> 
 }
 
 async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
+    if kvsql::enabled(env) {
+        kvsql::run(env, stmts).await?;
+        return Ok(());
+    }
     let url = env.secret("TURSO_URL")?.to_string();
     let token = env.secret("TURSO_TOKEN")?.to_string();
     let mut reqs: Vec<Value> = stmts.iter().map(|(sql, args)| {
@@ -625,6 +633,9 @@ async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
 /// barobar qisqartiradi. Statistika va tarix yozuvi aynan shunday
 /// ishlaydi: 7 ta buyruq — 1 ta so'rov.
 async fn turso_many(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value>> {
+    if kvsql::enabled(env) {
+        return kvsql::run(env, stmts).await;
+    }
     let url = env.secret("TURSO_URL")?.to_string();
     let token = env.secret("TURSO_TOKEN")?.to_string();
     let mut reqs: Vec<Value> = stmts.iter().map(|(sql, args)| {
@@ -693,6 +704,14 @@ static DB_READY: core::sync::atomic::AtomicBool =
 async fn ensure_db(env: &Env) {
     use core::sync::atomic::Ordering;
     if DB_READY.load(Ordering::Relaxed) {
+        return;
+    }
+    // tgstore: sxema `_schema` jadvalidan tiklanadi yoki `init_db` bir marta ishlaydi va saqlanadi. EN/RU: schema from the `_schema` table.
+    if kvsql::enabled(env) {
+        let mark = schema_mark_url();
+        if kvsql::ensure_schema(env, &mark, init_db(env)).await {
+            DB_READY.store(true, Ordering::Relaxed);
+        }
         return;
     }
     // ── SXEMA BELGISI KESHDA (Turso'ga ortiqcha 30+ buyruq yo'q) ──
@@ -14616,6 +14635,10 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
         return match path.as_str() {
             "/__kv/selftest" => match kvdb::selftest(&env).await {
+                Ok(v) => Response::from_json(&v),
+                Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),
+            },
+            "/__kv/sqltest" => match kvsql::sqltest(&env).await {
                 Ok(v) => Response::from_json(&v),
                 Err(e) => Response::from_json(&json!({"ok": false, "error": e.to_string()})),
             },

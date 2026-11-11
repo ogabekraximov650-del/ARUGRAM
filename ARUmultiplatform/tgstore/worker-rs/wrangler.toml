@@ -9,6 +9,10 @@ workers_dev = true
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 
+[vars]
+# UZ: baza = Telegram bo'laklari (Turso EMAS). EN: DB backend = Telegram chunks (not Turso). RU: baza = chanki Telegram.
+DB_BACKEND = "kv"
+
 [ai]
 binding = "AI"
 

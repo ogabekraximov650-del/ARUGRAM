@@ -144,9 +144,19 @@ async fn upload(env: &Env, table: &str, u: Upload) -> Result<(ChunkMeta, Vec<u8>
 /// UZ: amallarni yozadi (put/del). Bo'lak qayta yig'iladi, shifrlanadi, yuklanadi; ro'yxatda CAS — to'qnashuvda qayta uriniladi.
 /// EN: applies ops. Chunk is rebuilt, encrypted, uploaded; CAS in the registry, retried on conflict. RU: primenyaet operatsii.
 pub async fn commit(env: &Env, table: &str, ops: Vec<Op>) -> Result<()> {
-    if ops.is_empty() { return Ok(()); }
     for _attempt in 0..4 {
+        if commit_try(env, table, ops.clone(), None).await? { return Ok(()); }
+    }
+    err("yozish: ro'yxat to'qnashuvi (4 urinish)")
+}
+
+/// UZ: bitta urinish. `expect` berilsa va ro'yxat `rev` i boshqacha bo'lsa — `false` (ma'lumot o'zgarib ketgan, chaqiruvchi qayta hisoblashi kerak).
+/// EN: one attempt; with `expect` a differing registry `rev` returns `false`. RU: odna popytka; pri neskhozhdenii `rev` — `false`.
+pub async fn commit_try(env: &Env, table: &str, ops: Vec<Op>, expect: Option<u64>) -> Result<bool> {
+    if ops.is_empty() { return Ok(true); }
+    {
         let m = meta(env, table).await?;
+        if let Some(e) = expect { if m.rev != e { return Ok(false); } }
         let mut groups: BTreeMap<usize, Vec<Op>> = BTreeMap::new();
         for op in &ops {
             let k = match op { Op::Put(k, _) | Op::Del(k) => k };
@@ -188,11 +198,22 @@ pub async fn commit(env: &Env, table: &str, ops: Vec<Op>) -> Result<()> {
             for (name, plain) in views {
                 if let Ok(v) = View::parse(plain) { hot_put(&name, Rc::new(v)); }
             }
-            return Ok(());
+            return Ok(true);
         }
-        // UZ: to'qnashuv — boshqa worker yozib ulgurdi; yuklangan fayllar ro'yxatga kirmadi (GC emas, yetim: keyin tozalanadi). EN/RU: conflict -> retry.
+        // UZ: to'qnashuv — boshqa worker yozib ulgurdi; yuklangan fayllar ro'yxatga kirmadi (yetim). EN/RU: conflict.
+        Ok(false)
     }
-    err("yozish: ro'yxat to'qnashuvi (4 urinish)")
+}
+
+/// UZ: jadvalning bir xil `rev` dagi to'liq surati (ro'yxat bir marta o'qiladi). EN: a consistent snapshot of a table. RU: snimok tablitsy.
+pub async fn snapshot(env: &Env, table: &str) -> Result<(u64, Vec<(String, Value)>)> {
+    let m = meta(env, table).await?;
+    let mut out = Vec::new();
+    for c in &m.chunks {
+        let (v, _) = load_chunk(env, c).await?;
+        out.extend(v.range("", None, usize::MAX, false).map_err(Error::RustError)?);
+    }
+    Ok((m.rev, out))
 }
 
 /// UZ: eski versiyalarni Telegram'dan o'chiradi. EN: deletes replaced versions from Telegram. RU: udalyaet starye versii.

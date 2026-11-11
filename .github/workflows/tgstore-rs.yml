@@ -106,3 +106,17 @@ jobs:
           if 'error' in j: print('XATO', j['error'])
           sys.exit(0 if j.get('ok') else 1)
           PY
+
+      - name: SQL ko'prigi (production sxemasi va turso_* chaqiruvlari bo'laklar ustida)
+        run: |
+          URL=https://tgstore-rs.uzcom.workers.dev
+          S=$(date +%s)
+          curl -sS -m 300 -A tgstore-ci -H "Authorization: Bearer $KEY" "$URL/__kv/sqltest" | tee /tmp/sql.json; echo
+          echo "devor vaqti: $(( $(date +%s) - S )) s"
+          python3 - <<'PY'
+          import json,sys
+          j=json.load(open('/tmp/sql.json'))
+          for s in j.get('steps',[]): print(('OK  ' if s['ok'] else 'XATO'), s['step'], '-', s['note'])
+          if 'error' in j: print('XATO', j['error'])
+          sys.exit(0 if j.get('ok') else 1)
+          PY
