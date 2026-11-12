@@ -4,7 +4,6 @@
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{anyhow, Result};
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -15,13 +14,13 @@ pub fn key32(hex_key: &str) -> Result<[u8; 32]> {
     b.try_into().map_err(|_| anyhow!("kalit 32 bayt (64 hex) bo'lishi kerak"))
 }
 
-pub fn random_key_hex() -> String { let mut k = [0u8; 32]; rand::thread_rng().fill_bytes(&mut k); hex::encode(k) }
+pub fn random_key_hex() -> String { let mut k = [0u8; 32]; rand::fill(&mut k); hex::encode(k) }
 
 pub fn seal(key: &[u8; 32], plain: &[u8]) -> Vec<u8> {
     let mut iv = [0u8; 12];
-    rand::thread_rng().fill_bytes(&mut iv);
+    rand::fill(&mut iv);
     let c = Aes256Gcm::new(key.into());
-    let ct_tag = c.encrypt(Nonce::from_slice(&iv), plain).expect("aes-gcm encrypt");
+    let ct_tag = c.encrypt(&Nonce::try_from(&iv[..]).expect("nonce 12 bayt"), plain).expect("aes-gcm encrypt");
     let (ct, tag) = ct_tag.split_at(ct_tag.len() - 16);
     let mut out = Vec::with_capacity(28 + ct.len());
     out.extend_from_slice(&iv);
@@ -37,7 +36,7 @@ pub fn open(key: &[u8; 32], sealed: &[u8]) -> Result<Vec<u8>> {
     let mut buf = Vec::with_capacity(ct.len() + 16);
     buf.extend_from_slice(ct);
     buf.extend_from_slice(tag);
-    Aes256Gcm::new(key.into()).decrypt(Nonce::from_slice(iv), buf.as_slice()).map_err(|_| anyhow!("ochib bo'lmadi (kalit noto'g'ri yoki fayl buzilgan)"))
+    Aes256Gcm::new(key.into()).decrypt(&Nonce::try_from(iv).map_err(|_| anyhow!("nonce"))?, buf.as_slice()).map_err(|_| anyhow!("ochib bo'lmadi (kalit noto'g'ri yoki fayl buzilgan)"))
 }
 
 /// `[u32 BE sarlavha uzunligi][sarlavha JSON [{"n","l"}]][fayllar ketma-ket]` (nomlar tartiblangan). EN/RU: container of named files.
@@ -77,6 +76,15 @@ mod tests {
         assert!(open(&key32(&random_key_hex()).unwrap(), &s).is_err());
         let mut t = s.clone(); *t.last_mut().unwrap() ^= 1;
         assert!(open(&k, &t).is_err());
+    }
+
+    /// Mustaqil (Python `cryptography`) yasagan AES-256-GCM vektori: format `iv(12)|tag(16)|matn`; kutubxona versiyasi o'zgarganda ham eski zaxira ochilishi shart.
+    /// EN: independently produced AES-256-GCM vector — old backups must keep opening whatever crate version we use.
+    #[test]
+    fn opens_independent_vector() {
+        let key: [u8; 32] = core::array::from_fn(|i| i as u8);
+        let sealed = hex::decode("6465666768696a6b6c6d6e6f948ab89be3cd0529b339ab68c1432411257aa600109076e45f1a369abb5f4a8e23ae6967ab08861cdebe").unwrap();
+        assert_eq!(open(&key, &sealed).unwrap(), "maxfiy zaxira: salom dunyo".as_bytes());
     }
 
     #[test]
