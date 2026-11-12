@@ -232,6 +232,17 @@ pub(crate) async fn cron(env: &Env) {
             let _ = kick_wf(env, MIG_WORKFLOW).await;
         }
     }
+    // Egasi keyin paydo bo'lgan tayyor fayllar (yozishma rasmi xabardan oldin yuklanadi): navbatdagi `ready` qatorlari egasiga ko'chiriladi (har 10 daqiqada, 20 tagacha).
+    if !marker_has("attach").await {
+        marker_set("attach", 9 * 60).await;
+        if ensure(env).await.is_ok() {
+            let names: Vec<String> = turso_exec(env, "SELECT name FROM vd_queue WHERE state='ready' ORDER BY created LIMIT 20", vec![]).await.ok()
+                .map(|r| rows_of(&r).iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
+            for n in names {
+                let _ = try_attach(env, &n).await;
+            }
+        }
+    }
     // Tozalash (bazaga bitta so'rov) 6 soatlik davr bilan bir xil.
     if !marker_has("clean").await {
         marker_set("clean", 6 * 3600).await;
