@@ -1464,9 +1464,9 @@ async fn init_db(env: &Env) -> bool {
                 OR cfg_key LIKE 'dlv\_msg\_%' ESCAPE '\'", vec![]),
             ("DELETE FROM login_tokens WHERE expires_at<?", vec![TursoArg::int(now_ms())]),
         ]).await;
-        // `vd_files` jadvali kerak bo'lganda yaratiladi (`vd::ensure`); fayli bazada yo'q yozishma xabarlari o'chadi.
-        let chat_ok = vd::ensure(env).await.is_ok()
-            && turso_exec(env, "DELETE FROM chat_messages WHERE media_file<>'' AND media_file NOT IN (SELECT name FROM vd_files)", vec![]).await.is_ok();
+        // `vd_queue` jadvali kerak bo'lganda yaratiladi (`vd::ensure`). (Eski bir martalik "fayli yo'q yozishma xabarlarini o'chirish" olib tashlandi:
+        // endi tayyor fayl ma'lumoti egasining qatorida turadi, navbat jadvaliga qarab o'chirish tayyor xabarlarni ham o'chirib yuborardi.)
+        let chat_ok = vd::ensure(env).await.is_ok();
         if r.is_ok() && chat_ok { config_put(env, "mig_cleanup_2611", "1").await; }
     }
     // Anime qo'shilgan vaqt: yangi anime ro'yxatda eng tepaga chiqadi (2026-10).
@@ -1495,7 +1495,7 @@ async fn init_db(env: &Env) -> bool {
     // Video ombori (`vd`): fayl ma'lumoti (hajm, bo'laklar soni, kalit, Telegram `file_id` va xabar raqamlari) egasining jadvalida turadi
     // (1-qadam: faqat ustunlar qo'shiladi, hali hech narsa yozilmaydi/o'qilmaydi). Har ustun to'plami: `<ref>_vd_{size,chunks,key,ids,msgs}`.
     // Mavjud ustunlar qayta qo'shilmaydi (avval `pragma_table_info` o'qiladi), shu sabab qayta urinish xavfsiz.
-    if ok && config_get(env, "mig_vd_owner_cols").await.is_none() {
+    if ok && config_get(env, "mig_vd_owner_cols2").await.is_none() {
         let mut all_ok = true;
         for (table, refs) in vd::OWNER_REFS {
             let have: Vec<String> = match turso_exec(env, &format!("SELECT name FROM pragma_table_info('{table}')"), vec![]).await {
@@ -1508,7 +1508,7 @@ async fn init_db(env: &Env) -> bool {
             let stmts: Vec<(&str, Vec<TursoArg>)> = sqls.iter().map(|q| (q.as_str(), vec![])).collect();
             if turso_batch(env, &stmts).await.is_err() { all_ok = false }
         }
-        if all_ok { config_put(env, "mig_vd_owner_cols", "1").await; }
+        if all_ok { config_put(env, "mig_vd_owner_cols2", "1").await; }
     }
     // Kodlash jarayoni (qaysi sifat, necha foiz) — botning "Holat" xabari uchun.
     if ok && config_get(env, "mig_encode_progress").await.is_none() {

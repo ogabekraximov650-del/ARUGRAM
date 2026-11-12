@@ -155,18 +155,16 @@ fn hex_key(h: &str) -> Option<[u8; 16]> {
     Some(out)
 }
 
-/// Muqovaning OCHILGAN baytlari. Avval YANGI tizim (`vd_files`: shifrlangan bitta bo'lak, Bot API `getFile`), topilmasa eski saqlash kanali
+/// Muqovaning OCHILGAN baytlari. Avval YANGI tizim (`vd_queue`: shifrlangan bitta bo'lak, Bot API `getFile`), topilmasa eski saqlash kanali
 /// (`tg_files`: xabarni uzatib `file_id` olinadi). Yangi rasmlar (admin yuklagan, baza noldan boshlangach) faqat `vd` da — ilgari bu yerda
 /// faqat eski yo'l bor edi, shu sabab e'lon rasmsiz (faqat matn) chiqardi.
 async fn cover_bytes(env: &Env, photo: &str) -> std::result::Result<Vec<u8>, String> {
     if vd::ensure(env).await.is_ok() {
-        let r = turso_exec(env, "SELECT size, vkey, chunk_ids, state FROM vd_files WHERE name=?",
-            vec![TursoArg::text(photo)]).await.ok().and_then(|r| first_row(&r));
-        if let Some(row) = r {
-            let size = jint(&row, "size").max(0) as u64;
-            let first = row["chunk_ids"].as_str().unwrap_or("").split(',').next().unwrap_or("").trim().to_string();
-            if row["state"].as_str() == Some("ready") && size > 0 && size as usize <= COVER_MAX && !first.is_empty() {
-                let key = hex_key(row["vkey"].as_str().unwrap_or("").trim()).ok_or("rasm kaliti yo'q")?;
+        if let Some(m) = vd::meta_one(env, photo).await {
+            let size = jint(&m, "size").max(0) as u64;
+            let first = m["chunk_ids"].as_str().unwrap_or("").split(',').next().unwrap_or("").trim().to_string();
+            if m["state"].as_str() == Some("ready") && size > 0 && size as usize <= COVER_MAX && !first.is_empty() {
+                let key = hex_key(m["key"].as_str().unwrap_or("").trim()).ok_or("rasm kaliti yo'q")?;
                 let mut bytes = vd::chunk_bytes(env, &first, size).await.map_err(|e| e.to_string())?;
                 // AES-128-CTR (hisoblagich 0) — `vd::store_small` bilan bir xil.
                 let mut c = ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into());

@@ -11,7 +11,7 @@
 //!     Actions kladut kuski v R2, otdelnyy workflow-zagruzchik sohranyaet ih v Telegram cherez Bot API. Vosproizvedenie: Telegram ->
 //!     kesh Cloudflare (okno = 1 kusok), rasshifrovku delaet prilozhenie.
 //!
-//! Holatlar (`vd_files.state`): `staging` (Actions bo'laklarni R2 ga yozyapti) / `uploading` (ilova butun faylni R2 ga yozyapti) ->
+//! Holatlar (`vd_queue.state`): `staging` (Actions bo'laklarni R2 ga yozyapti) / `uploading` (ilova butun faylni R2 ga yozyapti) ->
 //! `uploaded` (R2 da to'liq, saqlash navbatida) -> `storing` (yuklovchi Telegram'ga yozyapti) -> `ready`. `failed` — saqlab bo'lmadi.
 //! Migratsiya navbati `vd_mig`: eski (`tg_files`) sifat fayllari -> yangi kalit va bo'laklar.
 
@@ -146,7 +146,7 @@ fn cap_bytes(env: &Env) -> i64 {
 
 /// Telegram'ga hali saqlanmagan (R2 da turgan) fayllar hajmi.
 async fn staged_bytes(env: &Env) -> i64 {
-    turso_exec(env, "SELECT COALESCE(SUM(size),0) AS n FROM vd_files WHERE state IN ('staging','uploading','uploaded','storing')", vec![]).await
+    turso_exec(env, "SELECT COALESCE(SUM(size),0) AS n FROM vd_queue WHERE state IN ('staging','uploading','uploaded','storing')", vec![]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0)
 }
 
@@ -154,15 +154,26 @@ pub(crate) async fn ensure(env: &Env) -> Result<()> {
     if SCHEMA_OK.load(Ordering::Relaxed) {
         return Ok(());
     }
+    // `vd_queue` — FAQAT yuklash navbati (vaqtinchalik): tayyor (`ready`) fayl ma'lumoti egasining jadvaliga ko'chadi va navbat qatori o'chadi
+    // (`try_attach`). Egasi hali yo'q fayl (masalan yozishma rasmi xabardan oldin yuklanadi) shu yerda turadi va egasi paydo bo'lgach ko'chiriladi.
     turso_many(env, &[
-        ("CREATE TABLE IF NOT EXISTS vd_files (name TEXT PRIMARY KEY, size INTEGER NOT NULL, chunks INTEGER NOT NULL, vkey TEXT NOT NULL, \
-          state TEXT NOT NULL, layout TEXT NOT NULL DEFAULT 'chunks', chunk_ids TEXT NOT NULL DEFAULT '', msg_ids TEXT NOT NULL DEFAULT '', \
-          lease INTEGER NOT NULL DEFAULT 0, tries INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)", vec![]),
-        ("CREATE INDEX IF NOT EXISTS vd_state ON vd_files(state, created)", vec![]),
+        ("CREATE TABLE IF NOT EXISTS vd_queue (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, size INTEGER NOT NULL, chunks INTEGER NOT NULL, \
+          vkey TEXT NOT NULL, state TEXT NOT NULL, layout TEXT NOT NULL DEFAULT 'chunks', chunk_ids TEXT NOT NULL DEFAULT '', \
+          msg_ids TEXT NOT NULL DEFAULT '', lease INTEGER NOT NULL DEFAULT 0, tries INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)", vec![]),
+        ("CREATE INDEX IF NOT EXISTS vd_queue_state ON vd_queue(state, created)", vec![]),
         ("CREATE TABLE IF NOT EXISTS vd_mig (name TEXT PRIMARY KEY, state TEXT NOT NULL, lease INTEGER NOT NULL DEFAULT 0, \
           tries INTEGER NOT NULL DEFAULT 0, err TEXT NOT NULL DEFAULT '', queued INTEGER NOT NULL)", vec![]),
         ("CREATE INDEX IF NOT EXISTS vd_mig_state ON vd_mig(state, queued)", vec![]),
     ]).await?;
+    // Eski `vd_files` jadvali bo'lsa: qatorlari navbatga ko'chiriladi (egasi bo'lganlar o'qishda egasiga o'tadi), jadval o'chadi.
+    let old = turso_exec(env, "SELECT 1 AS x FROM sqlite_master WHERE type='table' AND name='vd_files'", vec![]).await?;
+    if first_row(&old).is_some() {
+        turso_batch(env, &[
+            ("INSERT OR IGNORE INTO vd_queue (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,lease,tries,created) \
+              SELECT name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,lease,tries,created FROM vd_files", vec![]),
+            ("DROP TABLE vd_files", vec![]),
+        ]).await?;
+    }
     SCHEMA_OK.store(true, Ordering::Relaxed);
     Ok(())
 }
@@ -199,9 +210,9 @@ pub(crate) async fn cron(env: &Env) {
         }
         let now = now_ms();
         let Some(r) = turso_exec(env,
-            "SELECT (SELECT COUNT(*) FROM vd_files WHERE state='uploaded' OR (state='storing' AND lease<?)) AS store,
+            "SELECT (SELECT COUNT(*) FROM vd_queue WHERE state='uploaded' OR (state='storing' AND lease<?)) AS store,
                     (SELECT COUNT(*) FROM vd_mig WHERE state='queued' OR (state='running' AND lease<?)) AS mig,
-                    (SELECT COUNT(*) FROM vd_files WHERE state IN ('storing','staging','uploading') AND lease>=?) AS busy",
+                    (SELECT COUNT(*) FROM vd_queue WHERE state IN ('storing','staging','uploading') AND lease>=?) AS busy",
             vec![TursoArg::int(now), TursoArg::int(now), TursoArg::int(now)]).await.ok().and_then(|r| first_row(&r)) else { return };
         if jint(&r, "store") > 0 {
             let _ = kick_wf(env, WORKFLOW).await;
@@ -232,13 +243,13 @@ pub(crate) async fn cron(env: &Env) {
 async fn cleanup(env: &Env) {
     let Some(bk) = bucket(env) else { return };
     let cutoff = now_ms() - 24 * 3600 * 1000;
-    let Some(rows) = turso_exec(env, "SELECT name FROM vd_files WHERE state IN ('staging','uploading','failed') AND created<? LIMIT 20",
+    let Some(rows) = turso_exec(env, "SELECT name FROM vd_queue WHERE state IN ('staging','uploading','failed') AND created<? LIMIT 20",
         vec![TursoArg::int(cutoff)]).await.ok().map(|r| rows_of(&r)) else { return };
     for row in rows {
         let name = row["name"].as_str().unwrap_or("").to_string();
         if tg_safe_name(&name) {
             r2_delete_all(&bk, &name).await;
-            let _ = turso_exec(env, "DELETE FROM vd_files WHERE name=? AND state IN ('staging','uploading','failed')", vec![TursoArg::text(&name)]).await;
+            let _ = turso_exec(env, "DELETE FROM vd_queue WHERE name=? AND state IN ('staging','uploading','failed')", vec![TursoArg::text(&name)]).await;
         }
     }
 }
@@ -256,7 +267,7 @@ async fn r2_delete_all(bk: &Bucket, name: &str) {
 // ── Migratsiya navbati ───────────────────────────────────────
 
 /// Eski (`tg_files`) sifat fayllarini navbatga qo'yadi: faqat `ep_` kodlangan MP4 (fMP4 `_f.mp4` — Mini App uchun, tegilmaydi),
-/// kalitli va hali `vd_files` da yo'qlari. Qaytadi: navbatdagi (queued) fayllar soni.
+/// kalitli va hali `vd_queue` da yo'qlari. Qaytadi: navbatdagi (queued) fayllar soni.
 pub(crate) async fn enqueue_all(env: &Env) -> Result<i64> {
     ensure(env).await?;
     // Sifat fayllari (kalitli `ep_*.mp4`) VA rasmlar (Anibla/Post/to'plam botlari yetkazgan, kalitsiz ochiq rasmlar ham): `.jpg/.jpeg/.png/.webp`,
@@ -264,7 +275,7 @@ pub(crate) async fn enqueue_all(env: &Env) -> Result<i64> {
     turso_exec(env,
         "INSERT OR IGNORE INTO vd_mig (name, state, queued) \
          SELECT file_name, 'queued', ? FROM tg_files \
-         WHERE msg_id>0 AND file_name NOT IN (SELECT name FROM vd_files) AND ( \
+         WHERE msg_id>0 AND file_name NOT IN (SELECT name FROM vd_queue) AND ( \
             (file_name LIKE 'ep\\_%' ESCAPE '\\' AND file_name NOT LIKE '%\\_f.mp4' ESCAPE '\\' AND file_key<>'') \
             OR (file_name LIKE 'sys\\_emojifont\\_%' ESCAPE '\\' AND file_key<>'') \
             OR (file_name NOT LIKE 'chat\\_%' ESCAPE '\\' AND file_name NOT LIKE 'orig\\_%' ESCAPE '\\' AND file_name NOT LIKE 'ep\\_%' ESCAPE '\\' \
@@ -283,7 +294,7 @@ pub(crate) async fn enqueue_one(env: &Env, name: &str) {
         return;
     }
     let _ = turso_exec(env,
-        "INSERT OR IGNORE INTO vd_mig (name, state, queued) SELECT ?, 'queued', ? WHERE NOT EXISTS (SELECT 1 FROM vd_files WHERE name=?)",
+        "INSERT OR IGNORE INTO vd_mig (name, state, queued) SELECT ?, 'queued', ? WHERE NOT EXISTS (SELECT 1 FROM vd_queue WHERE name=?)",
         vec![TursoArg::text(name), TursoArg::int(now_ms()), TursoArg::text(name)]).await;
     let _ = kick_wf(env, MIG_WORKFLOW).await;
 }
@@ -310,7 +321,12 @@ pub(crate) async fn forget(env: &Env, name: &str) {
     if ensure(env).await.is_err() {
         return;
     }
-    let row = turso_exec(env, "SELECT msg_ids,chunks FROM vd_files WHERE name=?", vec![TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r));
+    // Ma'lumot egasining jadvalida (tayyor fayl) yoki navbatda (saqlanayotgan / egasi hali yo'q) bo'lishi mumkin.
+    let owned = owner_load_many(env, &[name.to_string()]).await.ok().and_then(|m| m.get(name).cloned());
+    let row = match owned {
+        Some(o) => Some(json!({"msg_ids": o["msg_ids"], "chunks": o["chunks"]})),
+        None => turso_exec(env, "SELECT msg_ids,chunks FROM vd_queue WHERE name=?", vec![TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r)),
+    };
     let _ = turso_exec(env, "DELETE FROM vd_mig WHERE name=?", vec![TursoArg::text(name)]).await;
     let Some(row) = row else { return };
     if let Some(bk) = bucket(env) {
@@ -330,7 +346,8 @@ pub(crate) async fn forget(env: &Env, name: &str) {
             }
         }
     }
-    let _ = turso_exec(env, "DELETE FROM vd_files WHERE name=?", vec![TursoArg::text(name)]).await;
+    let _ = turso_exec(env, "DELETE FROM vd_queue WHERE name=?", vec![TursoArg::text(name)]).await;
+    owner_clear(env, name).await;
     meta_drop(name).await;
     // Butun dunyo bo'yicha: boshqa mintaqalardagi kesh nusxalari endi "o'chirilgan" deb hisoblanadi (`tombstoned_many`).
     marks_bump(env, &[del_key(name)]).await;
@@ -356,7 +373,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         if !tg_safe_name(&name) {
             return bad("nom");
         }
-        let Some(row) = turso_exec(env, "SELECT size,chunks FROM vd_files WHERE name=? AND state='staging'", vec![TursoArg::text(&name)]).await?
+        let Some(row) = turso_exec(env, "SELECT size,chunks FROM vd_queue WHERE name=? AND state='staging'", vec![TursoArg::text(&name)]).await?
             .pipe_first() else { return json_resp(&json!({"error": "holat"}), 409) };
         let (size, chunks) = (jint(&row, "size") as u64, jint(&row, "chunks") as u64);
         if n >= chunks {
@@ -375,7 +392,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         if !tg_safe_name(&name) {
             return err404("yo'q");
         }
-        let Some(row) = turso_exec(env, "SELECT size,layout FROM vd_files WHERE name=?", vec![TursoArg::text(&name)]).await?.pipe_first() else {
+        let Some(row) = turso_exec(env, "SELECT size,layout FROM vd_queue WHERE name=?", vec![TursoArg::text(&name)]).await?.pipe_first() else {
             return err404("yo'q");
         };
         let size = jint(&row, "size") as u64;
@@ -456,8 +473,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if !tg_safe_name(&name) || size <= 0 || size > MAX_SIZE || !valid_file_key(&key) {
                 return bad("so'rov");
             }
-            let cur = turso_exec(env, "SELECT state FROM vd_files WHERE name=?", vec![TursoArg::text(&name)]).await?.pipe_first();
+            let cur = turso_exec(env, "SELECT state FROM vd_queue WHERE name=?", vec![TursoArg::text(&name)]).await?.pipe_first();
             if cur.as_ref().and_then(|r| r["state"].as_str()) == Some("ready") {
+                return ok(json!({"ready": true}));
+            }
+            if cur.is_none() && owner_load_many(env, &[name.clone()]).await.map(|m| m.contains_key(&name)).unwrap_or(false) {
                 return ok(json!({"ready": true}));
             }
             if staged_bytes(env).await + size > cap_bytes(env) && cur.is_none() {
@@ -466,14 +486,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             r2_delete_all(&bk, &name).await;
             let chunks = chunks_of(size);
             turso_exec(env,
-                "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,created) VALUES (?,?,?,?,'staging','chunks',?) \
+                "INSERT INTO vd_queue (name,size,chunks,vkey,state,layout,created) VALUES (?,?,?,?,'staging','chunks',?) \
                  ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=excluded.chunks, vkey=excluded.vkey, state='staging', layout='chunks', \
                    chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created",
                 vec![TursoArg::text(&name), TursoArg::int(size), TursoArg::int(chunks), TursoArg::text(&key), TursoArg::int(now)]).await?;
             ok(json!({"ok": true, "chunks": chunks, "chunk": CHUNK}))
         }
         "/api/vd/finish" => {
-            let Some(row) = turso_exec(env, "SELECT size,chunks FROM vd_files WHERE name=? AND state='staging'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
+            let Some(row) = turso_exec(env, "SELECT size,chunks FROM vd_queue WHERE name=? AND state='staging'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
                 return json_resp(&json!({"error": "holat"}), 409);
             };
             let (size, chunks) = (jint(&row, "size") as u64, jint(&row, "chunks") as u64);
@@ -485,7 +505,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 }
             }
             turso_many(env, &[
-                ("UPDATE vd_files SET state='uploaded' WHERE name=? AND state='staging'", vec![TursoArg::text(&name)]),
+                ("UPDATE vd_queue SET state='uploaded' WHERE name=? AND state='staging'", vec![TursoArg::text(&name)]),
                 ("UPDATE vd_mig SET state='done', lease=0 WHERE name=?", vec![TursoArg::text(&name)]),
             ]).await?;
             let k = kick_wf(env, WORKFLOW).await;
@@ -493,7 +513,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         }
         "/api/vd/peek" => {
             let r = turso_exec(env,
-                "SELECT (SELECT COUNT(*) FROM vd_files WHERE state='uploaded' OR (state='storing' AND lease<?)) AS store,
+                "SELECT (SELECT COUNT(*) FROM vd_queue WHERE state='uploaded' OR (state='storing' AND lease<?)) AS store,
                         (SELECT COUNT(*) FROM vd_mig WHERE state='queued' OR (state='running' AND lease<?)) AS mig",
                 vec![TursoArg::int(now), TursoArg::int(now)]).await?;
             let r = first_row(&r).unwrap_or(json!({}));
@@ -515,10 +535,12 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         // Tekshiruv (ENCODE_TOKEN): tayyor faylning 0-bo'lagini Telegram'dan olib, boshidagi 64 baytni (shifrlangan) va kalitni qaytaradi —
         // Actions shifr ochilib MP4 chiqishini tekshiradi (kalit logga chiqmaydi). `name` berilmasa — eng so'nggi tayyor fayl.
         "/api/vd/verify" => {
+            // `name` berilsa — fayl ma'lumoti egasidan (yoki navbatdan); berilmasa — navbatdagi eng so'nggi tayyor fayl (tayyorlar egasiga ko'chib ketadi).
             let row = if name.is_empty() {
-                turso_exec(env, "SELECT name,size,chunks,vkey,chunk_ids FROM vd_files WHERE state='ready' ORDER BY created DESC LIMIT 1", vec![]).await?.pipe_first()
+                turso_exec(env, "SELECT name,size,chunks,vkey,chunk_ids FROM vd_queue WHERE state='ready' ORDER BY created DESC LIMIT 1", vec![]).await?.pipe_first()
             } else {
-                turso_exec(env, "SELECT name,size,chunks,vkey,chunk_ids FROM vd_files WHERE name=? AND state='ready'", vec![TursoArg::text(&name)]).await?.pipe_first()
+                meta_one(env, &name).await.filter(|m| m["state"].as_str() == Some("ready"))
+                    .map(|m| json!({"name": name, "size": m["size"], "chunks": m["chunks"], "vkey": m["key"], "chunk_ids": m["chunk_ids"]}))
             };
             let Some(r) = row else { return ok(json!({"none": true})) };
             let first = ids(r["chunk_ids"].as_str().unwrap_or("")).first().map(|s| s.to_string()).unwrap_or_default();
@@ -557,6 +579,27 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 Err(e) => json!({"ok": false, "error": e.to_string(), "ms": t1 - t0}),
             };
             forget(env, &tname).await;
+            // Egasi yo'li (vd_files rejasi): yozishma xabari + `chat_0_<vaqt>.bin` fayli. Ma'lumot egasining ustunlariga ko'chishi, navbat qatori
+            // o'chishi, egasidan o'qilishi va `forget` bilan tozalanishi tekshiriladi.
+            let (oname, mid) = (format!("chat_0_{t0}.bin"), format!("selftest_{t0}"));
+            let mut owner = json!({"ok": false});
+            let ins = turso_exec(env,
+                "INSERT INTO chat_messages (id,user_id,from_admin,body,media_file,media_type,media_ms,created_at) VALUES (?,0,0,'',?,'',0,?)",
+                vec![TursoArg::text(&mid), TursoArg::text(&oname), TursoArg::int(t0)]).await;
+            if ins.is_ok() {
+                let stored = store_small(env, &oname, vec![9u8; 2048]).await;
+                let in_owner = owner_load_many(env, &[oname.clone()]).await.map(|m| m.get(&oname).map(|v| v["chunks"].clone())).ok().flatten();
+                let queued = turso_exec(env, "SELECT COUNT(*) AS n FROM vd_queue WHERE name=?", vec![TursoArg::text(&oname)]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(-1);
+                let read = meta_one(env, &oname).await.map(|m| m["state"].clone());
+                forget(env, &oname).await;
+                let left = owner_load_many(env, &[oname.clone()]).await.map(|m| m.len()).unwrap_or(99);
+                let _ = turso_exec(env, "DELETE FROM chat_messages WHERE id=?", vec![TursoArg::text(&mid)]).await;
+                let good = stored.is_ok() && in_owner.as_ref().and_then(|c| c.as_i64().or_else(|| c.as_str().and_then(|x| x.parse().ok()))) == Some(1)
+                    && queued == 0 && read.as_ref().and_then(|v| v.as_str()) == Some("ready") && left == 0;
+                owner = json!({"ok": good, "stored": stored.is_ok(), "in_owner": in_owner, "queue_rows": queued, "read": read, "left_after_forget": left});
+            }
+            let mut out = out;
+            out["owner"] = owner;
             ok(out)
         }
         "/api/vd/forget" => {
@@ -585,15 +628,15 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         }
         "/api/vd/claim" => {
             turso_many(env, &[
-                ("UPDATE vd_files SET state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
-                ("UPDATE vd_files SET state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+                ("UPDATE vd_queue SET state='uploaded' WHERE state='storing' AND lease<? AND tries<?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
+                ("UPDATE vd_queue SET state='failed' WHERE state='storing' AND lease<? AND tries>=?", vec![TursoArg::int(now), TursoArg::int(MAX_TRIES)]),
             ]).await?;
-            let Some(f) = turso_exec(env, "SELECT name FROM vd_files WHERE state='uploaded' ORDER BY created LIMIT 1", vec![]).await?.pipe_first() else {
+            let Some(f) = turso_exec(env, "SELECT name FROM vd_queue WHERE state='uploaded' ORDER BY created LIMIT 1", vec![]).await?.pipe_first() else {
                 return ok(json!({"none": true}));
             };
             let nm = f["name"].as_str().unwrap_or("").to_string();
-            let got = turso_exec(env, "UPDATE vd_files SET state='storing', lease=?, tries=tries+1 WHERE name=? AND state='uploaded' \
-                RETURNING rowid AS vid,size,chunks,chunk_ids,layout", vec![TursoArg::int(now + LEASE_MS), TursoArg::text(&nm)]).await?;
+            let got = turso_exec(env, "UPDATE vd_queue SET state='storing', lease=?, tries=tries+1 WHERE name=? AND state='uploaded' \
+                RETURNING id AS vid,size,chunks,chunk_ids,layout", vec![TursoArg::int(now + LEASE_MS), TursoArg::text(&nm)]).await?;
             let Some(r) = first_row(&got) else { return ok(json!({"none": true})) };
             let have = ids(r["chunk_ids"].as_str().unwrap_or("")).len() as i64;
             let done: Vec<i64> = (0..have).collect();
@@ -611,7 +654,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             if !tg_safe_name(&name) || items.is_empty() {
                 return bad("so'rov");
             }
-            let Some(row) = turso_exec(env, "SELECT chunk_ids,msg_ids,layout FROM vd_files WHERE name=? AND state='storing'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
+            let Some(row) = turso_exec(env, "SELECT chunk_ids,msg_ids,layout FROM vd_queue WHERE name=? AND state='storing'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
                 return json_resp(&json!({"error": "holat"}), 409);
             };
             let mut fids: Vec<String> = ids(row["chunk_ids"].as_str().unwrap_or("")).into_iter().map(String::from).collect();
@@ -630,7 +673,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                 if n == fids.len() { fids.push(tg); mids.push(msg.to_string()) } else { fids[n] = tg; mids[n] = msg.to_string() }
                 done_n.push(n as u64);
             }
-            turso_exec(env, "UPDATE vd_files SET chunk_ids=?, msg_ids=?, lease=?, tries=0 WHERE name=? AND state='storing'",
+            turso_exec(env, "UPDATE vd_queue SET chunk_ids=?, msg_ids=?, lease=?, tries=0 WHERE name=? AND state='storing'",
                 vec![TursoArg::text(&fids.join(",")), TursoArg::text(&mids.join(",")), TursoArg::int(now + LEASE_MS), TursoArg::text(&name)]).await?;
             // Saqlangan bo'laklar R2 dan darhol o'chadi (joy bo'shaydi — migratsiya davom etadi).
             if row["layout"].as_str() != Some("single") {
@@ -641,19 +684,21 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             ok(json!({"ok": true}))
         }
         "/api/vd/done" => {
-            let Some(row) = turso_exec(env, "SELECT chunks,chunk_ids,layout FROM vd_files WHERE name=? AND state='storing'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
+            let Some(row) = turso_exec(env, "SELECT chunks,chunk_ids,layout FROM vd_queue WHERE name=? AND state='storing'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
                 return json_resp(&json!({"error": "holat"}), 409);
             };
             let (want, have) = (jint(&row, "chunks"), ids(row["chunk_ids"].as_str().unwrap_or("")).len() as i64);
             if want <= 0 || have != want {
                 return json_resp(&json!({"error": format!("bo'laklar yetarli emas ({have}/{want})")}), 409);
             }
-            turso_exec(env, "UPDATE vd_files SET state='ready', lease=0 WHERE name=? AND state='storing'", vec![TursoArg::text(&name)]).await?;
+            turso_exec(env, "UPDATE vd_queue SET state='ready', lease=0 WHERE name=? AND state='storing'", vec![TursoArg::text(&name)]).await?;
+            // Egasi bo'lsa ma'lumot unga ko'chadi va navbat qatori o'chadi; bo'lmasa navbatda qoladi (`try_attach`).
+            let _ = try_attach(env, &name).await;
             r2_delete_all(&bk, &name).await;
             ok(json!({"ok": true}))
         }
         "/api/vd/fail" => {
-            turso_exec(env, "UPDATE vd_files SET state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE name=? AND state='storing'",
+            turso_exec(env, "UPDATE vd_queue SET state=CASE WHEN tries>=? THEN 'failed' ELSE 'uploaded' END, lease=0 WHERE name=? AND state='storing'",
                 vec![TursoArg::int(MAX_TRIES), TursoArg::text(&name)]).await?;
             ok(json!({"ok": true}))
         }
@@ -706,7 +751,7 @@ async fn del_msgs(env: &Env, channel: i64, msgs: &[i64]) -> bool {
     !encbot_token(env).is_empty() && encbot_api(env, "deleteMessages", body).await.is_ok()
 }
 
-/// Bir chaqiruvda cheklangan ish (worker so'rovlar chegarasi): `tg_files` / `vd_files` dagi kanal xabarlari o'chadi, qatorlar olib tashlanadi,
+/// Bir chaqiruvda cheklangan ish (worker so'rovlar chegarasi): `tg_files` / `vd_queue` dagi kanal xabarlari o'chadi, qatorlar olib tashlanadi,
 /// R2 dagi `vd/` va `r2_files` obyektlari o'chadi. Qolgan ish soni qaytadi — Actions `left == 0` bo'lguncha qayta chaqiradi.
 /// `bd/` (ARUDRIVE) prefiksi va boshqa kalitlarga TEGILMAYDI.
 async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
@@ -726,7 +771,7 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
         turso_exec(env, &format!("DELETE FROM tg_files WHERE file_name IN ({marks})"), names.iter().map(|n| TursoArg::text(n)).collect()).await?;
     }
     for _ in 0..5 {
-        let r = turso_exec(env, "SELECT name,msg_ids FROM vd_files LIMIT 1", vec![]).await?;
+        let r = turso_exec(env, "SELECT name,msg_ids FROM vd_queue LIMIT 1", vec![]).await?;
         let Some(row) = first_row(&r) else { break };
         let name = row["name"].as_str().unwrap_or("").to_string();
         let msgs: Vec<i64> = ids(row["msg_ids"].as_str().unwrap_or("")).iter().filter_map(|x| x.parse().ok()).collect();
@@ -735,7 +780,7 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
         }
         r2_delete_all(bk, &name).await;
         meta_drop(&name).await;
-        turso_exec(env, "DELETE FROM vd_files WHERE name=?", vec![TursoArg::text(&name)]).await?;
+        turso_exec(env, "DELETE FROM vd_queue WHERE name=?", vec![TursoArg::text(&name)]).await?;
     }
     // Yetkazilgan (anibla/to'plam) fayllarning kanal xabarlari: `dlv_msg_<nom>` -> xabar raqami.
     let r = turso_exec(env, "SELECT cfg_key,cfg_value FROM app_config WHERE cfg_key LIKE 'dlv\\_msg\\_%' ESCAPE '\\' LIMIT 100", vec![]).await?;
@@ -768,11 +813,11 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
         turso_exec(env, &format!("DELETE FROM r2_files WHERE file_name IN ({marks})"), names.iter().map(|n| TursoArg::text(n)).collect()).await?;
     }
     let left = turso_exec(env,
-        "SELECT (SELECT COUNT(*) FROM tg_files) AS tg, (SELECT COUNT(*) FROM vd_files) AS vd, (SELECT COUNT(*) FROM r2_files) AS r2,
+        "SELECT (SELECT COUNT(*) FROM tg_files) AS tg, (SELECT COUNT(*) FROM vd_queue) AS vd, (SELECT COUNT(*) FROM r2_files) AS r2,
                 (SELECT COUNT(*) FROM app_config WHERE cfg_key LIKE 'dlv\\_msg\\_%' ESCAPE '\\') AS dlv", vec![]).await?;
     let l = first_row(&left).unwrap_or(json!({}));
     let total = jint(&l, "tg") + jint(&l, "vd") + jint(&l, "r2") + jint(&l, "dlv");
-    Ok(json!({"deleted": deleted, "failed": failed, "left": total, "tg_files": l["tg"], "vd_files": l["vd"], "r2_files": l["r2"]}))
+    Ok(json!({"deleted": deleted, "failed": failed, "left": total, "tg_files": l["tg"], "vd_queue": l["vd"], "r2_files": l["r2"]}))
 }
 
 // ── Foydalanuvchi yo'llari (sessiya bilan) ───────────────────
@@ -797,21 +842,128 @@ async fn meta_many(env: &Env, names: &[String]) -> Result<serde_json::Map<String
     }
     if !miss.is_empty() {
         ensure(env).await?;
-        let marks = vec!["?"; miss.len()].join(",");
-        let r = turso_exec(env,
-            &format!("SELECT name,size,chunks,vkey,state,chunk_ids FROM vd_files WHERE state IN ('ready','storing','uploaded') AND name IN ({marks})"),
-            miss.iter().map(|n| TursoArg::text(n)).collect()).await?;
-        for row in rows_of(&r) {
-            let n = row["name"].as_str().unwrap_or("").to_string();
-            let v = json!({"state": row["state"], "size": row["size"], "chunks": row["chunks"], "key": row["vkey"], "chunk_ids": row["chunk_ids"]});
-            // Faqat TUGAGAN (`ready`) fayl keshlanadi — u o'zgarmaydi; saqlanayotgan fayl holati o'zgarib turadi.
-            if row["state"].as_str() == Some("ready") {
+        // 1) tayyor fayl ma'lumoti egasining jadvalida; 2) saqlanayotgan (yoki egasi hali yo'q) fayllar — navbat jadvalida.
+        let mut left: Vec<String> = miss.clone();
+        if let Ok(found) = owner_load_many(env, &miss).await {
+            for (n, v) in found {
                 meta_put(&n, &v).await;
+                left.retain(|x| *x != n);
+                out.insert(n, v);
             }
-            out.insert(n, v);
+        }
+        if !left.is_empty() {
+            let marks = vec!["?"; left.len()].join(",");
+            let r = turso_exec(env,
+                &format!("SELECT name,size,chunks,vkey,state,chunk_ids,msg_ids FROM vd_queue WHERE state IN ('ready','storing','uploaded') AND name IN ({marks})"),
+                left.iter().map(|n| TursoArg::text(n)).collect()).await?;
+            for row in rows_of(&r) {
+                let n = row["name"].as_str().unwrap_or("").to_string();
+                let v = json!({"state": row["state"], "size": row["size"], "chunks": row["chunks"], "key": row["vkey"], "chunk_ids": row["chunk_ids"], "msg_ids": row["msg_ids"]});
+                // Faqat TUGAGAN (`ready`) fayl keshlanadi — u o'zgarmaydi; saqlanayotgan fayl holati o'zgarib turadi.
+                if row["state"].as_str() == Some("ready") {
+                    meta_put(&n, &v).await;
+                    // Egasi endi bor bo'lsa ma'lumot unga ko'chadi (fayl egasidan oldin yuklangan edi).
+                    let _ = try_attach(env, &n).await;
+                }
+                out.insert(n, v);
+            }
         }
     }
     Ok(out)
+}
+
+
+// ── Egasi jadvali bilan ishlash (ma'lumot egasining qatorida turadi; navbat jadvali — vaqtinchalik) ───────────────────────────
+
+fn owner_arg(a: &OwnerArg) -> TursoArg {
+    match a {
+        OwnerArg::Int(i) => TursoArg::int(*i),
+        OwnerArg::Text(t) => TursoArg::text(t),
+    }
+}
+
+/// Fayl ma'lumotini egasining ustunlariga yozadi. Egasining qatori topilib yangilangan bo'lsa `true` (egasi hali yo'q bo'lsa `false`).
+async fn owner_save(env: &Env, name: &str, size: i64, chunks: i64, key: &str, ids: &str, msgs: &str) -> bool {
+    let mut saved = false;
+    for o in owners_of(name) {
+        let r = &o.r;
+        let sql = format!(
+            "UPDATE {t} SET {r}_vd_name=?, {r}_vd_size=?, {r}_vd_chunks=?, {r}_vd_key=?, {r}_vd_ids=?, {r}_vd_msgs=? WHERE {w}",
+            t = o.table, w = o.where_sql
+        );
+        let mut args = vec![TursoArg::text(name), TursoArg::int(size), TursoArg::int(chunks), TursoArg::text(key), TursoArg::text(ids), TursoArg::text(msgs)];
+        args.extend(o.args.iter().map(owner_arg));
+        if let Ok(res) = turso_exec(env, &sql, args).await {
+            if jint(&res, "affected_row_count") > 0 {
+                saved = true;
+            }
+        }
+    }
+    saved
+}
+
+/// Faylning egasidagi ma'lumotini tozalaydi (fayl o'chirilganda); faqat ma'lumot AYNAN shu nomga tegishli bo'lsa.
+async fn owner_clear(env: &Env, name: &str) {
+    for o in owners_of(name) {
+        let r = &o.r;
+        let sql = format!(
+            "UPDATE {t} SET {r}_vd_name='', {r}_vd_size=0, {r}_vd_chunks=0, {r}_vd_key='', {r}_vd_ids='', {r}_vd_msgs='' WHERE ({w}) AND {r}_vd_name=?",
+            t = o.table, w = o.where_sql
+        );
+        let mut args: Vec<TursoArg> = o.args.iter().map(owner_arg).collect();
+        args.push(TursoArg::text(name));
+        let _ = turso_exec(env, &sql, args).await;
+    }
+}
+
+/// Egalarining jadvallaridan tayyor fayllar ma'lumoti (bitta so'rov: `UNION ALL`). Faqat ma'lumoti to'liq (`chunks>0`) va nomi mos fayllar.
+async fn owner_load_many(env: &Env, names: &[String]) -> Result<serde_json::Map<String, Value>> {
+    let mut out = serde_json::Map::new();
+    let mut parts: Vec<String> = Vec::new();
+    let mut args: Vec<TursoArg> = Vec::new();
+    for n in names {
+        for o in owners_of(n) {
+            let r = &o.r;
+            parts.push(format!(
+                "SELECT ? AS n, {r}_vd_size AS size, {r}_vd_chunks AS chunks, {r}_vd_key AS vkey, {r}_vd_ids AS chunk_ids, {r}_vd_msgs AS msg_ids \
+                 FROM {t} WHERE ({w}) AND {r}_vd_name=? AND {r}_vd_chunks>0",
+                t = o.table, w = o.where_sql
+            ));
+            args.push(TursoArg::text(n));
+            args.extend(o.args.iter().map(owner_arg));
+            args.push(TursoArg::text(n));
+        }
+    }
+    if parts.is_empty() {
+        return Ok(out);
+    }
+    let res = turso_exec(env, &parts.join(" UNION ALL "), args).await?;
+    for row in rows_of(&res) {
+        let n = row["n"].as_str().unwrap_or("").to_string();
+        if n.is_empty() || out.contains_key(&n) {
+            continue;
+        }
+        out.insert(n, json!({"state": "ready", "size": row["size"], "chunks": row["chunks"], "key": row["vkey"], "chunk_ids": row["chunk_ids"], "msg_ids": row["msg_ids"]}));
+    }
+    Ok(out)
+}
+
+/// Navbatdagi TAYYOR (`ready`) fayl ma'lumotini egasiga ko'chiradi va navbat qatorini o'chiradi. Egasi hali yo'q bo'lsa hech narsa o'zgarmaydi
+/// (ma'lumot navbatda turadi va egasi paydo bo'lgach birinchi o'qishda ko'chiriladi). `true` — ko'chirildi.
+async fn try_attach(env: &Env, name: &str) -> bool {
+    let Some(row) = turso_exec(env, "SELECT size,chunks,vkey,chunk_ids,msg_ids FROM vd_queue WHERE name=? AND state='ready'", vec![TursoArg::text(name)]).await
+        .ok().and_then(|r| first_row(&r)) else { return false };
+    let saved = owner_save(env, name, jint(&row, "size"), jint(&row, "chunks"), row["vkey"].as_str().unwrap_or(""),
+        row["chunk_ids"].as_str().unwrap_or(""), row["msg_ids"].as_str().unwrap_or("")).await;
+    if saved {
+        let _ = turso_exec(env, "DELETE FROM vd_queue WHERE name=? AND state='ready'", vec![TursoArg::text(name)]).await;
+    }
+    saved
+}
+
+/// Bitta fayl ma'lumoti (`state/size/chunks/key/chunk_ids`) yoki `None`.
+pub(crate) async fn meta_one(env: &Env, name: &str) -> Option<Value> {
+    meta_many(env, &[name.to_string()]).await.ok()?.remove(name)
 }
 
 /// Mijozga beriladigan ko'rinish: `{state,size,chunks,key,stored}` (`file_id` lar yashirin).
@@ -1072,9 +1224,9 @@ async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(Strin
     ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into()).apply_keystream(&mut bytes);
     // Fayl RAQAMI (`vid`): jadvalning ketma-ket `rowid` si — kanalda hujjat nomi `<tur>_<raqam>_<bo'lak>.bin` bo'ladi (`doc_kind`: vid/img/audio/font/file) (o'qish oson, qism raqami kabi).
     let r = turso_exec(env,
-        "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'staging','chunks','','',?) \
+        "INSERT INTO vd_queue (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,1,?,'staging','chunks','','',?) \
          ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=1, vkey=excluded.vkey, state='staging', layout='chunks', \
-           chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created RETURNING rowid AS vid",
+           chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created RETURNING id AS vid",
         vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::int(now_ms())]).await?;
     let vid = first_row(&r).map(|x| jint(&x, "vid")).unwrap_or(0);
     let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("{}_{vid}_1.bin", doc_prefix(name)),
@@ -1082,12 +1234,13 @@ async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(Strin
     let (fid, mid) = match sent {
         Ok(v) => v,
         Err(e) => {
-            let _ = turso_exec(env, "DELETE FROM vd_files WHERE name=? AND state='staging' AND chunk_ids=''", vec![TursoArg::text(name)]).await;
+            let _ = turso_exec(env, "DELETE FROM vd_queue WHERE name=? AND state='staging' AND chunk_ids=''", vec![TursoArg::text(name)]).await;
             return Err(e);
         }
     };
-    turso_exec(env, "UPDATE vd_files SET state='ready', chunk_ids=?, msg_ids=? WHERE name=?",
+    turso_exec(env, "UPDATE vd_queue SET state='ready', chunk_ids=?, msg_ids=? WHERE name=?",
         vec![TursoArg::text(&fid), TursoArg::text(&mid.to_string()), TursoArg::text(name)]).await?;
+    let _ = try_attach(env, name).await;
     // Write-through kesh: ma'lumot va shifrlangan bo'lak (oyna 0) shu mintaqada darrov tayyor.
     meta_put(name, &json!({"state": "ready", "size": size, "chunks": 1, "key": key_hex, "chunk_ids": fid})).await;
     let wname = format!("vd~{name}");
@@ -1115,8 +1268,8 @@ pub(crate) async fn small(env: &Env, me: i64, admin: bool, name: &str, mut req: 
     }
     ensure(env).await?;
     // Xuddi shu nom allaqachon tayyor (qayta yuborilgan so'rov) — mavjud kalit qaytadi.
-    if let Some(r) = turso_exec(env, "SELECT vkey,size FROM vd_files WHERE name=? AND state='ready'", vec![TursoArg::text(name)]).await?.pipe_first() {
-        return ok(json!({"ok": true, "key": r["vkey"], "size": r["size"], "existing": true}));
+    if let Some(m) = meta_one(env, name).await.filter(|m| m["state"].as_str() == Some("ready")) {
+        return ok(json!({"ok": true, "key": m["key"], "size": m["size"], "existing": true}));
     }
     let mut bytes = req.bytes().await?;
     if bytes.is_empty() || bytes.len() as u64 > CHUNK {
@@ -1164,7 +1317,7 @@ pub(crate) async fn up_init(env: &Env, me: i64, admin: bool, body: &Value) -> Re
     };
     r2_delete_all(&bk, &name).await;
     turso_exec(env,
-        "INSERT INTO vd_files (name,size,chunks,vkey,state,layout,created) VALUES (?,?,?,?,'uploading','single',?) \
+        "INSERT INTO vd_queue (name,size,chunks,vkey,state,layout,created) VALUES (?,?,?,?,'uploading','single',?) \
          ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=excluded.chunks, vkey=excluded.vkey, state='uploading', layout='single', \
            chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created",
         vec![TursoArg::text(&name), TursoArg::int(size), TursoArg::int(chunks_of(size)), TursoArg::text(&key), TursoArg::int(now_ms())]).await?;
@@ -1179,15 +1332,15 @@ pub(crate) async fn up_complete(env: &Env, me: i64, admin: bool, body: &Value) -
         return bad("nom");
     }
     let Some(bk) = bucket(env) else { return json_resp(&json!({"error": "r2"}), 503) };
-    let Some(row) = turso_exec(env, "SELECT size FROM vd_files WHERE name=? AND state='uploading'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
+    let Some(row) = turso_exec(env, "SELECT size FROM vd_queue WHERE name=? AND state='uploading'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
         return json_resp(&json!({"error": "holat"}), 409);
     };
     let got = bk.head(format!("{SINGLE}{name}")).await.ok().flatten().map(|o| o.size() as i64);
     if got != Some(jint(&row, "size")) {
-        let _ = turso_exec(env, "UPDATE vd_files SET state='failed' WHERE name=?", vec![TursoArg::text(&name)]).await;
+        let _ = turso_exec(env, "UPDATE vd_queue SET state='failed' WHERE name=?", vec![TursoArg::text(&name)]).await;
         return json_resp(&json!({"error": format!("hajm mos emas ({got:?})")}), 422);
     }
-    turso_exec(env, "UPDATE vd_files SET state='uploaded' WHERE name=? AND state='uploading'", vec![TursoArg::text(&name)]).await?;
+    turso_exec(env, "UPDATE vd_queue SET state='uploaded' WHERE name=? AND state='uploading'", vec![TursoArg::text(&name)]).await?;
     let k = kick_wf(env, WORKFLOW).await;
     ok(json!({"ok": true, "kick": k}))
 }
@@ -1414,9 +1567,9 @@ mod tests {
     }
 }
 
-// ── Egalar jadvallaridagi fayl ma'lumoti ustunlari (vd_files ni olib tashlash rejasining 1-qadami) ─────────────────────────────
+// ── Egalar jadvallaridagi fayl ma'lumoti ustunlari (vd_queue ni olib tashlash rejasining 1-qadami) ─────────────────────────────
 //
-// Nomga havola qiluvchi har ustun (`ref`) uchun beshta ustun qo'shiladi: `<ref>_vd_size`, `_chunks`, `_key`, `_ids` (Telegram `file_id` lar,
+// Nomga havola qiluvchi har ustun (`ref`) uchun oltita ustun qo'shiladi: `<ref>_vd_name`, `_size`, `_chunks`, `_key`, `_ids` (Telegram `file_id` lar,
 // vergul bilan), `_msgs` (kanal xabar raqamlari). `ref` — jadval ichida noyob qisqa nom. Hozircha ular bo'sh: keyingi qadamlarda `ready`
 // bo'lgan fayl ma'lumoti shu yerga yoziladi.
 /// (jadval, ref nomlari). `epizod_db` da har sifat alohida ref (hajm/kalit eski ustunlari avvaldan bor, lekin yangi kalit shu yerda).
@@ -1430,7 +1583,9 @@ pub(crate) const OWNER_REFS: [(&str, &[&str]); 6] = [
 ];
 
 /// Egalar ustunlari: (qo'shimcha, SQL turi va standart qiymati).
-const OWNER_COLS: [(&str, &str); 5] = [
+const OWNER_COLS: [(&str, &str); 6] = [
+    // `name` — ma'lumot QAYSI fayl nomiga tegishli (egasining havolasi almashsa eski fayl ma'lumoti yangisiga o'tib ketmasin).
+    ("name", "TEXT DEFAULT ''"),
     ("size", "INTEGER DEFAULT 0"),
     ("chunks", "INTEGER DEFAULT 0"),
     ("key", "TEXT DEFAULT ''"),
@@ -1462,7 +1617,7 @@ mod owner_cols_tests {
 
     #[test]
     fn adds_only_missing_columns() {
-        let have: Vec<String> = ["id", "photo_vd_size", "photo_vd_chunks"].iter().map(|s| s.to_string()).collect();
+        let have: Vec<String> = ["id", "photo_vd_name", "photo_vd_size", "photo_vd_chunks"].iter().map(|s| s.to_string()).collect();
         let q = owner_alter_sqls("anime_db", &["photo"], &have);
         assert_eq!(q, vec![
             "ALTER TABLE anime_db ADD COLUMN photo_vd_key TEXT DEFAULT ''".to_string(),
@@ -1474,14 +1629,14 @@ mod owner_cols_tests {
     #[test]
     fn full_set_for_fresh_table_and_all_present() {
         let q = owner_alter_sqls("epizod_db", &["q360", "q1080"], &[]);
-        assert_eq!(q.len(), 10);
+        assert_eq!(q.len(), 12);
         assert!(q.iter().any(|s| s.contains("q1080_vd_msgs")));
         let have: Vec<String> = q.iter().map(|s| s.split_whitespace().nth(5).unwrap().to_string()).collect();
         assert!(owner_alter_sqls("epizod_db", &["q360", "q1080"], &have).is_empty());
     }
 }
 
-// ── Fayl nomi -> egasi (vd_files rejasining 2-qadami; hali hech qayerda ishlatilmaydi) ────────────────────────────────────────
+// ── Fayl nomi -> egasi (vd_queue rejasining 2-qadami; hali hech qayerda ishlatilmaydi) ────────────────────────────────────────
 //
 // Nom formatlari (kodda va bazada tekshirilgan):
 //   `ep_<anime>_<sezon>_<qism>_<sifat>p_<vaqt>.mp4`  -> `epizod_db` qatori (anime_id, season_id, epizod_id), ref `q<sifat>`

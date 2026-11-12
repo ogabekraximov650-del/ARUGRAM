@@ -40,8 +40,8 @@ print("\n== app_config encode*/sess_ok*/kicked")
 for r in q("SELECT cfg_key, CASE WHEN LENGTH(cfg_value)<40 THEN cfg_value ELSE substr(cfg_value,1,12)||'...' END FROM app_config WHERE cfg_key LIKE 'encode%' OR cfg_key LIKE 'sess_ok%' OR cfg_key LIKE '%kicked%'"):
     print(r)
 
-print("\n== vd_files (name, size, chunks, state, layout, stored, tries, lease_in_s, created_ago_s)")
-for r in q("SELECT name,size,chunks,state,layout,CASE WHEN chunk_ids='' THEN 0 ELSE LENGTH(chunk_ids)-LENGTH(REPLACE(chunk_ids,',',''))+1 END,tries,lease,created FROM vd_files ORDER BY created"):
+print("\n== vd_queue (name, size, chunks, state, layout, stored, tries, lease_in_s, created_ago_s)")
+for r in q("SELECT name,size,chunks,state,layout,CASE WHEN chunk_ids='' THEN 0 ELSE LENGTH(chunk_ids)-LENGTH(REPLACE(chunk_ids,',',''))+1 END,tries,lease,created FROM vd_queue ORDER BY created"):
     r = list(r)
     try:
         r[7] = (int(r[7]) - now) // 1000
