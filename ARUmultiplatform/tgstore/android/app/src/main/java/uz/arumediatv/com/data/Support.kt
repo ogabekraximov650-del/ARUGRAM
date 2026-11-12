@@ -166,7 +166,9 @@ class ChatStore(
             val allIds = j.optJSONArray("all_ids")?.let { a -> (0 until a.length()).map { a.optString(it) }.toSet() }
             _items.update { cur ->
                 var list = cur.map { if (!it.seen && it.id in seenIds) it.copy(seen = true) else it }
-                if (allIds != null) list = list.filter { it.pending || it.id in allIds }
+                // UZ: serverning "hamma raqamlar" ro'yxatida yo'q xabar o'chirilgan hisoblanadi, lekin YANGI (60 soniyadan yosh) xabar ro'yxat hali yetib bormagan bo'lishi mumkin: darhol yo'qolib qolmasin.
+                // EN/RU: a message missing from the server's id list counts as deleted, but a brand-new one (<60 s) may simply not be in that list yet.
+                if (allIds != null) { val nowMs = System.currentTimeMillis(); list = list.filter { it.pending || it.id in allIds || nowMs - it.createdAt < 60_000 } }
                 if (since > 0) {
                     val have = list.map { it.id }.toSet()
                     val fresh = rows.filter { it.id !in have }
