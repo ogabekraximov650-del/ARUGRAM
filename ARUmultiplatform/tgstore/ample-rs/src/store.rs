@@ -306,7 +306,7 @@ async fn write_manifest(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<()> {
     Ok(())
 }
 
-/// To'liq surat: baza fayli 1 MB bo'laklarda yuklanadi; undan oldingi yopilgan jurnal bo'laklari o'chiriladi. EN/RU: full snapshot in 1 MB parts.
+/// To'liq surat: baza fayli 1 MB bo'laklarda yuklanadi; suratga to'liq kirgan jurnal bo'laklari (ochiq bo'lak ham) o'chiriladi va raqamlash qaytadan `db_1_v1` dan boshlanadi. EN/RU: full snapshot in 1 MB parts.
 pub async fn snapshot(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<J> {
     let (seq, buf) = {
         let s = st.lock().await;
@@ -333,7 +333,7 @@ pub async fn snapshot(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<J> {
         s.snap = Some(Snap { seq, at: now_ms(), key: kh, parts: parts.clone(), bytes: buf.len() as u64 });
         let mut del = vec![];
         let keep: Vec<Chunk> = std::mem::take(&mut s.chunks).into_iter().filter_map(|c| {
-            if c.meta.sealed && c.meta.last_seq <= seq { del.push((c.meta.msg_id, c.dir.clone())); None } else { Some(c) }
+            if c.meta.last_seq <= seq { del.push((c.meta.msg_id, c.dir.clone())); None } else { Some(c) }
         }).collect();
         s.chunks = keep;
         for (_, d) in &del { let _ = std::fs::remove_dir_all(d); }

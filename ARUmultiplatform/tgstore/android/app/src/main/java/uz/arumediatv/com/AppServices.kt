@@ -17,6 +17,7 @@ import uz.arumediatv.com.data.UnreadBadge
 import uz.arumediatv.com.data.TrafficMeter
 import uz.arumediatv.com.data.ChannelGate
 import uz.arumediatv.com.data.PackStore
+import java.io.File
 import uz.arumediatv.com.data.AdminApi
 import uz.arumediatv.com.data.DownloadManager
 import uz.arumediatv.com.data.DownloadsIndex
@@ -97,6 +98,14 @@ object AppServices {
             if (hex != null && hex.length == 64) RustCore.setMasterKey(hex)
         }
         auth = AuthService(secure)
+        // UZ: sessiya tugasa (baza tozalangan, chiqish) — chat/kutubxona/izoh/navbat nusxalari ham o'chadi: eski ma'lumot ko'rinib qolmasin.
+        // EN/RU: when the session ends, wipe the user-bound local copies so stale data does not linger on screen.
+        auth.onSessionEnded = {
+            try {
+                File(ctx.filesDir, "cache").listFiles()?.filter { f -> f.name.startsWith("chat_") || f.name.startsWith("comments_") || f.name == "library.json" || f.name == "sync_queue.bin" }?.forEach { f -> f.delete() }
+            } catch (_: Exception) {
+            }
+        }
         telegram = TelegramService(ctx, auth, secure)
         images = ImageStore(ctx, telegram)
         seasons = SeasonsStore(SeasonsRepository(ctx))
