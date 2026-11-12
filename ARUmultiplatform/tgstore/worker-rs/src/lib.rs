@@ -14311,6 +14311,13 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         // EN/RU: a light ping every minute keeps Ample awake (no cold-start wait); heavy jobs only every 5th minute.
         let _ = circle::usage(&env).await;
         if (ev.schedule() / 60_000.0) as i64 % 5 != 0 { return; }
+        // UZ: har 5 daqiqada Worker->Ample kechikishi `app_config.__lat_cron` ga yoziladi (Smart Placement natijasini kuzatish uchun). EN/RU: periodic latency sample.
+        {
+            let mut ms: Vec<i64> = Vec::new();
+            for _ in 0..4 { let t = js_sys::Date::now(); let _ = turso_exec_pg(&env, "SELECT 1", vec![]).await; ms.push((js_sys::Date::now() - t) as i64); }
+            let _ = turso_exec_pg(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
+                vec![TursoArg::text("__lat_cron"), TursoArg::text(&json!({"ms": ms, "at": now_ms()}).to_string())]).await;
+        }
         // UZ: doira tizimi: baza 70% dan oshsa sovuq qatorlar Telegram'ga ketadi. EN/RU: circle system at >= 70%.
         let r = circle::run(&env, false, false).await;
         console_log!("tgstore circle: {:?}", r.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
