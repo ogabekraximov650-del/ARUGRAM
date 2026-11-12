@@ -492,6 +492,10 @@ async fn turso_after(env: &Env, sqls: &[&str], results: &[Value]) {
                     tables.push(d);
                 }
             }
+            // UZ: katalogga tuzilma yozuvi (anime/qism qo'shish, tahrir, o'chirish): nusxa eskirdi, darhol yangilanadi. EN/RU: structural catalog write.
+            if snap::is_structural(sql, &t) && !tables.iter().any(|x| x == "snap_struct") {
+                tables.push("snap_struct".to_string());
+            }
             if !tables.contains(&t) {
                 tables.push(t);
             }
@@ -14310,7 +14314,9 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         // UZ: har daqiqada Ample'ga yengil so'rov: server 60 soniya bo'sh tursa uxlab qoladi va birinchi foydalanuvchi uyg'onishni kutadi. Og'ir ishlar har 5 daqiqada.
         // EN/RU: a light ping every minute keeps Ample awake (no cold-start wait); heavy jobs only every 5th minute.
         let _ = circle::usage(&env).await;
-        if (ev.schedule() / 60_000.0) as i64 % 5 != 0 { return; }
+        // UZ: tuzilma yozuvi bo'lsa nusxa darhol (har daqiqa tekshiruvda) yangilanadi, aks holda har 5 daqiqada. EN/RU: urgent refresh on structural writes.
+        let urgent = snap::urgent(&env).await;
+        if (ev.schedule() / 60_000.0) as i64 % 5 != 0 && !urgent { return; }
         // UZ: har 5 daqiqada Worker->Ample kechikishi `app_config.__lat_cron` ga yoziladi (Smart Placement natijasini kuzatish uchun). EN/RU: periodic latency sample.
         {
             let mut ms: Vec<i64> = Vec::new();

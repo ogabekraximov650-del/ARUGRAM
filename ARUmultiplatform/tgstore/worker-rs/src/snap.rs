@@ -31,6 +31,29 @@ const ALL_TABLES: &[&str] = &[
     "subs_db", "sync_batches", "tg_files", "users_db", "watch_history_db", "arch_files",
 ];
 
+/// UZ: shu ustunlarning FAQAT o'zgarishi (ko'rishlar, baho...) "tuzilma" o'zgarishi emas: nusxa 5 daqiqada bir yangilanadi. Qolgan o'zgarish (anime/qism qo'shish, tahrirlash, o'chirish) — darhol.
+/// EN/RU: counter-only updates are not structural; any other catalog write is, and refreshes the copy right away.
+const COUNTERS: &[&str] = &["views_total", "watch_ms_total", "fav_count", "rating_sum", "rating_count"];
+
+pub fn is_structural(sql: &str, table: &str) -> bool {
+    if !CATALOG.iter().any(|(t, _)| *t == table) { return false; }
+    let low = sql.to_lowercase();
+    let low = low.trim_start();
+    if !low.starts_with("update") { return true; }
+    let Some(si) = low.find(" set ") else { return true };
+    let rest = &low[si + 5..];
+    let sets = &rest[..rest.find(" where ").unwrap_or(rest.len())];
+    !sets.split(',').all(|a| a.split('=').next().map(|c| COUNTERS.contains(&c.trim())).unwrap_or(false))
+}
+
+/// UZ: tuzilma o'zgarishi nusxadan keyin bo'ldimi (nusxa eskirgan). EN/RU: structural write newer than the copy.
+pub async fn urgent(env: &Env) -> bool {
+    if !is_pg(env) { return false; }
+    let at = published_at(env).await;
+    let (st, _) = marks_get(env, &["snap_struct"]).await;
+    st > at
+}
+
 const PAGE: usize = 2000;
 /// UZ: ikki nashr orasidagi eng kam vaqt. EN/RU: minimum gap between two publishes.
 const MIN_GAP_MS: i64 = 120_000;
@@ -88,7 +111,9 @@ pub async fn can_read_any(env: &Env, sqls: &[&str]) -> bool {
 /// UZ: bu so'rovlarni nusxadan o'qish kerakmi: katalog so'rovi, doira yoqilgan (>= 70%) va nusxa tayyor. EN/RU: serve these statements from the copy now.
 pub async fn can_read(env: &Env, sqls: &[&str]) -> bool {
     if !is_pg(env) || sqls.is_empty() || !sqls.iter().all(|s| catalog_only(s)) { return false; }
-    circle_on(env).await && can_read_any(env, sqls).await
+    // UZ: katalogga tuzilma yozuvi nusxadan keyin bo'lgan bo'lsa — nusxa eskirgan, darhol Ample'dan o'qiladi (yangi anime/qism shu zahoti ko'rinadi).
+    // EN/RU: a structural write newer than the copy means the copy is stale: read Ample so new data shows instantly.
+    circle_on(env).await && can_read_any(env, sqls).await && !urgent(env).await
 }
 
 fn ddl_for(table: &str, cols: &[String], pk: &[&str]) -> String {
@@ -121,9 +146,12 @@ pub async fn publish(env: &Env, force: bool) -> Result<Value> {
     let at = if at > 0 { at } else { kvdb::get(env, "_snap", "state").await.ok().flatten().and_then(|v| v["at"].as_i64()).unwrap_or(0) };
     let names: Vec<&str> = CATALOG.iter().map(|(t, _)| *t).collect();
     if !force && at > 0 {
-        if now_ms() - at < MIN_GAP_MS { return Ok(json!({"skipped": "tez-tez", "published_at": at})); }
-        let (last, _) = marks_get(env, &names).await;
-        if last <= at { return Ok(json!({"skipped": "o'zgarish yo'q", "published_at": at})); }
+        let (st, _) = marks_get(env, &["snap_struct"]).await;
+        if st <= at {
+            if now_ms() - at < MIN_GAP_MS { return Ok(json!({"skipped": "tez-tez", "published_at": at})); }
+            let (last, _) = marks_get(env, &names).await;
+            if last <= at { return Ok(json!({"skipped": "o'zgarish yo'q", "published_at": at})); }
+        }
     }
     let started = now_ms();
     for attempt in 0..3 {
@@ -181,5 +209,19 @@ mod tests {
     fn ddl_is_untyped_with_primary_key() {
         let d = ddl_for("season_db", &["anime_id".into(), "season_id".into(), "nomi".into()], &["anime_id", "season_id"]);
         assert_eq!(d, "CREATE TABLE IF NOT EXISTS season_db (\"anime_id\", \"season_id\", \"nomi\", PRIMARY KEY (\"anime_id\", \"season_id\"))");
+    }
+}
+
+#[cfg(test)]
+mod struct_tests {
+    use super::*;
+
+    #[test]
+    fn counters_are_not_structural() {
+        assert!(!is_structural("UPDATE season_db SET views_total = views_total + 1, watch_ms_total = watch_ms_total + ? WHERE anime_id=?", "season_db"));
+        assert!(is_structural("UPDATE season_db SET nomi = ? WHERE anime_id=?", "season_db"));
+        assert!(is_structural("INSERT INTO epizod_db (anime_id) VALUES (1)", "epizod_db"));
+        assert!(is_structural("DELETE FROM anime_db WHERE id=?", "anime_db"));
+        assert!(!is_structural("UPDATE users_db SET balance = 1", "users_db"));
     }
 }
