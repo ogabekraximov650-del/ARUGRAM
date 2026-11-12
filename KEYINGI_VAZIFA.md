@@ -7353,3 +7353,15 @@ Yoqish (qo'lda): GitHub Secrets'ga `AMPLE_URL` (= https://5fyhcmq3jq3j.ample.run
 Android (`ARUmultiplatform/android`): tgstore'dagi o'zgarishlar ko'chirildi — chat xabari yo'qolmasligi (`Support.kt`), sessiya tugaganda kesh tozalanishi (`AuthService`, `AppServices`), yuborilmagan sevimli/tarix o'zgarishlari darhol ko'rinishi (`LibraryStore`, `SyncQueue`, `SeasonScreen`). Yuborish vaqtlari production'dagidek (1/2 daqiqa).
 
 Ochiq: `vd_files` jadvalini butunlay olib tashlash (fayl ma'lumotlarini har bir jadvalning o'zida saqlash) — `vd.rs` va ilovaning video ombori qismini qayta yozishni talab qiladi, hali qilinmadi.
+
+## `vd_files` ni olib tashlash: tahlil va reja (2026-11-12, KODGA TEGILMAGAN)
+
+Talab (foydalanuvchi): fayl ma'lumotlari alohida `vd_files` jadvalida emas, egasining jadvalida tursin (epizodlarniki `epizod_db`, qolganlariniki o'zlarinikida); faqat yuklash navbati uchun vaqtinchalik jadval qolsin.
+
+Topilgan (kodni o'qib): `vd_files` ikki ish qiladi — (1) ro'yxat: `size, vkey, chunks, chunk_ids, msg_ids`; (2) navbat: `state/lease/tries` (`staging`->`uploaded`->`storing`->`ready`). `worker/src/vd.rs` da ~45 joyda, shuningdek `announce.rs` (163), `lib.rs` (1469, chat tozalash), `ci/enc_diag.py`. Actions/ilova faqat HTTP orqali fayl NOMI bilan ishlaydi (to'g'ridan-to'g'ri jadvalga emas) — yo'llar o'zgarmaydi.
+
+Egalar (nomga havola qiluvchi ustunlar): `anime_db.photo_url`, `season_db.photo_url`, `epizod_db.url_{360,480,720,1080}p` (hajm/kalit shu yerda bor), `users_db.avatar_file`, `comments_db.media_file`, `chat_messages.media_file`, `pack_db.file`, `announce_cover.photo_name`; tizim fayllari (`sys_emojifont_*`, `selftest_*`) egasiz.
+
+ASOSIY TO'SIQ: fayl ko'pincha egasidan OLDIN yuklanadi (chat rasmi: avval yuklanadi, keyin xabar yoziladi; avatar, muqova ham). `ready` bo'lganda egasining qatori hali yo'q bo'lishi mumkin — shu sabab ma'lumotni darhol egasiga ko'chirib bo'lmaydi.
+
+Reja (qadamma-qadam, har biri alohida deploy va tekshiruv; `vd-test.yml`, `/api/vd/selftest`): 1) egalar jadvallariga ustunlar (`<ref>_chunks/_ids/_msgs`, kalit/hajm bo'lmaganlarga ham) — faqat qo'shiladi; 2) `owner_of(name)` (nom -> jadval/ustun) + birlik testlar; 3) `ready` bo'lganda egasi bor bo'lsa ma'lumot unga yoziladi, egasi yo'q bo'lsa navbat jadvalida qoladi; egasi paydo bo'lganda/o'qishda ko'chiriladi (`attach`); 4) o'qish yo'llari (`meta_many`, `info`, `warm`, `img`, `verify`, `dl`, `forget`, `announce::cover`) avval egasidan, keyin navbatdan o'qiydi; 5) hammasi ishlagach `vd_files` navbat jadvaliga (`vd_queue`) qisqartiriladi. Ample'dagi yangi bazada hozir `vd_files` bo'sh va `epizod_db` bo'sh — ma'lumot ko'chirish kerak emas, bu o'zgartirish uchun eng qulay payt.
