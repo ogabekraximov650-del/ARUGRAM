@@ -179,7 +179,7 @@ impl Store {
             if let Err(e) = self.conn.execute("commit", ()).await { let _ = self.conn.execute("rollback", ()).await; return vec![Res::Err(e.to_string())]; }
             self.seq = ns;
             if journal { self.append(ns, writes); }
-        } else if let Err(e) = self.conn.execute("commit", ()).await { return vec![Res::Err(e.to_string())]; }
+        } else { match self.conn.execute("commit", ()).await { Err(e) => { return vec![Res::Err(e.to_string())]; } _ => {}}}
         results
     }
 

@@ -320,11 +320,11 @@ pub(crate) async fn pending_for(env: &Env, a: i64, s: i64, e: i64, queued_at: i6
 
 /// Bot faylni saqlab bazaga yozdi (yoki fayl kerak emas) — R2 obyekti va qator o'chadi.
 pub(crate) async fn finish(env: &Env, file: &str) {
-    if let Some(b) = bucket(env) {
+    match bucket(env) { Some(b) => {
         let _ = b.delete(file).await;
-    } else {
+    } _ => {
         let _ = signed_call(env, "DELETE", file).await;
-    }
+    }}
     let _ = turso_exec(env, "DELETE FROM r2_files WHERE file_name=?", vec![TursoArg::text(file)]).await;
 }
 

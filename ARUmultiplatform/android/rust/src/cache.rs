@@ -65,7 +65,7 @@ fn read_envelope(path: &str) -> Option<CacheEnvelope> {
 
 /// Keshdan o'qiydi. Fayl yo'q yoki buzilgan bo'lsagina null qaytaradi —
 /// MUDDATI TEKSHIRILMAYDI, offline holatda ham har doim ko'rsatiladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_cache_get(path_ptr: *const c_char) -> *mut c_char {
     let path = match unsafe { cstr_to_str(path_ptr) } {
         Some(p) => p,
@@ -81,7 +81,7 @@ pub extern "C" fn rust_cache_get(path_ptr: *const c_char) -> *mut c_char {
 /// bo'lsa) 0 qaytaradi. Faqat online holatda "qayta so'rov kerakmi"ni
 /// hal qilish uchun ishlatiladi — offline'da bu funksiya e'tiborga
 /// olinmasligi kerak.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_cache_is_fresh(path_ptr: *const c_char) -> i32 {
     let path = match unsafe { cstr_to_str(path_ptr) } {
         Some(p) => p,
@@ -98,7 +98,7 @@ pub extern "C" fn rust_cache_is_fresh(path_ptr: *const c_char) -> i32 {
 
 /// Ma'lumotni keshga (diskka) yozadi, joriy vaqt bilan birga.
 /// Muvaffaqiyatli bo'lsa 1, xato bo'lsa 0 qaytaradi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_cache_save(path_ptr: *const c_char, json_ptr: *const c_char) -> i32 {
     let path = match unsafe { cstr_to_str(path_ptr) } {
         Some(p) => p,
@@ -141,7 +141,7 @@ pub extern "C" fn rust_cache_save(path_ptr: *const c_char, json_ptr: *const c_ch
 }
 
 /// Keshni butunlay o'chiradi (majburiy yangilash — pull-to-refresh uchun).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_cache_clear(path_ptr: *const c_char) -> i32 {
     let path = match unsafe { cstr_to_str(path_ptr) } {
         Some(p) => p,

@@ -604,7 +604,7 @@ fn size(h: i64) -> i64 {
 /// Ilova ijro joyini beradi (har soniyada va sek qilinganda).
 /// `name` — fayl nomi (`aru://file/<nom>` dagi), `dur_ms` 0 bo'lsa
 /// yozuv o'chiriladi (pleyer yopildi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_player_position(
     name: *const std::os::raw::c_char,
     pos_ms: i64,
@@ -643,7 +643,7 @@ const RETRY: i64 = -2;
 
 /// Ochadi. Qaytadi: dastak (> 0); 0 — xato (Java IOException
 /// tashlaydi); `RETRY` — internet yo'q, keyinroq qayta urinish.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeOpen<'l>(
     mut env: JNIEnv<'l>,
     _c: JClass<'l>,
@@ -661,7 +661,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeO
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeSize<'l>(
     _env: JNIEnv<'l>,
     _c: JClass<'l>,
@@ -672,7 +672,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeS
 
 /// Qaytadi: o'qilgan bayt; 0 — fayl oxiri; -1 — xato; -2 (`RETRY`) —
 /// internet yo'q, Java kutib qayta so'raydi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeRead<'l>(
     env: JNIEnv<'l>,
     _c: JClass<'l>,
@@ -704,7 +704,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeR
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeClose<'l>(
     _env: JNIEnv<'l>,
     _c: JClass<'l>,
@@ -718,7 +718,7 @@ pub extern "system" fn Java_io_flutter_plugins_videoplayer_AruDataSource_nativeC
 // ═══════════════════════════════════════════════════════════════
 
 /// Ochadi. Qaytadi: dastak (> 0); 0 — xato; -2 — internet yo'q (keyinroq qayta urinish).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_player_open(name: *const std::os::raw::c_char, size_hint: i64) -> i64 {
     if name.is_null() {
         return 0;
@@ -734,13 +734,13 @@ pub extern "C" fn rust_player_open(name: *const std::os::raw::c_char, size_hint:
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_player_size(h: i64) -> i64 {
     size(h)
 }
 
 /// O'qiydi. Qaytadi: bayt soni; 0 — fayl oxiri; -1 — xato; -2 — internet yo'q yoki bo'lak hali tayyor emas (kutib qayta so'rang).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_player_read(h: i64, pos: i64, buf: *mut u8, len: i32) -> i32 {
     if pos < 0 || len <= 0 || buf.is_null() {
         return 0;
@@ -756,7 +756,7 @@ pub extern "C" fn rust_player_read(h: i64, pos: i64, buf: *mut u8, len: i32) -> 
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_player_close(h: i64) {
     close(h);
 }

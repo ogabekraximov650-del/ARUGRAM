@@ -22,7 +22,7 @@ use ffi_utils::string_to_cptr;
 use std::os::raw::c_char;
 
 /// Rust yadrosi versiyasi (diagnostika uchun, masalan Profil ekranida).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_core_version() -> *mut c_char {
     string_to_cptr("rust_core 0.1.0".to_string())
 }
@@ -192,8 +192,8 @@ pub(crate) fn sign_v2(method: &str, url_or_path: &str) -> Option<String> {
 ///
 /// # Safety
 /// `path` nol bilan tugaydigan UTF-8 satrga ishora qilishi shart.
-#[no_mangle]
-pub unsafe extern "C" fn app_play_token(path: *const c_char, ttl_secs: u64) -> *mut c_char {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn app_play_token(path: *const c_char, ttl_secs: u64) -> *mut c_char { unsafe {
     use hmac::Mac;
 
     if SECRET_LEN == 0 || path.is_null() {
@@ -209,7 +209,7 @@ pub unsafe extern "C" fn app_play_token(path: *const c_char, ttl_secs: u64) -> *
     };
     mac.update(format!("play.{path}.{exp}").as_bytes());
     string_to_cptr(format!("{exp}.{}", hex::encode(mac.finalize().into_bytes())))
-}
+}}
 
 // ── ILOVA VERSIYASI ────────────────────────────────────────────
 //
@@ -225,8 +225,8 @@ static APP_VERSION: std::sync::Mutex<String> = std::sync::Mutex::new(String::new
 ///
 /// # Safety
 /// `v` nol bilan tugaydigan UTF-8 satrga ishora qilishi shart.
-#[no_mangle]
-pub unsafe extern "C" fn rust_set_app_version(v: *const c_char) {
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn rust_set_app_version(v: *const c_char) { unsafe {
     if v.is_null() {
         return;
     }
@@ -234,7 +234,7 @@ pub unsafe extern "C" fn rust_set_app_version(v: *const c_char) {
     if let Ok(mut g) = APP_VERSION.lock() {
         *g = s;
     }
-}
+}}
 
 /// Yadro so'rovlariga qo'yiladigan versiya (bo'sh bo'lishi mumkin).
 pub(crate) fn app_version() -> String {
@@ -248,12 +248,12 @@ pub(crate) fn app_version() -> String {
 /// # Safety
 /// Uchala ko'rsatkich ham to'g'ri, nol bilan tugaydigan UTF-8
 /// satrga ishora qilishi shart.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn app_sign(
     ts: *const c_char,
     method: *const c_char,
     path: *const c_char,
-) -> *mut c_char {
+) -> *mut c_char { unsafe {
 
     if SECRET_LEN == 0 {
         return string_to_cptr(String::new());
@@ -276,4 +276,4 @@ pub unsafe extern "C" fn app_sign(
     };
     hmac::Mac::update(&mut mac, format!("{ts}.{}.{path}", method.to_uppercase()).as_bytes());
     string_to_cptr(format!("v2.{ts}.{}", hex::encode(hmac::Mac::finalize(mac).into_bytes())))
-}
+}}

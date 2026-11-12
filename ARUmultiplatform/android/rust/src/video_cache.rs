@@ -161,7 +161,7 @@ fn log(msg: impl Into<String>) {
 /// `cache_dir_ptr` — path_provider'ning Application Support papkasi
 /// (Dart tomonidan beriladi, chunki Rust Flutter plaginlariga
 /// to'g'ridan-to'g'ri murojaat qila olmaydi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_start(cache_dir_ptr: *const c_char) -> i32 {
     if let Some(port) = PORT.get() {
         return *port as i32;
@@ -337,7 +337,7 @@ pub extern "C" fn rust_video_cache_start(cache_dir_ptr: *const c_char) -> i32 {
 /// Keshdan o'qilgan bo'laklar bunga KIRMAYDI — shu sabab bu son
 /// o'smay tursa, video uchun tarmoqqa umuman chiqilmayotgani aniq
 /// bo'ladi. Ekrandagi diagnostika paneli buni doimiy ko'rsatib turadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_net_bytes() -> u64 {
     NET_BYTES.load(Ordering::Relaxed)
 }
@@ -345,7 +345,7 @@ pub extern "C" fn rust_video_cache_net_bytes() -> u64 {
 /// Pleyerga MAHALLIY (127.0.0.1) ulanish orqali uzatilgan umumiy bayt.
 /// Yuqoridagi SERVED_BYTES izohiga qarang — telefon status-satridagi
 /// "KB/s" ko'rsatkichi ko'pincha aynan shuni ko'rsatadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_served_bytes() -> u64 {
     SERVED_BYTES.load(Ordering::Relaxed)
 }
@@ -353,7 +353,7 @@ pub extern "C" fn rust_video_cache_served_bytes() -> u64 {
 /// Xotiradagi diagnostika qatorlarini qaytaradi (va tozalaydi).
 /// Faqat ishlab chiqish uchun — ishlab chiqarish versiyasida
 /// chaqirilmaydi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_pull_logs() -> *mut c_char {
     let Some(s) = SHARED.get() else {
         return string_to_cptr("[]".to_string());
@@ -3240,7 +3240,7 @@ fn delete_cached(url: &str) -> bool {
 /// BITTA chaqiruvda bir nechta sifat so'raladi (epizod ochilganda 2-4 ta)
 /// — shu bilan Dart tomoni soniyasiga bir necha marta so'rasa ham FFI
 /// chaqiruvlari soni minimal bo'ladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_stats(urls_json_ptr: *const c_char) -> *mut c_char {
     let Some(shared) = SHARED.get() else {
         return string_to_cptr("{}".to_string());
@@ -3303,7 +3303,7 @@ pub extern "C" fn rust_video_cache_stats(urls_json_ptr: *const c_char) -> *mut c
 ///
 /// UI oqimida chaqiriladi — `stats` kabi DISKKA CHIQMAYDI
 /// (`stat_snapshot_fast`), faqat xotiradagi ro'yxat o'qiladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_ranges(url_ptr: *const c_char) -> *mut c_char {
     let empty = || string_to_cptr("{\"total\":0,\"ranges\":[]}".to_string());
     let Some(shared) = SHARED.get() else { return empty() };
@@ -3378,7 +3378,7 @@ pub extern "C" fn rust_video_cache_ranges(url_ptr: *const c_char) -> *mut c_char
 /// Shu sabab bu funksiya diskni SINXRON skanerlaydi — lekin u
 /// faqat video OCHILGANDA bir marta chaqiriladi, ya'ni ro'yxatni
 /// surishga hech qanday ta'siri yo'q.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_complete(url_ptr: *const c_char) -> i32 {
     let Some(shared) = SHARED.get() else {
         return 0;
@@ -3404,7 +3404,7 @@ pub extern "C" fn rust_video_cache_complete(url_ptr: *const c_char) -> i32 {
 
 /// Videoni to'liq yuklab olishni boshlaydi (yetishmayotgan bo'laklarni).
 /// Darhol qaytadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_download(url_ptr: *const c_char) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -3421,7 +3421,7 @@ pub extern "C" fn rust_video_cache_download(url_ptr: *const c_char) -> i32 {
 
 /// Yuklab olishni to'xtatadi (pauza). Yuklangan bo'laklar joyida
 /// qoladi — keyin xohlagan paytda o'sha joydan davom etadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_pause(url_ptr: *const c_char) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -3431,7 +3431,7 @@ pub extern "C" fn rust_video_cache_pause(url_ptr: *const c_char) -> i32 {
 }
 
 /// Shu sifatdagi videoning keshlangan ma'lumotini butunlay o'chiradi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_delete(url_ptr: *const c_char) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -3455,7 +3455,7 @@ pub extern "C" fn rust_video_cache_delete(url_ptr: *const c_char) -> i32 {
 /// holda fon oqimi o'chirilgan faylni qaytadan yozib qo'yardi.
 ///
 /// Qaytadi: o'chirilgan papkalar soni (diagnostika uchun).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_wipe() -> i32 {
     let Some(shared) = SHARED.get() else { return 0 };
 
@@ -3929,7 +3929,7 @@ fn warm_marker_fresh(key: &str, widx: u64) -> bool {
 ///
 /// Ilova buni pleyerni ochishdan oldin so'raydi: 1 bo'lsa isitish
 /// KUTILMAYDI va video darhol ochiladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_window_seen(url_ptr: *const c_char, widx: u64) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -4087,7 +4087,7 @@ fn start_prepare(url: &str) -> bool {
 }
 
 /// Videoni ijroga tayyorlashni boshlaydi (darhol qaytadi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_prepare(url_ptr: *const c_char) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -4123,7 +4123,7 @@ fn prepare_ready(key: &str) -> bool {
 /// Ilova buni sezganda shu funksiyani chaqiradi: isitish "tayyor"
 /// belgisi va oyna holati tozalanadi, ya'ni keyingi
 /// `rust_video_cache_prepare` oynani HAQIQATDAN qayta isitadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_prepare_reset(url_ptr: *const c_char) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -4169,7 +4169,7 @@ pub extern "C" fn rust_video_cache_prepare_reset(url_ptr: *const c_char) -> i32 
 ///   1 — TAYYOR (oyna(lar) keshda, ijro qilsa bo'ladi);
 ///   2 — MUVAFFAQIYATSIZ (isitish chiqmadi — ilova majburan qayta
 ///       urinadi, keyin esa aniq xabar ko'rsatadi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_prepare_status(url_ptr: *const c_char) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 1;
@@ -4342,7 +4342,7 @@ fn warm_window_bg(url: &str, widx: u64) -> bool {
 
 /// Oynani isitishni boshlaydi (yoki allaqachon ketayotgan bo'lsa —
 /// hech narsa qilmaydi). DARHOL qaytadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_warm_window(url_ptr: *const c_char, widx: u64) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -4365,7 +4365,7 @@ pub extern "C" fn rust_video_cache_warm_window(url_ptr: *const c_char, widx: u64
 ///
 /// Fayl DISKDA to'liq bo'lsa oyna tushunchasining o'zi kerak
 /// emas — 1 qaytariladi (tarmoqqa umuman chiqilmaydi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_window_status(url_ptr: *const c_char, widx: u64) -> i32 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 3;
@@ -4397,7 +4397,7 @@ pub extern "C" fn rust_video_cache_window_status(url_ptr: *const c_char, widx: u
 ///
 /// Ilova shu son orqali "pleyer hozir qaysi oynada" degan savolga
 /// javob beradi: `bayt = (pozitsiya / davomiylik) * hajm`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_total(url_ptr: *const c_char) -> u64 {
     let Some(url) = (unsafe { cstr_to_str(url_ptr) }) else {
         return 0;
@@ -4414,7 +4414,7 @@ pub extern "C" fn rust_video_cache_total(url_ptr: *const c_char) -> u64 {
 /// Bitta oynadagi baytlar soni — ilova oyna chegarasini AYNAN shu
 /// songa qarab hisoblaydi (Rust va worker bilan bir xil bo'lishi
 /// shart, shu sabab qiymat qo'lda takrorlanmaydi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_window_size() -> u64 {
     WARM_WINDOW
 }
@@ -4470,7 +4470,7 @@ fn signed(req: ureq::Request, method: &str, url: &str) -> ureq::Request {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_set_user_id(id: i64) {
     let old = TRAFFIC_USER.swap(id.max(0), Ordering::Relaxed);
     if old != id.max(0) {
@@ -5106,7 +5106,7 @@ fn key_tag(key: &str) -> u64 {
 }
 
 /// Dart tomoni ijro nuqtasini shu yerda xabar qiladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_video_cache_set_position(
     url_ptr: *const c_char,
     position_ms: u64,

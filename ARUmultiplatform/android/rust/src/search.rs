@@ -6,7 +6,7 @@ use std::os::raw::c_char;
 
 /// Anime ro'yxatini (JSON massiv) `name` maydoni bo'yicha, katta-kichik
 /// harfga sezgir bo'lmagan holda filtrlaydi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_search_filter(
     list_json_ptr: *const c_char,
     query_ptr: *const c_char,
@@ -43,7 +43,7 @@ pub extern "C" fn rust_search_filter(
 }
 
 /// Anime ro'yxatini `janri` maydoni bo'yicha aniq (exact match) filtrlaydi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_filter_by_genre(
     list_json_ptr: *const c_char,
     genre_ptr: *const c_char,

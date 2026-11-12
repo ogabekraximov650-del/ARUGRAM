@@ -255,7 +255,7 @@ static TG: OnceLock<Tg> = OnceLock::new();
 /// (`rust_tg_set_device`, Dart ishga tushishda chaqiradi).
 static DEVICE: Mutex<Option<(String, String, String)>> = Mutex::new(None);
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_set_device(model_ptr: *const c_char, system_ptr: *const c_char, app_ptr: *const c_char) {
     let s = |p| unsafe { cstr_to_str(p) }.unwrap_or("").trim().to_string();
     let (model, system, app) = (s(model_ptr), s(system_ptr), s(app_ptr));
@@ -1499,7 +1499,7 @@ fn after_login(t: &Tg) -> String {
 
 /// Ishga tushiradi. `api_id <= 0` bo'lsa avval saqlangan qiymat
 /// ishlatiladi (oflayn ishga tushish).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_init(dir_ptr: *const c_char, api_id: i32, api_hash_ptr: *const c_char) -> *mut c_char {
     let dir = unsafe { cstr_to_str(dir_ptr) }.unwrap_or("");
     let hash = unsafe { cstr_to_str(api_hash_ptr) }.unwrap_or("");
@@ -1516,7 +1516,7 @@ pub extern "C" fn rust_tg_init(dir_ptr: *const c_char, api_id: i32, api_hash_ptr
 /// (`updates.getState`). O'lgan bo'lsa sessiya tashlanadi. Javob —
 /// `rust_tg_status` bilan bir xil. Tarmoq yo'q bo'lsa holat
 /// o'zgarmaydi. BLOKLAYDI (Dart uni alohida isolate'da chaqiradi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_check_session() -> *mut c_char {
     let Some(t) = tg() else {
         return string_to_cptr(json!({"configured": false, "authorized": false, "port": 0}).to_string());
@@ -1534,7 +1534,7 @@ pub extern "C" fn rust_tg_check_session() -> *mut c_char {
     string_to_cptr(status_json(t))
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_status() -> *mut c_char {
     string_to_cptr(match tg() {
         Some(t) => status_json(t),
@@ -1884,7 +1884,7 @@ async fn check_password_srp(
 }
 
 /// Telefon raqamiga kirish kodini yuboradi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_request_code(phone_ptr: *const c_char) -> *mut c_char {
     let phone = unsafe { cstr_to_str(phone_ptr) }.unwrap_or("").trim().to_string();
     string_to_cptr(with_client(|t, client| {
@@ -1987,7 +1987,7 @@ fn login_token_result(t: &Tg, client: &Client, r: tl::enums::auth::LoginToken) -
 
 /// QR uchun yangi token (yoki tasdiqlangan bo'lsa — kirish).
 /// Javob: `{"url","expires"}` | `{"ok":true}` | `{"password":true,"hint"}` | `{"error"}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_qr_token() -> *mut c_char {
     string_to_cptr(with_client(|t, client| {
         QR_ACCEPTED.store(false, Ordering::SeqCst);
@@ -2008,14 +2008,14 @@ pub extern "C" fn rust_tg_qr_token() -> *mut c_char {
 
 /// QR tasdiqlandimi (tarmoqsiz). 1 — ha: `rust_tg_qr_token` ni
 /// qayta chaqirish kerak.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_qr_accepted() -> i32 {
     QR_ACCEPTED.load(Ordering::SeqCst) as i32
 }
 
 /// Kodni QAYTA yuboradi (`auth.resendCode`) — odatda keyingi usulda
 /// (masalan SMS yoki qo'ng'iroq). Javob: `{"ok":true,"sent":{..}}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_resend_code() -> *mut c_char {
     string_to_cptr(with_client(|t, client| {
         let st = load_login(t).ok_or("Kod muddati tugadi — raqamni qayta kiriting")?;
@@ -2053,7 +2053,7 @@ pub extern "C" fn rust_tg_resend_code() -> *mut c_char {
 /// Kelgan kod bilan kiradi. Javob: `{"ok":true}`,
 /// `{"password":true,"hint":".."}` (2 bosqichli parol kerak) yoki
 /// `{"error":".."}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_sign_in(code_ptr: *const c_char) -> *mut c_char {
     let code = unsafe { cstr_to_str(code_ptr) }.unwrap_or("").trim().to_string();
     string_to_cptr(with_client(|t, client| {
@@ -2088,7 +2088,7 @@ pub extern "C" fn rust_tg_sign_in(code_ptr: *const c_char) -> *mut c_char {
 }
 
 /// 2 bosqichli parolni tekshiradi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_check_password(pw_ptr: *const c_char) -> *mut c_char {
     let pw = unsafe { cstr_to_str(pw_ptr) }.unwrap_or("").to_string();
     string_to_cptr(with_client(|t, client| {
@@ -2114,7 +2114,7 @@ pub extern "C" fn rust_tg_check_password(pw_ptr: *const c_char) -> *mut c_char {
 
 /// Saqlangan kirish bosqichi: `{"stage":"phone"|"code"|"password",
 /// "phone":"..","hint":".."}` (tarmoqqa chiqmaydi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_login_state() -> *mut c_char {
     let Some(t) = tg() else {
         return string_to_cptr(json!({"stage": "phone"}).to_string());
@@ -2136,7 +2136,7 @@ pub extern "C" fn rust_tg_login_state() -> *mut c_char {
 }
 
 /// "Raqamni o'zgartirish" — saqlangan bosqich o'chadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_login_reset() {
     if let Some(t) = tg() {
         clear_login(t);
@@ -2151,7 +2151,7 @@ pub extern "C" fn rust_tg_login_reset() {
 /// so'rov ketmaydi. Keyingi ko'rishda bot videoni qayta yuboradi.
 /// Tarmoq bo'lmasa xato qaytadi va Dart tomoni internet qaytgach
 /// qayta uradi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_clear_bot_chat() -> *mut c_char {
     string_to_cptr(with_client(|t, client| {
         if !t.authorized.load(Ordering::SeqCst) {
@@ -2354,7 +2354,7 @@ async fn join_one(client: &Client, kind: &str, target: &str) -> Result<&'static 
 /// `private:https://t.me/+xesh`. Javob: `{"ok":true,"state":"joined|requested"}`
 /// yoki `{"error":...}`. Tarmoqqa chiqadi (BLOKLAYDI) — Dart uni
 /// fon isolate'ida chaqiradi (`tgCall`).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_join_channel(arg_ptr: *const c_char) -> *mut c_char {
     let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("");
     let (kind, target) = arg.split_once(':').unwrap_or(("", ""));
@@ -2383,7 +2383,7 @@ pub extern "C" fn rust_tg_join_channel(arg_ptr: *const c_char) -> *mut c_char {
 /// Javob: `{"ok":true,"id":-100..,"title","username","about","members",
 /// "verified","broadcast","public","member","photo":"<base64>"}` yoki
 /// `{"error":...}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_channel_info(arg_ptr: *const c_char) -> *mut c_char {
     let input = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
     string_to_cptr(with_client(|t, client| {
@@ -2566,7 +2566,7 @@ async fn full_info(client: &Client, chat: tl::enums::Chat) -> Result<Value, Stri
 ///
 /// Argument: Bot API ko'rinishidagi kanal ID (`-100...`).
 /// Javob: `{"ok":true,"text":"...","edit_date":unix}` yoki `{"error":...}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_read_pinned(arg_ptr: *const c_char) -> *mut c_char {
     let chat: i64 = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().parse().unwrap_or(0);
     string_to_cptr(with_client(|t, client| {
@@ -2652,7 +2652,7 @@ async fn read_pinned(client: &Client, chat: i64) -> Result<(String, i64), String
 /// orqali taklif qilish (yopiq kanal so'rovlari uchun shart), boshqarish.
 ///
 /// Javob: `{"ok":true,"chat_id":-100...}` (Bot API ko'rinishidagi ID).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_make_bot_admin(arg_ptr: *const c_char) -> *mut c_char {
     let target = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
     string_to_cptr(with_client(|t, client| {
@@ -2715,7 +2715,7 @@ pub extern "C" fn rust_tg_make_bot_admin(arg_ptr: *const c_char) -> *mut c_char 
 }
 
 /// Kirish boti username'i (videolar shu bot chatidan olinadi).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_set_bot(bot_ptr: *const c_char) {
     let Some(t) = tg() else { return };
     let bot = unsafe { cstr_to_str(bot_ptr) }.unwrap_or("").trim_start_matches('@').to_string();
@@ -2740,7 +2740,7 @@ pub extern "C" fn rust_tg_set_bot(bot_ptr: *const c_char) {
 /// hisobini (`from.id`) oladi va sessiya ochadi. Ya'ni ilova
 /// hech narsani "da'vo qilmaydi" — shaxsni Telegram'ning o'zi
 /// tasdiqlaydi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_start_bot(bot_ptr: *const c_char, param_ptr: *const c_char) -> *mut c_char {
     let bot = unsafe { cstr_to_str(bot_ptr) }.unwrap_or("").trim_start_matches('@').to_string();
     let param = unsafe { cstr_to_str(param_ptr) }.unwrap_or("").to_string();
@@ -2780,7 +2780,7 @@ pub extern "C" fn rust_tg_start_bot(bot_ptr: *const c_char, param_ptr: *const c_
 /// Foydalanuvchi IP manzili bo'yicha davlat (ISO kodi, `UZ`) —
 /// Telegram ilovasi raqam oynasida davlatni aynan shunday tanlaydi
 /// (`help.getNearestDc`). Javob: `{"ok":true,"country":"UZ"}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_nearest_country() -> *mut c_char {
     string_to_cptr(with_client(|t, client| {
         let tl::enums::NearestDc::Dc(dc) = t
@@ -3247,7 +3247,7 @@ fn msg_id_of(res: &tl::enums::Updates, random_id: i64) -> Option<i32> {
 }
 
 /// Yuklashni boshlaydi. Javob: `{"job": N}` yoki `{"error": ".."}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_upload_start(
     path_ptr: *const c_char,
     name_ptr: *const c_char,
@@ -3311,7 +3311,7 @@ pub extern "C" fn rust_tg_upload_start(
 
 /// Yuklash holati: `{"sent","total","done","msg_id","error"}`.
 /// Tugagan ish shu chaqiruvda ro'yxatdan o'chiriladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_upload_status(job: u64) -> *mut c_char {
     let Ok(mut m) = uploads().lock() else {
         return string_to_cptr(err_json("holat qulfi"));
@@ -3335,7 +3335,7 @@ pub extern "C" fn rust_tg_upload_status(job: u64) -> *mut c_char {
 }
 
 /// Yuklashni bekor qiladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_upload_cancel(job: u64) {
     if let Ok(mut m) = uploads().lock() {
         if let Some(mut j) = m.remove(&job) {
@@ -3347,7 +3347,7 @@ pub extern "C" fn rust_tg_upload_cancel(job: u64) {
 }
 
 /// Telegram hisobidan chiqadi va sessiyani o'chiradi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_logout() -> *mut c_char {
     let Some(t) = tg() else { return string_to_cptr(json!({"ok": true}).to_string()) };
     if t.authorized.load(Ordering::SeqCst) {
@@ -3382,7 +3382,7 @@ pub extern "C" fn rust_tg_logout() -> *mut c_char {
 /// Fayl nomini bot chatidagi xabarga bog'laydi (`msg_id <= 0` —
 /// bog'lanishni olib tashlaydi). Yuklab olish shundan keyin
 /// Telegram'dan ketadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_route(key_ptr: *const c_char, msg_id: i32) -> i32 {
     let Some(t) = tg() else { return 0 };
     let Some(key) = (unsafe { cstr_to_str(key_ptr) }) else { return 0 };
@@ -3413,7 +3413,7 @@ pub extern "C" fn rust_tg_route(key_ptr: *const c_char, msg_id: i32) -> i32 {
 
 /// Fayllarning ochish kalitlari (`/api/tg/deliver` javobidagi
 /// `keys`: `{"nom": "hex", ...}`).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_set_keys(json_ptr: *const c_char) {
     let Some(t) = tg() else { return };
     let Some(json) = (unsafe { cstr_to_str(json_ptr) }) else { return };
@@ -3433,7 +3433,7 @@ fn run_tmo<T>(t: &Tg, secs: u64, f: impl std::future::Future<Output = Result<T, 
 }
 
 /// Pleyer uchun manzil (Telegram ishlatib bo'lmasa bo'sh satr).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_play_url(key_ptr: *const c_char) -> *mut c_char {
     let key = unsafe { cstr_to_str(key_ptr) }.unwrap_or("");
     string_to_cptr(route_url(key).unwrap_or_default())

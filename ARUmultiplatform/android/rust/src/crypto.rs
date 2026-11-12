@@ -489,7 +489,7 @@ mod tests {
 /// saqlaydi (u Android'da Keystore bilan himoyalangan). Keyingi
 /// ishga tushishlarda kalit o'sha yerdan o'qib, `rust_crypto_set_key`
 /// orqali qaytariladi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_crypto_generate_key() -> *mut c_char {
     string_to_cptr(generate_master_key_hex())
 }
@@ -497,7 +497,7 @@ pub extern "C" fn rust_crypto_generate_key() -> *mut c_char {
 /// Asosiy kalitni o'rnatadi. 1 — muvaffaqiyat, 0 — xato.
 /// Bu chaqirilmaguncha shifrlash O'CHIQ bo'ladi va hamma narsa
 /// avvalgidek ochiq saqlanadi (eski o'rnatmalar buzilmasligi uchun).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_crypto_set_key(hex_ptr: *const c_char) -> i32 {
     match unsafe { cstr_to_str(hex_ptr) } {
         Some(h) if set_master_key_hex(h) => 1,
@@ -506,7 +506,7 @@ pub extern "C" fn rust_crypto_set_key(hex_ptr: *const c_char) -> i32 {
 }
 
 /// Shifrlash yoqilganmi (1/0) — diagnostika uchun.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_crypto_is_enabled() -> i32 {
     if is_enabled() { 1 } else { 0 }
 }
@@ -558,7 +558,7 @@ fn bytes_out(v: Vec<u8>, out_len: *mut usize) -> *mut u8 {
 }
 
 /// Baytlarni muhrlaydi. Xato bo'lsa (kalit yo'q) — null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_seal_bytes(
     label_ptr: *const c_char,
     data_ptr: *const u8,
@@ -584,7 +584,7 @@ pub extern "C" fn rust_seal_bytes(
 
 /// Muhrlangan baytlarni ochadi. Buzilgan, boshqa kalit yoki ochiq
 /// (eski) ma'lumot bo'lsa — null.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_open_bytes(
     label_ptr: *const c_char,
     data_ptr: *const u8,
@@ -605,7 +605,7 @@ pub extern "C" fn rust_open_bytes(
 }
 
 /// `rust_seal_bytes`/`rust_open_bytes` natijasini bo'shatadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_free_bytes(ptr: *mut u8, len: usize) {
     if ptr.is_null() {
         return;
@@ -616,7 +616,7 @@ pub extern "C" fn rust_free_bytes(ptr: *mut u8, len: usize) {
 }
 
 /// 1 — muvaffaqiyat, 0 — xato (jumladan shifrlash o'chiq bo'lsa).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_secure_save(
     path_ptr: *const c_char,
     label_ptr: *const c_char,
@@ -649,7 +649,7 @@ pub extern "C" fn rust_secure_save(
 
 /// Muhrlangan fayldan matnni o'qiydi. Fayl yo'q, buzilgan yoki
 /// boshqa kalit bilan yozilgan bo'lsa — bo'sh satr qaytadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_secure_load(
     path_ptr: *const c_char,
     label_ptr: *const c_char,
@@ -669,7 +669,7 @@ pub extern "C" fn rust_secure_load(
 }
 
 /// Faylni o'chiradi. Fayl allaqachon yo'q bo'lsa ham 1 qaytadi.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_secure_clear(path_ptr: *const c_char) -> i32 {
     let Some(path) = (unsafe { cstr_to_str(path_ptr) }) else {
         return 0;

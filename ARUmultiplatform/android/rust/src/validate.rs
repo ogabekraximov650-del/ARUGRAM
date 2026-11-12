@@ -5,7 +5,7 @@ use std::os::raw::c_char;
 
 /// Anime formasi to'ldirilganini tekshiradi (barcha maydonlar bo'sh emas).
 /// 1 — to'g'ri, 0 — kamida bitta maydon bo'sh.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_validate_anime_form(
     name_ptr: *const c_char,
     davlat_ptr: *const c_char,

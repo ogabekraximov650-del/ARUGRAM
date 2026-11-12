@@ -1,7 +1,7 @@
 [package]
 name = "tgstore-jr"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "UZ: Ample jurnal-baza serveri (libSQL + db_N_vV jurnal papkalari + Telegram nusxa). EN: Ample journal-store server (libSQL + db_N_vV journal folders + Telegram copy). RU: сервер журнальной базы Ample."
 
 [dependencies]

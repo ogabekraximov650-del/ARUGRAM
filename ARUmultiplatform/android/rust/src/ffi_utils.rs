@@ -6,12 +6,12 @@ use std::os::raw::c_char;
 
 /// C tomonidan kelgan pointer'ni Rust &str ga aylantiradi.
 /// Null yoki noto'g'ri UTF-8 bo'lsa None qaytaradi (panic qilmaydi).
-pub unsafe fn cstr_to_str<'a>(ptr: *const c_char) -> Option<&'a str> {
+pub unsafe fn cstr_to_str<'a>(ptr: *const c_char) -> Option<&'a str> { unsafe {
     if ptr.is_null() {
         return None;
     }
     CStr::from_ptr(ptr).to_str().ok()
-}
+}}
 
 /// Rust String'ni Dart'ga qaytarish uchun C pointer'ga aylantiradi.
 pub fn string_to_cptr(s: String) -> *mut c_char {
@@ -23,7 +23,7 @@ pub fn string_to_cptr(s: String) -> *mut c_char {
 
 /// Rust qaytargan har qanday satrni Dart tomoni shu funksiya orqali
 /// bo'shatishi SHART — aks holda xotira sizib chiqadi (memory leak).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_free_string(ptr: *mut c_char) {
     if ptr.is_null() {
         return;

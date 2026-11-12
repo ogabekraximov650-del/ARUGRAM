@@ -221,7 +221,7 @@ async fn media_list(client: &Client, arg: &str) -> Result<Value, String> {
 }
 
 /// To'plamlar/GIF ro'yxatini oladi (BLOKLAYDI — faqat fon oqimidan chaqiring). Javob: `{"ok":true,...}` yoki `{"error":...}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_media_list(arg_ptr: *const c_char) -> *mut c_char {
     let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").trim().to_string();
     string_to_cptr(with_client(|t, client| {
@@ -322,7 +322,7 @@ async fn media_get(t: &'static Tg, client: &Client, v: &Value) -> Result<Value, 
 }
 
 /// Arg: JSON `{id,hash,ref,dc,thumb,out,max}`. Javob: `{"ok":true,"size":N}` yoki `{"error":...}`.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_tg_media_get(arg_ptr: *const c_char) -> *mut c_char {
     let arg = unsafe { cstr_to_str(arg_ptr) }.unwrap_or("").to_string();
     string_to_cptr(with_client(|t, client| {
