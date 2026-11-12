@@ -263,6 +263,34 @@ async fn has_creds(env: &Env) -> bool {
 }
 
 /// Yangi login/parol bilan saytga kiradi; muvaffaqiyatli bo'lsa shifrlab saqlaydi.
+/// UZ: JWT ichidagi `exp` (soniya). Imzo tekshirilmaydi — faqat muddatni o'qiydi.
+/// EN: reads `exp` (seconds) from a JWT; the signature is not checked.
+fn jwt_exp(tok: &str) -> Option<i64> {
+    let mut parts = tok.split('.');
+    let (h, p, sig) = (parts.next()?, parts.next()?, parts.next()?);
+    if !h.starts_with("eyJ") || sig.is_empty() || parts.next().is_some() { return None; }
+    let mut bits = 0u32; let mut n = 0u32; let mut out: Vec<u8> = Vec::new();
+    for c in p.bytes() {
+        let v = match c { b'A'..=b'Z' => c - b'A', b'a'..=b'z' => c - b'a' + 26, b'0'..=b'9' => c - b'0' + 52, b'-' | b'+' => 62, b'_' | b'/' => 63, b'=' => break, _ => return None } as u32;
+        bits = (bits << 6) | v; n += 6;
+        if n >= 8 { n -= 8; out.push((bits >> n) as u8); bits &= (1 << n) - 1; }
+    }
+    serde_json::from_slice::<Value>(&out).ok()?["exp"].as_i64()
+}
+
+/// UZ: Google orqali kirilgan akkaunt uchun (parol yo'q): brauzerdagi `access_token` cookie qiymati qabul qilinadi.
+/// EN: for accounts signed in with Google (no password): accepts the browser's `access_token` cookie value.
+pub(crate) async fn connect_token(env: &Env, raw: &str) -> std::result::Result<i64, String> {
+    let tok = raw.trim().trim_start_matches("access_token=").trim_matches(|c: char| c == '"' || c == ';' || c.is_whitespace()).to_string();
+    let exp = jwt_exp(&tok).ok_or("bu token emas (eyJ... bilan boshlanuvchi 3 qismli qator kerak)")?;
+    if exp * 1000 <= now_ms() { return Err("tokenning muddati tugagan \u{2014} saytga qayta kirib yangisini oling".into()); }
+    config_put(env, "anibla_creds", "").await;
+    config_put(env, "anibla_token", &tok).await;
+    config_put(env, "anibla_token_exp", &exp.to_string()).await;
+    TOKEN.with(|t| *t.borrow_mut() = tok);
+    Ok(exp)
+}
+
 pub(crate) async fn connect_account(env: &Env, phone: &str, password: &str) -> std::result::Result<(), String> {
     let digits: String = phone.chars().filter(|c| c.is_ascii_digit()).collect();
     let n: i64 = digits.parse().map_err(|_| "telefon raqami noto'g'ri".to_string())?;
@@ -286,6 +314,7 @@ pub(crate) async fn connect_account(env: &Env, phone: &str, password: &str) -> s
     let iv = unhex(&iv_hex).ok_or("tasodifiy son olinmadi")?;
     let mut buf = serde_json::to_vec(&json!({"login": digits, "password": password})).map_err(|e| e.to_string())?;
     if !xor_ctr(env, &iv, &mut buf) { return Err("shifrlab bo'lmadi".into()); }
+    config_put(env, "anibla_token_exp", "").await;
     config_put(env, "anibla_creds", &format!("{iv_hex}:{}", hex_of(&buf))).await;
     TOKEN.with(|t| *t.borrow_mut() = tok.clone());
     config_put(env, "anibla_token", &tok).await;
@@ -294,6 +323,11 @@ pub(crate) async fn connect_account(env: &Env, phone: &str, password: &str) -> s
 
 async fn login(env: &Env) -> std::result::Result<String, String> {
     set_proxy(env);
+    // Token bilan ulangan akkaunt (parolsiz): token tugasa o'zi qayta kira olmaydi.
+    if !config_get(env, "anibla_token_exp").await.unwrap_or_default().is_empty() && creds_cfg(env).await.is_none() {
+        TOKEN.with(|t| t.borrow_mut().clear());
+        return Err("Anibla tokenining muddati tugadi \u{2014} \u{1F517} Anibla akkaunt bo'limiga yangi access_token yuboring".into());
+    }
     let cfg = creds_cfg(env).await;
     let Some(c) = cfg.or_else(|| creds(env)) else {
         return Err("login/parol sozlanmagan (ANIBLA_CREDS)".into());
@@ -2210,4 +2244,17 @@ pub(crate) async fn resolve_origin(env: &Env, raw: &str) -> (String, String) {
             .map(|v| v.job_url()).ok_or_else(|| "sifat topilmadi".to_string())
     }.await;
     (fresh.unwrap_or(saved), label)
+}
+
+#[cfg(test)]
+mod jwt_tests {
+    use super::jwt_exp;
+    #[test]
+    fn reads_exp_from_jwt() {
+        // header {"alg":"HS256","typ":"JWT"}, payload {"sub":"1","exp":1794999999}
+        let t = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwiZXhwIjoxNzk0OTk5OTk5fQ.c2ln";
+        assert_eq!(jwt_exp(t), Some(1794999999));
+        assert_eq!(jwt_exp("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9"), None); // faqat sarlavha
+        assert_eq!(jwt_exp("abc.def.ghi"), None);
+    }
 }

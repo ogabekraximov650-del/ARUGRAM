@@ -173,7 +173,8 @@ pub(crate) async fn start_anibla(env: &Env, chat: i64) {
     encbot_send(env, chat,
         "\u{1F517} <b>Anibla akkaunt</b>\n\n\
          anibla.uz dagi akkauntingiz <b>telefon raqamini</b> (login) yuboring, masalan <code>998901234567</code>.\n\
-         Keyin parol so'raladi. Worker saytga kirib tekshiradi va akkauntni <b>shifrlab</b> saqlaydi.",
+         Keyin parol so'raladi. Worker saytga kirib tekshiradi va akkauntni <b>shifrlab</b> saqlaydi.\n\n\
+         Google orqali kirgan (parolsiz) bo'lsangiz: brauzerdagi <code>access_token</code> cookie qiymatini (eyJ... bilan boshlanadi) shu yerga yuboring.",
         Some(keyboard())).await;
 }
 
@@ -269,6 +270,22 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
             config_put(env, "sess_pw", &text).await;
             config_put(env, "sess_state", "wait_pw").await;
             encbot_send(env, chat, "\u{23F3} Parol tekshirilmoqda...", Some(keyboard())).await;
+        }
+        "al_phone" if text.starts_with("eyJ") || text.starts_with("access_token=") => {
+            delete_msg(env, chat, msg).await;
+            match anibla::connect_token(env, &text).await {
+                Ok(exp) => {
+                    reset(env).await;
+                    config_put(env, "encbot_mode", "").await;
+                    let left = (exp * 1000 - now_ms()) / 86_400_000;
+                    encbot_send(env, chat, &format!(
+                        "\u{2705} <b>Anibla akkaunt token bilan ulandi</b>.\nToken ~{left} kun amal qiladi; keyin yangisini yuborasiz (parol yo'q, o'zi yangilana olmaydi)."), None).await;
+                    postbot::main_menu(env, chat).await;
+                }
+                Err(e) => {
+                    encbot_send(env, chat, &format!("\u{274C} {}", html_escape(&e)), Some(keyboard())).await;
+                }
+            }
         }
         "al_phone" => {
             let d = digits(&text);
