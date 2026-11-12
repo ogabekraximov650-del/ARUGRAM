@@ -13,8 +13,11 @@ use serde_json::{json, Value as J};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-pub const THRESHOLD: f64 = 70.0;
-pub const STOP_AT: f64 = 65.0;
+/// UZ: arxiv `DB_LIMIT_MB` ning shuncha foizida ishga tushadi (standart 70) va shuncha foizga tushganda to'xtaydi (standart 65). Ample'da `JR_ARCH_START_PCT=100`, `JR_ARCH_STOP_PCT=90`:
+/// baza limitga (500 MB) yetganda arxivlanadi. EN: archive start/stop as a percentage of `DB_LIMIT_MB` (env overridable).
+fn pct_env(k: &str, d: f64) -> f64 { std::env::var(k).ok().and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0 && *v <= 200.0).unwrap_or(d) }
+pub fn threshold() -> f64 { pct_env("JR_ARCH_START_PCT", 70.0) }
+pub fn stop_at() -> f64 { pct_env("JR_ARCH_STOP_PCT", 65.0).min(threshold()) }
 const BATCH: i64 = 500;
 const DAY: i64 = 86_400_000;
 
@@ -181,7 +184,7 @@ impl Arch {
         Ok(json!({"table": spec.table, "found": rows.len(), "archived": gone.len(), "chunk": format!("db_{no}_v{ver}"), "sealed": sealed, "bytes": packed.len(), "dry": false}))
     }
 
-    /// Baza `THRESHOLD` dan oshsa ishga tushadi; `STOP_AT` ga tushsa to'xtaydi. EN/RU: one scheduler tick.
+    /// Baza `threshold()` dan oshsa ishga tushadi; `stop_at()` ga tushsa to'xtaydi. EN/RU: one scheduler tick.
     pub async fn run(&self, force: bool, dry: bool, max: usize) -> Result<J> {
         let Ok(_g) = self.busy.try_lock() else { return Ok(json!({"skipped": "band"})) };
         self.init().await?;
@@ -189,7 +192,7 @@ impl Arch {
         let _ = pct;
         let percent = async { let s = self.st.lock().await; s.live_bytes().await as f64 / (s.cfg.limit_mb as f64 * 1048576.0) * 100.0 };
         let p0 = percent.await;
-        if p0 < THRESHOLD && !force { return Ok(json!({"active": false, "percent": p0, "threshold": THRESHOLD})); }
+        if p0 < threshold() && !force { return Ok(json!({"active": false, "percent": p0, "threshold": threshold()})); }
         if !dry {
             let _ = self.st.lock().await.exec(&[st("delete from login_tokens where expires_at < ?1", vec![ti(now_ms() as i64 - DAY)]), st("delete from arch_warm where until < ?1", vec![ti(now_ms() as i64)])], true).await;
         }
@@ -203,16 +206,16 @@ impl Arch {
                 if moved { did = true; break; }
             }
             if !did || dry { break; }
-            if !force { let p = { let s = self.st.lock().await; s.live_bytes().await as f64 / (s.cfg.limit_mb as f64 * 1048576.0) * 100.0 }; if p < STOP_AT { break; } }
+            if !force { let p = { let s = self.st.lock().await; s.live_bytes().await as f64 / (s.cfg.limit_mb as f64 * 1048576.0) * 100.0 }; if p < stop_at() { break; } }
         }
-        Ok(json!({"active": true, "percent": p0, "threshold": THRESHOLD, "steps": steps}))
+        Ok(json!({"active": true, "percent": p0, "threshold": threshold(), "steps": steps}))
     }
 
     pub async fn files(&self) -> Result<J> {
         self.init().await?;
         let (cols, rows) = self.st.lock().await.query_raw("select id, no, ver, sealed, name, rows, size, created_at, restored_at from arch_files order by id desc limit 100", vec![]).await?;
         let list: Vec<J> = rows.iter().map(|r| J::Object(cols.iter().zip(r).map(|(c, v)| (c.clone(), match v { Value::Integer(i) => json!(i), Value::Text(s) => json!(s), _ => J::Null })).collect())).collect();
-        Ok(json!({"files": list, "threshold": THRESHOLD}))
+        Ok(json!({"files": list, "threshold": threshold()}))
     }
 
     async fn file_row(&self, id: i64) -> Result<Option<BTreeMap<String, Value>>> { Ok(self.row_map("select * from arch_files where id=?1", vec![Value::Integer(id)]).await?.into_iter().next()) }
