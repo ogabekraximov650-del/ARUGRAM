@@ -228,4 +228,15 @@ export class Archive {
     if (!k.rows[0]) return { restored: 0, found: false };
     return { found: true, ...(await this.restore(k.rows[0].fid, opts)) };
   }
+
+  /** Arxiv faylini butunlay o'chiradi: Telegram xabari, kalit indeksi va ro'yxat qatori (ma'lumot ARXIVDA qolmaydi!). Faqat sinov/tozalash uchun. EN/RU: removes a file entirely. */
+  async purge(id) {
+    const f = (await this.pool.query('select * from arch_files where id=$1', [id])).rows[0];
+    if (!f) return { purged: false };
+    const okTg = await this.tg.del(Number(f.msg_id));
+    await this.pool.query('delete from arch_keys where fid=$1', [id]);
+    await this.pool.query('delete from arch_files where id=$1', [id]);
+    try { fs.unlinkSync(path.join(this.dir, `${id}.enc`)); } catch { /* keshda yo'q */ }
+    return { purged: true, telegram_deleted: okTg };
+  }
 }

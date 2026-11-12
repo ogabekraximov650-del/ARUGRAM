@@ -150,6 +150,7 @@ http.createServer((req, res) => {
         if (a === 'files') return send(200, { files: await arch.files(), threshold: THRESHOLD });
         if (a === 'get') return send(200, { row: await arch.lookup(String(b.table), String(b.key)) });
         if (a === 'warm') return send(200, await arch.warm(String(b.table), String(b.key), { warmDays: b.days || 7 }));
+        if (a === 'purge') return send(200, await arch.purge(Number(b.id)));
         if (a === 'restore') return send(200, await arch.restore(Number(b.id), { warmDays: b.days || 7 }));
         return send(404, { message: 'no such endpoint' });
       }
