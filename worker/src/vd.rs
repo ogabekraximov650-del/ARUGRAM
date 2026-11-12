@@ -570,15 +570,22 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         // Faylni to'liq o'chirish (R2, kanal xabarlari, kesh, baza) — Actions/ENCODE_TOKEN (sinov fayllarini tozalash uchun).
         // O'z-o'zini tekshirish: 4 KiB faylni XUDDI `/api/vd/small` yo'li bilan saqlaydi (shifrlash -> Telegram -> baza -> kesh), vaqtlarni qaytaradi, so'ng o'chiradi.
         "/api/vd/selftest" => {
+            // Cloudflare bepul rejasi bitta so'rovda 50 ta tashqi chaqiruvga ruxsat beradi: oddiy sinov va egasi yo'li sinovi ALOHIDA chaqiriladi
+            // (`?owner=1` — faqat egasi yo'li).
+            let owner_only = qs(&url, "owner") == "1";
             let t0 = now_ms();
-            let tname = format!("selftest_{t0}.bin");
-            let r = store_small(env, &tname, vec![7u8; 4096]).await;
-            let t1 = now_ms();
-            let out = match &r {
-                Ok((_, size)) => json!({"ok": true, "size": size, "ms": t1 - t0}),
-                Err(e) => json!({"ok": false, "error": e.to_string(), "ms": t1 - t0}),
-            };
-            forget(env, &tname).await;
+            let mut out = json!({"ok": true});
+            if !owner_only {
+                let tname = format!("selftest_{t0}.bin");
+                let r = store_small(env, &tname, vec![7u8; 4096]).await;
+                let t1 = now_ms();
+                out = match &r {
+                    Ok((_, size)) => json!({"ok": true, "size": size, "ms": t1 - t0}),
+                    Err(e) => json!({"ok": false, "error": e.to_string(), "ms": t1 - t0}),
+                };
+                forget(env, &tname).await;
+                return ok(out);
+            }
             // Egasi yo'li (vd_files rejasi): yozishma xabari + `chat_0_<vaqt>.bin` fayli. Ma'lumot egasining ustunlariga ko'chishi, navbat qatori
             // o'chishi, egasidan o'qilishi va `forget` bilan tozalanishi tekshiriladi.
             let (oname, mid) = (format!("chat_0_{t0}.bin"), format!("selftest_{t0}"));
@@ -598,7 +605,6 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
                     && queued == 0 && read.as_ref().and_then(|v| v.as_str()) == Some("ready") && left == 0;
                 owner = json!({"ok": good, "stored": stored.is_ok(), "in_owner": in_owner, "queue_rows": queued, "read": read, "left_after_forget": left});
             }
-            let mut out = out;
             out["owner"] = owner;
             ok(out)
         }
