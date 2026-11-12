@@ -196,6 +196,17 @@ impl Store {
         if size >= chunk_bytes { c.meta.sealed = true; write_meta(c); self.open_next(); }
     }
 
+    /// Faqat o'qish: ustun nomlari va xom qiymatlar (jurnalga yozilmaydi). EN/RU: read-only query returning raw values.
+    pub async fn query_raw(&self, sql: &str, args: Vec<Value>) -> Result<(Vec<String>, Vec<Vec<Value>>)> {
+        let stmt = self.conn.prepare(sql).await?;
+        let cols: Vec<String> = stmt.columns().iter().map(|c| c.name().to_string()).collect();
+        let n = cols.len();
+        let mut rows = stmt.query(args).await?;
+        let mut out = vec![];
+        while let Some(r) = rows.next().await? { out.push((0..n).map(|i| r.get_value(i as i32).unwrap_or(Value::Null)).collect()); }
+        Ok((cols, out))
+    }
+
     pub async fn marks(&self, bump: &[String], get: &[String], at: i64) -> Result<J> {
         for k in bump {
             self.conn.execute("insert into kv_marks(k,v) values(?1,?2) on conflict(k) do update set v=max(excluded.v, kv_marks.v+1)", vec![Value::Text(k.clone()), Value::Integer(at.max(1))]).await?;
@@ -210,6 +221,15 @@ impl Store {
 
     fn dir_bytes(p: &Path) -> u64 {
         std::fs::read_dir(p).map(|d| d.filter_map(|e| e.ok()).map(|e| { let m = e.metadata(); match m { Ok(m) if m.is_dir() => Self::dir_bytes(&e.path()), Ok(m) => m.len(), _ => 0 } }).sum()).unwrap_or(0)
+    }
+
+    /// UZ: bazaning JONLI hajmi: ishlatilayotgan sahifalar + jurnal bo'laklari (bo'sh sahifalar va WAL hisobga olinmaydi). EN/RU: live data size (free pages and WAL excluded).
+    pub async fn live_bytes(&self) -> u64 {
+        let pc = self.scalar_i64("pragma page_count").await.unwrap_or(0).max(0) as u64;
+        let fl = self.scalar_i64("pragma freelist_count").await.unwrap_or(0).max(0) as u64;
+        let ps = self.scalar_i64("pragma page_size").await.unwrap_or(4096).max(0) as u64;
+        let journals: u64 = self.chunks.iter().map(|c| Self::dir_bytes(&c.dir)).sum();
+        pc.saturating_sub(fl) * ps + journals
     }
 
     pub fn usage(&self) -> J {

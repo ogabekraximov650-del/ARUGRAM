@@ -14780,6 +14780,10 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
         let got = req.headers().get("authorization").ok().flatten().unwrap_or_default();
         if key.is_empty() || got != format!("Bearer {key}") { return Response::error("unauthorized", 401); }
         let q: std::collections::HashMap<String, String> = url.query_pairs().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        // UZ: jr rejimida arxivlash/tiklash Ample'dagi Rust xizmatida (`/archive/*`); Worker'dan faqat quruq sanashga ruxsat (ikki marta arxivlanmasin). EN/RU: archiving lives on the Ample service.
+        if env.var("DB_BACKEND").map(|v| v.to_string() == "jr").unwrap_or(false) && !q.contains_key("dry") {
+            return Response::from_json(&json!({"ok": false, "error": "arxivlash Ample xizmatida: POST <AMPLE>/archive/run|files|get|warm|restore|purge"}));
+        }
         let r = if q.contains_key("files") {
             circle::files(&env).await
         } else if let Some(id) = q.get("restore") {

@@ -1,6 +1,7 @@
 //! UZ: tgstore-jr (Rust): Turso `pipeline` formatidagi so'rovlarni libSQL (SQLite) da bajaradi; yozuvlar `db_N_vV` jurnal papkalariga tushadi va Telegram'ga nusxalanadi.
 //! EN: tgstore-jr (Rust): runs Turso-pipeline requests on libSQL (SQLite); writes land in `db_N_vV` journal folders and replicate to Telegram.
 //! RU: tgstore-jr (Rust): запросы формата Turso pipeline на libSQL, журнал в папках db_N_vV и копия в Telegram.
+mod archive;
 mod crypto;
 mod store;
 mod tg;
@@ -21,6 +22,7 @@ struct App {
     tg: Option<tg::Tg>,
     key: Option<[u8; 32]>,
     auths: Mutex<HashSet<String>>,
+    arch: Option<Arc<archive::Arch>>,
 }
 
 fn log(m: &str) { eprintln!("{} {}", store::now_ms(), m); }
@@ -87,6 +89,19 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
             let n = app.st.lock().await.apply_schema(include_str!("../schema.sql")).await;
             match n { Ok(n) => json_resp(200, json!({"statements": n})), Err(e) => json_resp(500, json!({"message": e.to_string()})) }
         }
+        p if p.starts_with("archive/") => {
+            let Some(a) = app.arch.as_ref() else { return json_resp(503, json!({"message": "doira yoqilmagan (TG_BOT_TOKEN/TG_CHANNEL_ID yo'q)"})) };
+            let r = match &p[8..] {
+                "run" => a.run(b["force"] == json!(true), b["dry"] == json!(true), b["max"].as_u64().unwrap_or(5) as usize).await,
+                "files" => a.files().await,
+                "get" => a.lookup(b["table"].as_str().unwrap_or(""), b["key"].as_str().unwrap_or("")).await.map(|row| json!({"row": row})),
+                "warm" => a.warm(b["table"].as_str().unwrap_or(""), b["key"].as_str().unwrap_or(""), b["days"].as_i64().unwrap_or(7)).await,
+                "restore" => a.restore(b["id"].as_i64().unwrap_or(0), b["days"].as_i64().unwrap_or(7)).await,
+                "purge" => a.purge(b["id"].as_i64().unwrap_or(0)).await,
+                _ => return json_resp(404, json!({"message": "no such endpoint"})),
+            };
+            match r { Ok(v) => json_resp(200, v), Err(e) => json_resp(500, json!({"message": e.to_string()})) }
+        }
         "replicate" | "snapshot" => {
             let (Some(tg), Some(key)) = (app.tg.as_ref(), app.key.as_ref()) else { return json_resp(200, json!({"skipped": true})) };
             let r = if path == "replicate" { store::replicate(&app.st, tg, key).await } else { store::snapshot(&app.st, tg, key).await };
@@ -123,7 +138,12 @@ async fn main() {
     if let Res::Ok(v) = st.lock().await.exec(&[Stmt { sql: "select v from kv_conf where k='key_hash'".into(), args: vec![] }], false).await.remove(0) {
         if let Some(h) = v["rows"][0][0]["value"].as_str() { auths.insert(h.to_string()); }
     }
-    let app = Arc::new(App { st: st.clone(), tg: tg.clone(), key, auths: Mutex::new(auths) });
+    let arch = tg.clone().map(|t| Arc::new(archive::Arch::new(st.clone(), t, env("JR_ARCH_DIR").unwrap_or_else(|| "/var/lib/tgstore-arch".into()).into(), cfg.chunk_bytes)));
+    let app = Arc::new(App { st: st.clone(), tg: tg.clone(), key, auths: Mutex::new(auths), arch: arch.clone() });
+    if let Some(a) = arch {
+        // UZ: har 5 daqiqada baza foizi tekshiriladi; >= 70% bo'lsa sovuq qatorlar Telegram'ga chiqariladi. EN/RU: circle tick every 5 minutes.
+        tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(300)).await; match a.run(false, false, 5).await { Ok(r) if r["active"] == json!(true) => log(&format!("doira: {}", r.to_string().chars().take(300).collect::<String>())), Err(e) => log(&format!("doira xato: {}", e)), _ => {} } } });
+    }
 
     if let (Some(tg), Some(key)) = (tg, key) {
         let (st2, tg2) = (st.clone(), tg.clone());

@@ -124,7 +124,7 @@ jobs:
           sys.exit(0 if j.get('ok') else 1)
           PY
 
-      - name: Postgres (Ample) orqali haqiqiy so'rovlar tekshiruvi
+      - name: Ample bazasi orqali haqiqiy so'rovlar tekshiruvi
         run: |
           URL=https://tgstore-rs.uzcom.workers.dev
           FAIL=0
@@ -137,7 +137,7 @@ jobs:
           done
           exit $FAIL
 
-      - name: Doira tizimi quruq sinovi (sovuq qatorlar so'rovlari PostgreSQL'da ishlaydimi)
+      - name: Doira tizimi quruq sinovi (sovuq qatorlar so'rovlari bazada ishlaydimi)
         if: always()
         continue-on-error: true
         run: |

@@ -69,6 +69,7 @@ kanali orqali uzatiladi (xarajatni kamaytirish uchun).
 | `tool/packs/` | Emoji/GIF/stiker to'plamlarini yig'ish (ALOHIDA workflow `packs.yml`, yangi akkauntdagi repoda) |
 | `worker/src/packs.rs` | Emoji/GIF/stiker to'plamlari (o'z tizimimiz; Telegram'niki olib tashlangan) — `KEYINGI_VAZIFA.md` oxirgi bo'lim |
 | `web/`, `worker/src/tma.rs` | Telegram Mini App — ilovaning onlayn nusxasi (arumediatv.pages.dev, `deploy-web.yml`). `KEYINGI_VAZIFA.md` oxirgi bo'limlar |
+| `ARUmultiplatform/tgstore/` | SINOV tizimi (production'ga tegmaydi): Worker `tgstore-rs` + Ample'dagi Rust xizmati `ample-rs` (libSQL, papka-jurnal, Telegram zaxira, arxiv). Tafsilot: `KEYINGI_VAZIFA.md` oxirgi `tgstore:` bo'limlari |
 | `ci/` | Imzo kaliti (`release.keystore`), baza tozalash skripti |
 | `android-template/` | CI `flutter create` dan keyin qo'yadigan `MainActivity.kt` (`/android/` repoda yo'q) |
 
