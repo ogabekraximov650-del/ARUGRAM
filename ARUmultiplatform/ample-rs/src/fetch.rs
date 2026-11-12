@@ -38,16 +38,38 @@ pub async fn run(b: &J) -> Result<J> {
         }
     }
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(20)).build()?;
-    let mut rq = client.request(method, u);
-    if let Some(h) = b["headers"].as_object() {
-        for (k, v) in h { if let Some(v) = v.as_str() { rq = rq.header(k.as_str(), v); } }
-    }
-    if let Some(body) = b["body"].as_str() { rq = rq.body(body.to_string()); }
-    let r = rq.send().await.map_err(|e| anyhow!("so'rov: {e}"))?;
-    let status = r.status().as_u16();
-    let bytes = r.bytes().await.map_err(|e| anyhow!("javob: {e}"))?;
+    // UZ: yo'naltirishlarni (301/302/303/307/308) FAQAT ruxsat etilgan hostlar ichida o'zimiz kuzatamiz (5 martagacha); tashqariga chiqsa Worker'ga `location` qaytariladi.
+    // EN: redirects are followed only inside the allow-list (up to 5 hops); a redirect leaving it is returned as `location` for the Worker to follow.
+    let mut cur = u;
+    let mut method = method;
+    let mut body_s = b["body"].as_str().map(|x| x.to_string());
+    let (status, bytes, location) = {
+        let mut hops = 0;
+        loop {
+            let mut rq = client.request(method.clone(), cur.clone());
+            if let Some(h) = b["headers"].as_object() {
+                for (k, v) in h { if let Some(v) = v.as_str() { rq = rq.header(k.as_str(), v); } }
+            }
+            if let Some(bd) = &body_s { rq = rq.body(bd.clone()); }
+            let r = rq.send().await.map_err(|e| anyhow!("so'rov: {e}"))?;
+            let st = r.status().as_u16();
+            let loc = r.headers().get("location").and_then(|v| v.to_str().ok()).and_then(|l| cur.join(l).ok());
+            if matches!(st, 301 | 302 | 303 | 307 | 308) {
+                if let Some(next) = loc {
+                    if next.scheme() == "https" && host_allowed(next.host_str().unwrap_or(""), &allow) && hops < 5 {
+                        if st == 303 || ((st == 301 || st == 302) && method != reqwest::Method::GET) { method = reqwest::Method::GET; body_s = None; }
+                        cur = next; hops += 1; continue;
+                    }
+                    break (st, axum::body::Bytes::new(), Some(next.to_string()));
+                }
+            }
+            let bytes = r.bytes().await.map_err(|e| anyhow!("javob: {e}"))?;
+            break (st, bytes, None);
+        }
+    };
     if bytes.len() > MAX_BODY { return Err(anyhow!("javob juda katta")); }
-    let out = json!({"status": status, "body": String::from_utf8_lossy(&bytes)});
+    let mut out = json!({"status": status, "body": String::from_utf8_lossy(&bytes)});
+    if let Some(l) = location { out["location"] = json!(l); }
     if cacheable && status == 200 {
         if let Ok(mut c) = cache().lock() {
             if c.len() >= CACHE_MAX { c.retain(|_, (t, _)| t.elapsed().as_millis() < CACHE_MS); if c.len() >= CACHE_MAX { c.clear(); } }

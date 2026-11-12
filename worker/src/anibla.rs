@@ -207,6 +207,11 @@ async fn http_via(base: &str, token: &str, url: &str, method: Method, body: Opti
         let why = v["message"].as_str().map(|m| m.to_string()).unwrap_or_else(|| text.chars().take(120).collect());
         return Err(format!("o'tkazgich (HTTP {}): {why}", r.status_code()));
     }
+    // UZ: Ample yo'naltirish ruxsat etilgan hostdan TASHQARIGA chiqarsa (masalan video serveri/CDN), Worker uni o'zi to'g'ridan-to'g'ri oladi.
+    // EN: when a redirect leaves the allow-list (e.g. a video/CDN host), the Worker follows it directly.
+    if let Some(loc) = v["location"].as_str() {
+        return Box::pin(http(loc, Method::Get, None, None)).await;
+    }
     Ok((v["status"].as_u64().unwrap_or(0) as u16, v["body"].as_str().unwrap_or("").to_string()))
 }
 
