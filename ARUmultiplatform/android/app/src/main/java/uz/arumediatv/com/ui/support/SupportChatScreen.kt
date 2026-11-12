@@ -234,13 +234,14 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
         lifecycle.addObserver(ob)
         onDispose { lifecycle.removeObserver(ob); store.close(); VoicePlayer.stop() }
     }
-    LaunchedEffect(items.size) { if (items.isNotEmpty() && !searching) listState.scrollToItem(items.lastIndex + 1) }
+    // UZ: ro'yxat `reverseLayout` bilan (eng yangi xabar pastda, indeks 0): yangi xabar kelganda qo'lda `scrollToItem` KERAK EMAS — avval u o'lchov tugamasdan surib, oldingi xabar pufagining chizilmay qolishiga olib kelardi.
+    // EN: the list uses `reverseLayout` (newest at the bottom, index 0), so no manual `scrollToItem` after an update (it raced the layout and left the previous bubble undrawn).
 
     fun goTo(id: String) {
         val i = items.indexOfFirst { it.id == id }
         if (i < 0) { toast("Asl xabar topilmadi"); return }
         scope.launch {
-            listState.animateScrollToItem(i, scrollOffset = -200)
+            listState.animateScrollToItem(items.lastIndex - i + 1, scrollOffset = -200)
             flash = id
             delay(1200)
             if (flash == id) flash = null
@@ -416,17 +417,24 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                 when {
                     loading && items.isEmpty() -> LoadingBox()
                     items.isEmpty() && upProgress == null -> EmptyState(AruIcons.SupportAgent, error ?: if (adminSide) "Bu odam hali yozmagan" else "Savolingiz bormi? Yozing — admin javob beradi.")
-                    else -> LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 10.dp)) {
-                        itemsIndexed(items, key = { _, m -> m.id }) { i, m ->
+                    else -> LazyColumn(Modifier.fillMaxSize(), state = listState, reverseLayout = true, contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 14.dp, bottom = 10.dp)) {
+                        // Indeks 0 — eng pastdagi element: yuklanayotgan fayl pufagi.
+                        item(key = "up") {
+                            upProgress?.let { p -> UploadingBubble(upLabel, p) }
+                        }
+                        itemsIndexed(items.asReversed(), key = { _, m -> m.id }) { di, m ->
+                            val i = items.lastIndex - di
                             val mine = m.fromAdmin == adminSide
                             val prev = items.getOrNull(i - 1)
                             val next = items.getOrNull(i + 1)
                             val newDay = prev == null || !sameDay(prev.createdAt, m.createdAt)
                             val lastOfGroup = next == null || next.fromAdmin != m.fromAdmin || !sameDay(next.createdAt, m.createdAt)
                             val topNear = !newDay && prev != null && prev.fromAdmin == m.fromAdmin
-                            if (newDay) DateChip(dayLabel(m.createdAt))
                             val rid = splitReply(m.body).first
-                            Box {
+                            // Bitta ildiz (Column): sana belgisi va pufak har doim yuqoridan pastga, `reverseLayout` da ham tartibi buzilmaydi.
+                            Column {
+                                if (newDay) DateChip(dayLabel(m.createdAt))
+                                Box {
                                 SwipeReply(enabled = !selecting && !m.pending, onReply = { replyTo = m; focus.clearFocus() }) {
                                     Bubble(
                                         m, mine, topNear = topNear, bottomNear = !lastOfGroup, selected = m.id in selected || flash == m.id,
@@ -449,10 +457,8 @@ fun SupportChatScreen(userId: Long?, title: String, onBack: () -> Unit, onPacks:
                                         DropdownMenuItem(text = { Text("O'chirish", color = Color(0xFFFF5A5A)) }, onClick = { menuFor = null; selected.clear(); selected.add(m.id); deleteSelected() })
                                     }
                                 }
+                                }
                             }
-                        }
-                        item(key = "up") {
-                            upProgress?.let { p -> UploadingBubble(upLabel, p) }
                         }
                     }
                 }
