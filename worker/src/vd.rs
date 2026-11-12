@@ -1480,3 +1480,134 @@ mod owner_cols_tests {
         assert!(owner_alter_sqls("epizod_db", &["q360", "q1080"], &have).is_empty());
     }
 }
+
+// ── Fayl nomi -> egasi (vd_files rejasining 2-qadami; hali hech qayerda ishlatilmaydi) ────────────────────────────────────────
+//
+// Nom formatlari (kodda va bazada tekshirilgan):
+//   `ep_<anime>_<sezon>_<qism>_<sifat>p_<vaqt>.mp4`  -> `epizod_db` qatori (anime_id, season_id, epizod_id), ref `q<sifat>`
+//   `anime_<vaqt>.<kengaytma>`                       -> `anime_db.photo_url`, ref `photo`
+//   `season_<vaqt>.<kengaytma>`                      -> `season_db.photo_url`, ref `photo`
+//   `avatar_<user>_<vaqt>.jpg`                       -> `users_db.avatar_file`, ref `avatar`
+//   `chat_<user>_<vaqt>.<kengaytma>`                 -> `chat_messages.media_file` yoki `comments_db.media_file`, ref `media`
+// Boshqalar (`sys_emojifont_*`, `selftest_*`, `orig_*`, ...) egasiz: ma'lumoti navbat jadvalida qoladi.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum OwnerArg {
+    Int(i64),
+    Text(String),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct OwnerRef {
+    pub table: &'static str,
+    /// Ustun to'plamining nomi (`OWNER_REFS` dagi ref): ustunlar `<ref>_vd_size` ...
+    pub r: String,
+    /// `WHERE` sharti (`?` belgilari bilan) va uning argumentlari.
+    pub where_sql: String,
+    pub args: Vec<OwnerArg>,
+}
+
+fn all_digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// `<bosh>_<vaqt>.<kengaytma>` ko'rinishidagi nom (bosh — `anime` / `season`).
+fn stamped(name: &str, head: &str) -> bool {
+    let Some(rest) = name.strip_prefix(head).and_then(|r| r.strip_prefix('_')) else { return false };
+    let Some((stamp, ext)) = rest.split_once('.') else { return false };
+    all_digits(stamp) && !ext.is_empty() && ext.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// Nom bo'yicha mumkin bo'lgan egalar (odatda bitta; `chat_` nomi yozishma yoki izohga tegishli bo'lishi mumkin). Egasiz nom — bo'sh ro'yxat.
+pub(crate) fn owners_of(name: &str) -> Vec<OwnerRef> {
+    if !tg_safe_name(name) {
+        return Vec::new();
+    }
+    if let Some(rest) = name.strip_prefix("ep_") {
+        let p: Vec<&str> = rest.split('.').next().unwrap_or("").split('_').collect();
+        if name.ends_with(".mp4") && p.len() == 5 && p[..3].iter().all(|x| all_digits(x)) && all_digits(p[4]) {
+            if let Some(q) = p[3].strip_suffix('p').filter(|d| all_digits(d) && matches!(*d, "360" | "480" | "720" | "1080")) {
+                let (a, s, e) = (p[0].parse::<i64>(), p[1].parse::<i64>(), p[2].parse::<i64>());
+                if let (Ok(a), Ok(s), Ok(e)) = (a, s, e) {
+                    return vec![OwnerRef {
+                        table: "epizod_db",
+                        r: format!("q{q}"),
+                        where_sql: format!("anime_id=? AND season_id=? AND epizod_id=? AND url_{q}p=?"),
+                        args: vec![OwnerArg::Int(a), OwnerArg::Int(s), OwnerArg::Int(e), OwnerArg::Text(name.to_string())],
+                    }];
+                }
+            }
+        }
+        return Vec::new();
+    }
+    if stamped(name, "anime") {
+        return vec![OwnerRef { table: "anime_db", r: "photo".into(), where_sql: "photo_url=?".into(), args: vec![OwnerArg::Text(name.to_string())] }];
+    }
+    if stamped(name, "season") {
+        return vec![OwnerRef { table: "season_db", r: "photo".into(), where_sql: "photo_url=?".into(), args: vec![OwnerArg::Text(name.to_string())] }];
+    }
+    if let Some(rest) = name.strip_prefix("avatar_") {
+        let mut it = rest.split('_');
+        if let (Some(u), Some(t), None) = (it.next(), it.next(), it.next()) {
+            if all_digits(u) && t.strip_suffix(".jpg").map_or(false, all_digits) {
+                return vec![OwnerRef { table: "users_db", r: "avatar".into(), where_sql: "avatar_file=?".into(), args: vec![OwnerArg::Text(name.to_string())] }];
+            }
+        }
+        return Vec::new();
+    }
+    if let Some(rest) = name.strip_prefix("chat_") {
+        let mut it = rest.split('_');
+        if let (Some(u), Some(t), None) = (it.next(), it.next(), it.next()) {
+            if all_digits(u) && t.split_once('.').map_or(false, |(st, ext)| all_digits(st) && !ext.is_empty()) {
+                return ["chat_messages", "comments_db"].iter().map(|tb| OwnerRef {
+                    table: tb, r: "media".into(), where_sql: "media_file=?".into(), args: vec![OwnerArg::Text(name.to_string())],
+                }).collect();
+            }
+        }
+    }
+    Vec::new()
+}
+
+#[cfg(test)]
+mod owner_of_tests {
+    use super::*;
+
+    #[test]
+    fn episode_names() {
+        let o = owners_of("ep_11_1_10_480p_1794297649616.mp4");
+        assert_eq!(o.len(), 1);
+        assert_eq!((o[0].table, o[0].r.as_str()), ("epizod_db", "q480"));
+        assert_eq!(o[0].where_sql, "anime_id=? AND season_id=? AND epizod_id=? AND url_480p=?");
+        assert_eq!(o[0].args[..3], [OwnerArg::Int(11), OwnerArg::Int(1), OwnerArg::Int(10)]);
+        assert!(owners_of("ep_11_1_10_999p_1.mp4").is_empty()); // noma'lum sifat
+        assert!(owners_of("ep_11_1_10_480p_1794297649616_f.mp4").is_empty()); // fMP4 / ortiqcha bo'lak
+        assert!(owners_of("ep_a_1_10_480p_1.mp4").is_empty());
+    }
+
+    #[test]
+    fn photo_avatar_chat() {
+        assert_eq!(owners_of("anime_1794231437322.jpg")[0].table, "anime_db");
+        assert_eq!(owners_of("season_1794287206244.png")[0].table, "season_db");
+        assert_eq!(owners_of("avatar_1_1794246570946.jpg")[0].table, "users_db");
+        assert!(owners_of("avatar_1_1794246570946.png").is_empty()); // faqat .jpg
+        let c = owners_of("chat_1_1794232801099.jpg");
+        assert_eq!(c.iter().map(|x| x.table).collect::<Vec<_>>(), vec!["chat_messages", "comments_db"]);
+        assert!(c.iter().all(|x| x.r == "media"));
+    }
+
+    #[test]
+    fn no_owner() {
+        for n in ["sys_emojifont_1794244734.bin", "selftest_1.bin", "orig_5_1_1_1.mp4", "anime_x.jpg", "", "../ep_1_1_1_480p_1.mp4"] {
+            assert!(owners_of(n).is_empty(), "{n}");
+        }
+    }
+
+    #[test]
+    fn every_owner_has_columns() {
+        // Har egaga qaytadigan (jadval, ref) juftligi OWNER_REFS da bo'lishi shart (1-qadamdagi ustunlar).
+        for n in ["ep_1_1_1_360p_1.mp4", "ep_1_1_1_720p_1.mp4", "ep_1_1_1_1080p_1.mp4", "anime_1.jpg", "season_1.jpg", "avatar_1_1.jpg", "chat_1_1.jpg"] {
+            for o in owners_of(n) {
+                assert!(OWNER_REFS.iter().any(|(t, rs)| *t == o.table && rs.contains(&o.r.as_str())), "{n} -> {} {}", o.table, o.r);
+            }
+        }
+    }
+}
