@@ -14310,7 +14310,7 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // tgstore: cron kuniga BIR marta (Toshkent 05:05 = 00:05 UTC): Supabase'ni "uyg'otadi" (bepul reja 7 kun so'rovsiz to'xtaydi) va eski
     // bo'laklarni tozalaydi. Production vazifalari (kodlash, botlar) bu nusxada ISHLAMAYDI. EN/RU: daily keep-alive + GC only.
     // tgstore (Postgres rejimi): production cron vazifalari (kodlash, botlar) ishlamaydi. EN/RU: pg mode runs no production cron jobs.
-    if env.var("DB_BACKEND").map(|v| v.to_string() == "pg").unwrap_or(false) {
+    if env.var("DB_BACKEND").map(|v| matches!(v.to_string().as_str(), "pg" | "jr")).unwrap_or(false) {
         // UZ: har daqiqada Ample'ga yengil so'rov: server 60 soniya bo'sh tursa uxlab qoladi va birinchi foydalanuvchi uyg'onishni kutadi. Og'ir ishlar har 5 daqiqada.
         // EN/RU: a light ping every minute keeps Ample awake (no cold-start wait); heavy jobs only every 5th minute.
         let _ = circle::usage(&env).await;
@@ -14324,6 +14324,9 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
             let _ = turso_exec_pg(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
                 vec![TursoArg::text("__lat_cron"), TursoArg::text(&json!({"ms": ms, "at": now_ms()}).to_string())]).await;
         }
+        // UZ: jurnal-baza (`jr`) rejimida nusxalash va arxivlash Ample serverining o'zida (`pg-gateway/jr`): Worker faqat uyg'otadi va kechikishni o'lchaydi.
+        // EN/RU: in `jr` mode replication/archiving run on the Ample server; the Worker only pings and samples latency.
+        if env.var("DB_BACKEND").map(|v| v.to_string() == "jr").unwrap_or(false) { return; }
         // UZ: doira tizimi (arxivlash/tiklash) endi Ample serverining o'zida ishlaydi (`pg-gateway/archive.mjs`); Worker faqat uyg'otadi. Ikki marta arxivlanmasin.
         // EN/RU: the circle system now runs on the Ample server itself; the Worker only keeps it awake (no double archiving).
         // UZ: katalog nusxasi (Telegram) yangilanadi, eski bo'laklar tozalanadi. EN/RU: refresh the catalog copy, GC old chunks.

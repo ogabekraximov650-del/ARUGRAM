@@ -72,7 +72,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export function makeTelegram({ token, channel, mock }) {
   if (mock) { // UZ: sinov uchun xotirada. EN/RU: in-memory for tests.
     const files = new Map(); let n = 1;
-    return { mock: true, files,
+    let pinned = null;
+    return { mock: true, files, async pin(mid) { pinned = mid; return true; }, async getPinned() { return pinned ? { msg_id: pinned, file_id: 'F' + (pinned - 1000) } : null; },
       async send(name, buf) { const id = n++; files.set('F' + id, buf); return { file_id: 'F' + id, msg_id: 1000 + id }; },
       async get(fid) { const b = files.get(fid); if (!b) throw new Error('mock: fayl yo\'q'); return b; },
       async del(mid) { files.delete('F' + (mid - 1000)); return true; } };
@@ -99,6 +100,11 @@ export function makeTelegram({ token, channel, mock }) {
       const r = await fetch(`https://api.telegram.org/file/bot${token}/${f.file_path}`);
       if (!r.ok) throw new Error(`telegram yuklash ${r.status}`);
       return Buffer.from(await r.arrayBuffer());
+    },
+    async pin(mid) { try { await call('pinChatMessage', () => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: channel, message_id: mid, disable_notification: true }) })); return true; } catch { return false; } },
+    async getPinned() {
+      const c = await call('getChat', () => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: channel }) }));
+      const m = c.pinned_message; return m && m.document ? { msg_id: m.message_id, file_id: m.document.file_id } : null;
     },
     async del(mid) { try { await call('deleteMessage', () => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ chat_id: channel, message_id: mid }) })); return true; } catch { return false; } },
   };
