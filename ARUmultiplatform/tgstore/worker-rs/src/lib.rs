@@ -14314,6 +14314,9 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
         // UZ: har daqiqada Ample'ga yengil so'rov: server 60 soniya bo'sh tursa uxlab qoladi va birinchi foydalanuvchi uyg'onishni kutadi. Og'ir ishlar har 5 daqiqada.
         // EN/RU: a light ping every minute keeps Ample awake (no cold-start wait); heavy jobs only every 5th minute.
         let _ = circle::usage(&env).await;
+        // UZ: jr rejimida Worker bazaga HECH NARSA YOZMAYDI (faqat uyg'otadi): bo'sh turganda jurnal papkasi o'zgarmaydi va Telegram'ga hech narsa yuklanmaydi.
+        // EN/RU: in `jr` mode the cron writes nothing, so an idle system leaves the journal folder unchanged and uploads nothing.
+        if env.var("DB_BACKEND").map(|v| v.to_string() == "jr").unwrap_or(false) { return; }
         // UZ: tuzilma yozuvi bo'lsa nusxa darhol (har daqiqa tekshiruvda) yangilanadi, aks holda har 5 daqiqada. EN/RU: urgent refresh on structural writes.
         let urgent = snap::urgent(&env).await;
         if (ev.schedule() / 60_000.0) as i64 % 5 != 0 && !urgent { return; }
