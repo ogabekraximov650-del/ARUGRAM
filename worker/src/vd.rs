@@ -232,17 +232,7 @@ pub(crate) async fn cron(env: &Env) {
             let _ = kick_wf(env, MIG_WORKFLOW).await;
         }
     }
-    // Egasi keyin paydo bo'lgan tayyor fayllar (yozishma rasmi xabardan oldin yuklanadi): navbatdagi `ready` qatorlari egasiga ko'chiriladi (har 10 daqiqada, 20 tagacha).
-    if !marker_has("attach").await {
-        marker_set("attach", 9 * 60).await;
-        if ensure(env).await.is_ok() {
-            let names: Vec<String> = turso_exec(env, "SELECT name FROM vd_queue WHERE state='ready' ORDER BY created LIMIT 20", vec![]).await.ok()
-                .map(|r| rows_of(&r).iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
-            for n in names {
-                let _ = try_attach(env, &n).await;
-            }
-        }
-    }
+    attach_sweep(env).await;
     // Tozalash (bazaga bitta so'rov) 6 soatlik davr bilan bir xil.
     if !marker_has("clean").await {
         marker_set("clean", 6 * 3600).await;
@@ -978,6 +968,24 @@ async fn try_attach(env: &Env, name: &str) -> bool {
     saved
 }
 
+
+/// Egasi keyin paydo bo'lgan tayyor fayllar (yozishma rasmi xabardan oldin yuklanadi, anime/bo'lim rasmi saqlangach egasi yangilanadi):
+/// navbatdagi `ready` qatorlari egasiga ko'chiriladi (har 9 daqiqada bir marta, 20 tagacha). Cron va foydalanuvchi so'rovlaridan chaqiriladi.
+pub(crate) async fn attach_sweep(env: &Env) {
+    if marker_has("attach").await {
+        return;
+    }
+    marker_set("attach", 9 * 60).await;
+    if ensure(env).await.is_err() {
+        return;
+    }
+    let names: Vec<String> = turso_exec(env, "SELECT name FROM vd_queue WHERE state='ready' ORDER BY created LIMIT 20", vec![]).await.ok()
+        .map(|r| rows_of(&r).iter().filter_map(|x| x["name"].as_str().map(String::from)).collect()).unwrap_or_default();
+    for n in names {
+        let _ = try_attach(env, &n).await;
+    }
+}
+
 /// Bitta fayl ma'lumoti (`state/size/chunks/key/chunk_ids`) yoki `None`.
 pub(crate) async fn meta_one(env: &Env, name: &str) -> Option<Value> {
     meta_many(env, &[name.to_string()]).await.ok()?.remove(name)
@@ -1025,6 +1033,7 @@ pub(crate) async fn info_for(env: &Env, me: i64, admin: bool, body: &Value) -> R
         return ok_nostore(json!({"files": {}}));
     }
     let m = meta_many(env, &names).await?;
+    attach_sweep(env).await;
     let files: serde_json::Map<String, Value> = m.iter().map(|(k, v)| (k.clone(), client_view(v))).collect();
     ok_nostore(json!({"files": files}))
 }
