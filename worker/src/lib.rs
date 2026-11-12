@@ -1492,6 +1492,24 @@ async fn init_db(env: &Env) -> bool {
         }
         config_put(env, "mig_origin_key", "1").await;
     }
+    // Video ombori (`vd`): fayl ma'lumoti (hajm, bo'laklar soni, kalit, Telegram `file_id` va xabar raqamlari) egasining jadvalida turadi
+    // (1-qadam: faqat ustunlar qo'shiladi, hali hech narsa yozilmaydi/o'qilmaydi). Har ustun to'plami: `<ref>_vd_{size,chunks,key,ids,msgs}`.
+    // Mavjud ustunlar qayta qo'shilmaydi (avval `pragma_table_info` o'qiladi), shu sabab qayta urinish xavfsiz.
+    if ok && config_get(env, "mig_vd_owner_cols").await.is_none() {
+        let mut all_ok = true;
+        for (table, refs) in vd::OWNER_REFS {
+            let have: Vec<String> = match turso_exec(env, &format!("SELECT name FROM pragma_table_info('{table}')"), vec![]).await {
+                Ok(r) => rows_of(&r).iter().filter_map(|x| x["name"].as_str().map(String::from)).collect(),
+                Err(_) => { all_ok = false; continue }
+            };
+            if have.is_empty() { all_ok = false; continue }
+            let sqls = vd::owner_alter_sqls(table, refs, &have);
+            if sqls.is_empty() { continue }
+            let stmts: Vec<(&str, Vec<TursoArg>)> = sqls.iter().map(|q| (q.as_str(), vec![])).collect();
+            if turso_batch(env, &stmts).await.is_err() { all_ok = false }
+        }
+        if all_ok { config_put(env, "mig_vd_owner_cols", "1").await; }
+    }
     // Kodlash jarayoni (qaysi sifat, necha foiz) — botning "Holat" xabari uchun.
     if ok && config_get(env, "mig_encode_progress").await.is_none() {
         let _ = turso_exec(env,

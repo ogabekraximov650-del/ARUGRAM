@@ -1413,3 +1413,70 @@ mod tests {
         assert!(!is_actions_path("/api/vd/up/init"));
     }
 }
+
+// ── Egalar jadvallaridagi fayl ma'lumoti ustunlari (vd_files ni olib tashlash rejasining 1-qadami) ─────────────────────────────
+//
+// Nomga havola qiluvchi har ustun (`ref`) uchun beshta ustun qo'shiladi: `<ref>_vd_size`, `_chunks`, `_key`, `_ids` (Telegram `file_id` lar,
+// vergul bilan), `_msgs` (kanal xabar raqamlari). `ref` — jadval ichida noyob qisqa nom. Hozircha ular bo'sh: keyingi qadamlarda `ready`
+// bo'lgan fayl ma'lumoti shu yerga yoziladi.
+/// (jadval, ref nomlari). `epizod_db` da har sifat alohida ref (hajm/kalit eski ustunlari avvaldan bor, lekin yangi kalit shu yerda).
+pub(crate) const OWNER_REFS: [(&str, &[&str]); 6] = [
+    ("anime_db", &["photo"]),
+    ("season_db", &["photo"]),
+    ("epizod_db", &["q360", "q480", "q720", "q1080"]),
+    ("users_db", &["avatar"]),
+    ("comments_db", &["media"]),
+    ("chat_messages", &["media"]),
+];
+
+/// Egalar ustunlari: (qo'shimcha, SQL turi va standart qiymati).
+const OWNER_COLS: [(&str, &str); 5] = [
+    ("size", "INTEGER DEFAULT 0"),
+    ("chunks", "INTEGER DEFAULT 0"),
+    ("key", "TEXT DEFAULT ''"),
+    ("ids", "TEXT DEFAULT ''"),
+    ("msgs", "TEXT DEFAULT ''"),
+];
+
+pub(crate) fn owner_col(r: &str, suffix: &str) -> String {
+    format!("{r}_vd_{suffix}")
+}
+
+/// Jadvalda hali yo'q ustunlar uchun `ALTER TABLE` buyruqlari (`have` — jadvalning hozirgi ustunlari).
+pub(crate) fn owner_alter_sqls(table: &str, refs: &[&str], have: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for r in refs {
+        for (suffix, ty) in OWNER_COLS {
+            let col = owner_col(r, suffix);
+            if !have.iter().any(|h| *h == col) {
+                out.push(format!("ALTER TABLE {table} ADD COLUMN {col} {ty}"));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod owner_cols_tests {
+    use super::*;
+
+    #[test]
+    fn adds_only_missing_columns() {
+        let have: Vec<String> = ["id", "photo_vd_size", "photo_vd_chunks"].iter().map(|s| s.to_string()).collect();
+        let q = owner_alter_sqls("anime_db", &["photo"], &have);
+        assert_eq!(q, vec![
+            "ALTER TABLE anime_db ADD COLUMN photo_vd_key TEXT DEFAULT ''".to_string(),
+            "ALTER TABLE anime_db ADD COLUMN photo_vd_ids TEXT DEFAULT ''".to_string(),
+            "ALTER TABLE anime_db ADD COLUMN photo_vd_msgs TEXT DEFAULT ''".to_string(),
+        ]);
+    }
+
+    #[test]
+    fn full_set_for_fresh_table_and_all_present() {
+        let q = owner_alter_sqls("epizod_db", &["q360", "q1080"], &[]);
+        assert_eq!(q.len(), 10);
+        assert!(q.iter().any(|s| s.contains("q1080_vd_msgs")));
+        let have: Vec<String> = q.iter().map(|s| s.split_whitespace().nth(5).unwrap().to_string()).collect();
+        assert!(owner_alter_sqls("epizod_db", &["q360", "q1080"], &have).is_empty());
+    }
+}
