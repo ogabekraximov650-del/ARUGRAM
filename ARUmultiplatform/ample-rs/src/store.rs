@@ -54,6 +54,11 @@ fn is_write(sql: &str) -> bool {
     ["insert", "update", "delete", "replace", "create", "drop", "alter", "vacuum", "reindex"].iter().any(|k| l.starts_with(k) && !l[k.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_'))
 }
 
+fn is_ddl(sql: &str) -> bool {
+    let l = sql.trim_start().to_lowercase();
+    ["create", "drop", "alter", "reindex"].iter().any(|k| l.starts_with(k) && !l[k.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_'))
+}
+
 pub fn to_value(a: &J) -> Result<Value> {
     let t = a["type"].as_str().unwrap_or("null");
     let v = &a["value"];
@@ -141,9 +146,26 @@ impl Store {
     }
 
     // ── so'rovlar ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    /// SQLite sxema versiyasi (DDL o'zgarganda oshadi).
+    async fn schema_version(&self) -> i64 {
+        match self.conn.query("pragma schema_version", ()).await {
+            Ok(mut rows) => match rows.next().await { Ok(Some(r)) => r.get::<i64>(0).unwrap_or(0), _ => 0 },
+            Err(_) => 0,
+        }
+    }
+
+    /// Buyruq natijasida ma'lumot yoki sxema haqiqatan o'zgardimi.
+    async fn changed(&self, tc0: u64, sv0: i64, ddl: bool) -> bool {
+        self.conn.total_changes() != tc0 || (ddl && self.schema_version().await != sv0)
+    }
+
     async fn one(&self, st: &Stmt) -> Result<(bool, J)> {
         let params: Vec<Value> = st.args.iter().map(to_value).collect::<Result<_>>()?;
         let write = is_write(&st.sql);
+        // UZ: jurnalga FAQAT haqiqatan o'zgargan buyruq yoziladi (qator o'zgargan yoki sxema o'zgargan): bo'sh UPDATE va allaqachon bor `CREATE ... IF NOT EXISTS`
+        // jurnal papkasini "o'zgargan" qilib, Telegram'ga qayta yuklanishiga sabab bo'lmasin. EN: journal only statements that really changed data or schema.
+        let ddl = write && is_ddl(&st.sql);
+        let (tc0, sv0) = if write { (self.conn.total_changes(), if ddl { self.schema_version().await } else { 0 }) } else { (0, 0) };
         let stmt = self.conn.prepare(&st.sql).await?;
         if stmt.column_count() > 0 {
             let cols: Vec<J> = stmt.columns().iter().map(|c| json!({"name": c.name()})).collect();
@@ -154,10 +176,12 @@ impl Store {
                 out.push(J::Array((0..n).map(|i| r.get_value(i as i32).map(|v| cell(&v)).unwrap_or(json!({"type": "null"}))).collect()));
             }
             let cnt = out.len();
-            Ok((write, json!({"cols": cols, "rows": out, "affected_row_count": cnt, "rows_read": cnt, "rows_written": if write { cnt } else { 0 }})))
+            let effective = write && self.changed(tc0, sv0, ddl).await;
+            Ok((effective, json!({"cols": cols, "rows": out, "affected_row_count": cnt, "rows_read": cnt, "rows_written": if write { cnt } else { 0 }})))
         } else {
             let changes = stmt.execute(params).await?;
-            Ok((write, json!({"cols": [], "rows": [], "affected_row_count": changes, "rows_read": 0, "rows_written": if write { changes } else { 0 }, "last_insert_rowid": self.conn.last_insert_rowid().to_string()})))
+            let effective = write && self.changed(tc0, sv0, ddl).await;
+            Ok((effective, json!({"cols": [], "rows": [], "affected_row_count": changes, "rows_read": 0, "rows_written": if write { changes } else { 0 }, "last_insert_rowid": self.conn.last_insert_rowid().to_string()})))
         }
     }
 
