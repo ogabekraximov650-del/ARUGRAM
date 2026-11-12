@@ -357,7 +357,12 @@ async fn get_raw(env: &Env, path: &str, auth: bool) -> std::result::Result<Value
             Err(_) if matches!(code, 502 | 503 | 504) => {
                 return Err(format!("sayt vaqtincha ishlamayapti (HTTP {code}) — birozdan keyin qayta urinib ko'ring"));
             }
-            Err(_) => return Err(format!("sayt javobi tushunarsiz (HTTP {code})")),
+            Err(_) => {
+                // UZ: tashxis uchun javob boshini ko'rsatamiz (masalan Cloudflare "Just a moment" / "blocked").
+                // EN: show the start of the body for diagnosis (e.g. a Cloudflare challenge page).
+                let head: String = text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(90).collect();
+                return Err(format!("sayt javobi tushunarsiz (HTTP {code}): {head}"));
+            }
         };
         if code >= 400 || v["success"].as_bool() == Some(false) {
             return Err(format!("sayt: {} (HTTP {code})", v["message"].as_str().unwrap_or("xato")));
