@@ -1,6 +1,5 @@
 plugins {
     alias(libs.plugins.android.application)
-    alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
@@ -15,7 +14,7 @@ val onlyAbi = (project.findProperty("onlyAbi") as String?)?.takeIf { it.isNotBla
 
 android {
     namespace = "uz.arumediatv.com"
-    compileSdk = 36
+    compileSdk = 37
 
     defaultConfig {
         applicationId = "uz.arumediatv.com"
@@ -101,8 +100,8 @@ dependencies {
     // Compose kutubxonalarining tayyor "baseline profile"larini o'rnatadi: birinchi ochilish va aylantirish qotmaydi.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
     // Video: Media3 ExoPlayer (Range so'rovlar Rust mahalliy serveriga yoki worker keshiga ketadi).
-    implementation("androidx.media3:media3-exoplayer:1.5.1")
-    implementation("androidx.media3:media3-ui:1.5.1")
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
     // QR kod (Telegram QR orqali kirish)
     implementation("com.google.zxing:core:3.5.4")
     // Telegram .tgs (Lottie) stikerlarini bir marta animatsiyali WebP'ga aylantirish uchun (faqat chizuvchi sifatida)
