@@ -8,7 +8,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 # Cloudflare Workers Rust SDK — worker-build talab qiladigan versiya
-worker = "0.8.5"
+worker = "0.9.0"
 # Oqim ichida (sanovchi quvurda) fon vazifasini boshlash uchun
 wasm-bindgen-futures = "0.4"
 # `vd::warm`: joriy bo'lak oqayotganda keyingisining ulanishini parallel ochish (`join`).
@@ -22,8 +22,8 @@ serde_json = "1"
 # yozish (SHA-256 ni o'zi) bitta xato bilan butun tekshiruvni
 # ma'nosiz qilib qo'yadi. Ikkala paket ham sof Rust, `no_std` ga
 # mos va WASM ga muammosiz yig'iladi; hajmga qo'shadigani ~10 KB.
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 # AES-128-CTR — e'lon muqovasini ochish uchun (`announce.rs`); versiyalar `rust/` bilan bir xil.
 aes = "0.9"
 ctr = "0.10"

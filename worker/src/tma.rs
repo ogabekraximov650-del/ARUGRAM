@@ -38,13 +38,13 @@ const TOKEN_SECS: i64 = 12 * 3600;
 const INIT_MAX_AGE_SECS: i64 = 24 * 3600;
 
 fn mac_hex(key: &[u8], msg: &[u8]) -> Option<String> {
-    let mut h = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key).ok()?;
+    let mut h = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(key).ok()?;
     hmac::Mac::update(&mut h, msg);
     Some(hex_of(&hmac::Mac::finalize(h).into_bytes()))
 }
 
 fn mac_raw(key: &[u8], msg: &[u8]) -> Option<Vec<u8>> {
-    let mut h = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key).ok()?;
+    let mut h = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(key).ok()?;
     hmac::Mac::update(&mut h, msg);
     Some(hmac::Mac::finalize(h).into_bytes().to_vec())
 }

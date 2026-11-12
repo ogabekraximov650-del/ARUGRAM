@@ -33,7 +33,7 @@ fn hex(b: &[u8]) -> String {
 }
 
 fn hmac256(key: &[u8], data: &str) -> Vec<u8> {
-    let mut m = <Hmac<Sha256> as Mac>::new_from_slice(key).expect("hmac kaliti");
+    let mut m = <Hmac<Sha256> as hmac::KeyInit>::new_from_slice(key).expect("hmac kaliti");
     m.update(data.as_bytes());
     m.finalize().into_bytes().to_vec()
 }
@@ -685,6 +685,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
 
 #[cfg(test)]
 mod tests {
+    /// RFC 4231, 1-sinov: kutubxona versiyasi o'zgarganda HMAC-SHA256 natijasi o'zgarmasligi shart (R2 imzosi, Telegram initData, sessiya imzolari).
+    /// EN: RFC 4231 test case 1 — HMAC-SHA256 output must not change across crate upgrades.
+    #[test]
+    fn hmac256_matches_rfc4231() {
+        let out = hmac256(&[0x0b; 20], "Hi There");
+        assert_eq!(hex(&out), "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
+    }
+
     use super::*;
 
     #[test]

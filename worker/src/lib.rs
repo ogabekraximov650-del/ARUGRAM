@@ -6440,7 +6440,7 @@ fn webhook_sig_ok(secret: &str, ts: &str, delivery: &str, sig_header: &str, raw:
     let sha_key: [u8; 32] = <sha2::Sha256 as sha2::Digest>::digest(secret.as_bytes()).into();
     let mut expected: Vec<String> = Vec::with_capacity(2);
     for key in [secret.as_bytes(), &sha_key[..]] {
-        let Ok(mut mac) = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(key) else {
+        let Ok(mut mac) = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(key) else {
             return false;
         };
         hmac::Mac::update(&mut mac, msg.as_bytes());
@@ -10596,7 +10596,7 @@ fn verify_app_sig(secret: &str, got: &str, method: &str, path: &str) -> bool {
         return false;
     }
 
-    let Ok(mut h) = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(secret.as_bytes())
+    let Ok(mut h) = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(secret.as_bytes())
     else {
         return false;
     };
@@ -10637,7 +10637,7 @@ fn verify_play_token(secret: &str, token: &str, path: &str) -> bool {
     if now_ms() / 1000 > exp_num {
         return false;
     }
-    let Ok(mut h) = <hmac::Hmac<sha2::Sha256> as hmac::Mac>::new_from_slice(secret.as_bytes())
+    let Ok(mut h) = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(secret.as_bytes())
     else {
         return false;
     };
