@@ -5,9 +5,9 @@ edition = "2021"
 description = "UZ: Ample jurnal-baza serveri (libSQL + db_N_vV jurnal papkalari + Telegram nusxa). EN: Ample journal-store server (libSQL + db_N_vV journal folders + Telegram copy). RU: сервер журнальной базы Ample."
 
 [dependencies]
-libsql = { version = "0.9", default-features = false, features = ["core"] }
+libsql = { version = "0.10", default-features = false, features = ["core"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "fs"] }
-axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "json"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "json"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "multipart", "json"] }
