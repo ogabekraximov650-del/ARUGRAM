@@ -270,11 +270,16 @@ class AuthService(
         secure.putString(KEY_USER, u.toJson().toString())
     }
 
+    /** UZ: sessiya tugaganda (chiqish yoki server 401) — foydalanuvchiga bog'liq mahalliy nusxalar (chat, kutubxona...) o'chiriladi. EN/RU: called when the session ends so user-bound caches can be wiped. */
+    var onSessionEnded: (() -> Unit)? = null
+
     private fun clear() {
+        val had = sessionToken != null
         sessionToken = null
         _user.value = null
         secure.remove(KEY_SESSION)
         secure.remove(KEY_USER)
+        if (had) onSessionEnded?.invoke()
     }
 
     private fun deviceInfo(): JSONObject = JSONObject()

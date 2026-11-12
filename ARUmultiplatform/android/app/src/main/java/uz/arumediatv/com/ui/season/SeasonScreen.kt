@@ -71,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.Episode
+import uz.arumediatv.com.data.HistoryItem
 import uz.arumediatv.com.data.PlaySource
 import uz.arumediatv.com.data.Season
 import uz.arumediatv.com.data.SeasonInfo
@@ -168,6 +169,17 @@ fun SeasonScreen(
         if (stamp == d.lastStamp) return
         d.lastStamp = stamp
         AppServices.sync.putHistory(d.animeId, d.seasonId, d.epId, d.url, d.quality, d.positionMs, d.durationMs, d.watchedMs, d.newView)
+        // Ro'yxatda (Kutubxona > Tarix) darhol ko'rinadi — server paketini kutmaydi.
+        sorted.firstOrNull { it.id == d.epId }?.let { ep ->
+            AppServices.library.applyHistory(
+                HistoryItem(
+                    animeId = d.animeId, seasonId = d.seasonId, episodeNo = ep.number, sectionNo = season.sectionNo,
+                    title = season.name, photoUrl = season.photoUrl, positionMs = d.positionMs, durationMs = d.durationMs,
+                    views = if (d.newView) 1 else 0, watchedMs = d.watchedMs, quality = d.quality, epizodId = d.epId,
+                    updatedAt = System.currentTimeMillis(), videoUrl = d.url,
+                ),
+            )
+        }
         d.newView = false
     }
 

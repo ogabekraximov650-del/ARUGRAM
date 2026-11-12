@@ -7341,3 +7341,15 @@ Ilova: paketlab yuborish (`SyncQueue`) 5 daqiqaga o'zgartirildi; yuborilmagan ta
 - **Tezlik (Ample serverida, 1 vCPU):** o'qish ~5800 so'rov/s (p50 3 ms), yozish ~3000/s (p50 6-14 ms) — Node variantidan ~3 baravar tez, eski PostgreSQL'dan 25+ baravar. Worker -> Ample ~100 ms: masofa (Ample faqat `sjc` mintaqasida, deploy'da mintaqa tanlab bo'lmaydi).
 - **Production:** `worker-build` 0.8.7 ga qotirildi (`worker/wrangler.toml`, `deploy-worker.yml`): 0.9.0 `worker` 0.8 ni qabul qilmaydi.
 - **Ochiq:** `ADMIN_KEY` (Ample'da, operatsiya uchun) — keyin almashtirish; mintaqa (Yevropa) Ample'da tanlanadigan bo'lganda ko'chirish; ikkinchi nusxa (replica) — pullik reja bilan.
+
+## Asosiy tizimni Ample'ga o'tkazish (2026-11-12)
+
+Nima: asosiy baza (Turso) nusxasi (`arumediatv.db`, 2,8 MB, 41 jadval) Ample'dagi jurnal-bazaga (`tgstore-jr`, Rust + libSQL) ko'chirildi: 344 qator, 38 jadval, qator sonlari solishtirib tekshirildi. Ko'chirilmadi (foydalanuvchi talabi): `vd_files`, `vd_mig`, `tg_files` (fayl yozuvlari) va support chat fayllari, profil/anime/bo'lim rasmlari, epizod videolari fayllari. `r2_files` ga `upload_id`, `dest` ustunlari qo'shildi.
+
+Worker (`worker/src/lib.rs`): `db_endpoint()` — `AMPLE_URL`/`AMPLE_TOKEN` berilsa hamma so'rov Ample'ga ketadi, FAQAT `post_jobs` va `anibla_jobs` ("Post kodlash", "Anibla yuklash" navbatlari) Turso'da qoladi (foydalanuvchi talabi). Berilmasa hammasi avvalgidek Turso'da. Cron endi har daqiqada: Ample 60 soniya bo'sh tursa uxlaydi, shuning uchun har daqiqada `/usage` so'rovi; og'ir ishlar (kodlash, botlar) avvalgidek har 10-daqiqada. `deploy-worker.yml` ikki yangi secret'ni qo'yadi.
+
+Yoqish (qo'lda): GitHub Secrets'ga `AMPLE_URL` (= https://5fyhcmq3jq3j.ample.run) va `AMPLE_TOKEN` (= STORE_KEY) qo'shiladi, keyin worker qayta deploy qilinadi. Yoqishdan oldin Turso'dan YANGI nusxa olib qayta ko'chirish kerak (hozirgi nusxa eskirishi mumkin). Boshqa Turso'ga ulangan narsalar (`ARUmultiplatform/drive`, aniraxuzbot, albot, ci/*.py) tegilmadi.
+
+Android (`ARUmultiplatform/android`): tgstore'dagi o'zgarishlar ko'chirildi — chat xabari yo'qolmasligi (`Support.kt`), sessiya tugaganda kesh tozalanishi (`AuthService`, `AppServices`), yuborilmagan sevimli/tarix o'zgarishlari darhol ko'rinishi (`LibraryStore`, `SyncQueue`, `SeasonScreen`). Yuborish vaqtlari production'dagidek (1/2 daqiqa).
+
+Ochiq: `vd_files` jadvalini butunlay olib tashlash (fayl ma'lumotlarini har bir jadvalning o'zida saqlash) — `vd.rs` va ilovaning video ombori qismini qayta yozishni talab qiladi, hali qilinmadi.

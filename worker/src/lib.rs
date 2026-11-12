@@ -539,9 +539,22 @@ impl DurableObject for MarkHub {
     }
 }
 
+/// UZ: qaysi bazaga boriladi. Faqat "Post kodlash" va "Anibla yuklash" navbatlari (`post_jobs`, `anibla_jobs`) Turso'da qoladi; qolgan hamma narsa
+/// Ample'da (`AMPLE_URL`/`AMPLE_TOKEN` berilgan bo'lsa). Berilmagan bo'lsa hammasi avvalgidek Turso'da.
+/// EN: picks the database. Only the post-encode and anibla job queues stay on Turso; everything else goes to Ample when AMPLE_URL/AMPLE_TOKEN are set (else all Turso).
+/// RU: vybor bazy: ocheredi post/anibla ostayutsya na Turso, ostalnoe — na Ample (esli zadany AMPLE_*).
+fn db_endpoint(env: &Env, sqls: &[&str]) -> Result<(String, String)> {
+    let turso_only = sqls.iter().any(|s| { let l = s.to_ascii_lowercase(); l.contains("post_jobs") || l.contains("anibla_jobs") });
+    if !turso_only {
+        let u = env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default();
+        let t = env.secret("AMPLE_TOKEN").map(|v| v.to_string()).unwrap_or_default();
+        if !u.is_empty() && !t.is_empty() { return Ok((u.trim_end_matches('/').to_string(), t)); }
+    }
+    Ok((env.secret("TURSO_URL")?.to_string(), env.secret("TURSO_TOKEN")?.to_string()))
+}
+
 async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
-    let url = env.secret("TURSO_URL")?.to_string();
-    let token = env.secret("TURSO_TOKEN")?.to_string();
+    let (url, token) = db_endpoint(env, &[sql])?;
     let body = json!({
         "requests": [
             {"type": "execute", "stmt": {"sql": sql, "args": args}},
@@ -570,8 +583,7 @@ async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> 
 }
 
 async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
-    let url = env.secret("TURSO_URL")?.to_string();
-    let token = env.secret("TURSO_TOKEN")?.to_string();
+    let (url, token) = db_endpoint(env, &stmts.iter().map(|(s, _)| *s).collect::<Vec<&str>>())?;
     let mut reqs: Vec<Value> = stmts.iter().map(|(sql, args)| {
         json!({"type": "execute", "stmt": {"sql": sql, "args": args}})
     }).collect();
@@ -620,8 +632,7 @@ async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
 /// barobar qisqartiradi. Statistika va tarix yozuvi aynan shunday
 /// ishlaydi: 7 ta buyruq — 1 ta so'rov.
 async fn turso_many(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Value>> {
-    let url = env.secret("TURSO_URL")?.to_string();
-    let token = env.secret("TURSO_TOKEN")?.to_string();
+    let (url, token) = db_endpoint(env, &stmts.iter().map(|(s, _)| *s).collect::<Vec<&str>>())?;
     let mut reqs: Vec<Value> = stmts.iter().map(|(sql, args)| {
         json!({"type": "execute", "stmt": {"sql": sql, "args": args}})
     }).collect();
@@ -14249,7 +14260,20 @@ async fn cleanup_orphan_history(env: &Env) {
 }
 
 #[event(scheduled)]
-async fn scheduled(_ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
+    // UZ: cron har daqiqada: Ample 60 soniya bo'sh tursa uxlab qoladi, shuning uchun har daqiqada yengil so'rov (uyg'otish). Og'ir ishlar avvalgidek har 10 daqiqada.
+    // EN: cron runs every minute: a light ping keeps Ample awake; the heavy jobs below still run every 10 minutes.
+    {
+        let (au, at) = (env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default(), env.secret("AMPLE_TOKEN").map(|v| v.to_string()).unwrap_or_default());
+        if !au.is_empty() && !at.is_empty() {
+            let mut h = Headers::new();
+            let _ = h.set("Authorization", &format!("Bearer {at}"));
+            if let Ok(rq) = Request::new_with_init(&format!("{}/usage", au.trim_end_matches('/')), RequestInit::new().with_method(Method::Get).with_headers(h)) {
+                let _ = Fetch::Request(rq).send().await;
+            }
+        }
+        if ((ev.schedule() / 60_000.0) as i64) % 10 != 0 { return; }
+    }
     // Kodlash navbati BIRINCHI: Cloudflare bitta chaqiruvda ~50 ta ichki so'rovga ruxsat beradi (subrequest). Quyidagi bot/navbatlar ularni
     // ishlatib bo'lgach 720p/1080p workflow'lari ishga tushmay qolardi (har 10 daqiqada bitta-ikkita sifat, "oxirgi sifat kech boshlanadi").
     let msg = encode_kick_full(&env, true).await;

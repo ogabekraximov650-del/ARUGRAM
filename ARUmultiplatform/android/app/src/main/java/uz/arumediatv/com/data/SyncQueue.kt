@@ -25,7 +25,7 @@ enum class SyncResult { DONE, OFFLINE, NO_ACCOUNT }
  * 1. Hamma yozuv avval telefonda (ekranda o'zgarish darhol ko'rinadi), serverga keyin bitta paket bo'lib ketadi (`POST /api/sync`).
  * 2. Navbat siqiladi: bir xil `key` — eskisi almashtiriladi (50 marta bosilgan tugma navbatda 1 ta qator).
  * 3. Yuborish: yangi yozuvdan 1 daqiqa keyin (shu orada kelganlar ham shu paketga tushadi), ilova fonga ketganda — darhol;
- *    ikki paket orasida kamida 2 daqiqa. Navbat diskda shifrlangan holda turadi — ilova yopilsa ham yo'qolmaydi.
+ *    ikki paket orasida kamida 2 daqiqa. Yuborilmagan o'zgarishlar (tarix, sevimli, baho) ro'yxatlarda DARHOL ko'rinadi (`pendingHistory`, `pendingFavorites`). Navbat diskda shifrlangan holda turadi — ilova yopilsa ham yo'qolmaydi.
  * 4. Har paketda bir martalik `batch_id`: javob yo'lda yo'qolib qayta yuborilsa, worker ikki marta sanamaydi.
  */
 class SyncQueue(
@@ -66,6 +66,17 @@ class SyncQueue(
         rows.filter { it.optString("kind") == Kind.FAVORITE }.associate {
             val d = it.optJSONObject("data")
             "${d?.optLong("anime_id")}:${d?.optLong("season_id")}" to (d?.optBoolean("on") == true)
+        }
+    }
+
+    /** Hali yuborilmagan tomosha tarixi yozuvlari (`deleted` — tarixdan yashirilgan). */
+    data class PendingHistory(val animeId: Long, val seasonId: Long, val epizodId: Long, val deleted: Boolean)
+
+    fun pendingHistory(): List<PendingHistory> = synchronized(rows) {
+        load()
+        rows.filter { it.optString("kind") == Kind.HISTORY }.mapNotNull {
+            val d = it.optJSONObject("data") ?: return@mapNotNull null
+            PendingHistory(d.optLong("anime_id"), d.optLong("season_id"), d.optLong("epizod_id"), d.optBoolean("deleted") || it.optString("op") == "delete")
         }
     }
 

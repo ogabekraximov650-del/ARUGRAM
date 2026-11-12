@@ -103,6 +103,9 @@ jobs:
           }
           put TURSO_URL "${{ secrets.TURSO_URL }}"
           put TURSO_TOKEN "${{ secrets.TURSO_TOKEN }}"
+          # Ample (jurnal-baza): berilsa asosiy ma'lumotlar shu yerda; "Post kodlash" va "Anibla yuklash" navbatlari Turso'da qoladi.
+          put AMPLE_URL "${{ secrets.AMPLE_URL }}"
+          put AMPLE_TOKEN "${{ secrets.AMPLE_TOKEN }}"
           # Yangi Turso bazasi: `tool/migrate/new_turso.enc` (JSON {"url","token"}, AES-256-CBC/PBKDF2, kalit — ENCODE_TOKEN)
           # bo'lsa GitHub Secret'dagi (eski) qiymatdan USTUN turadi. Ochilmasa — eski qiymat saqlanadi.
           if [ -f ../tool/migrate/new_turso.enc ]; then
