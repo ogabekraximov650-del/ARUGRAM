@@ -81,7 +81,7 @@ fn master() -> Option<[u8; 32]> {
 /// (flutter_secure_storage) saqlaydi.
 pub fn generate_master_key_hex() -> String {
     let mut key = [0u8; 32];
-    if getrandom::getrandom(&mut key).is_err() {
+    if getrandom::fill(&mut key).is_err() {
         return String::new();
     }
     hex::encode(key)
@@ -169,7 +169,7 @@ fn chunk_cipher(key: &[u8; 16]) -> Option<ring::aead::LessSafeKey> {
 pub fn encrypt_chunk(plain: &[u8], key: &[u8; 16], _iv: &[u8; 16]) -> Vec<u8> {
     let mut nonce = [0u8; CHUNK_NONCE_LEN];
     let cipher = chunk_cipher(key);
-    if getrandom::getrandom(&mut nonce).is_err() || cipher.is_none() {
+    if getrandom::fill(&mut nonce).is_err() || cipher.is_none() {
         // Juda kam uchraydigan holat: bo'sh natija — chaqiruvchi
         // bo'lakni yozmaydi va keyinroq qaytadan yuklaydi.
         return Vec::new();
@@ -224,7 +224,7 @@ pub fn seal_blob(label: &str, plain: &[u8]) -> Option<Vec<u8>> {
     let key = derive_blob_key(label)?;
     let cipher = blob_cipher(&key)?;
     let mut nonce = [0u8; 12];
-    getrandom::getrandom(&mut nonce).ok()?;
+    getrandom::fill(&mut nonce).ok()?;
     let mut out = Vec::with_capacity(12 + plain.len() + 16);
     out.extend_from_slice(&nonce);
     out.extend_from_slice(plain);

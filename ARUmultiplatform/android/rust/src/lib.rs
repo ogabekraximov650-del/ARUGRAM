@@ -160,7 +160,7 @@ pub(crate) fn sign_v2(method: &str, url_or_path: &str) -> Option<String> {
     }
     let ts = unix_now();
     let path = path_of(url_or_path);
-    let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(&app_secret()).ok()?;
+    let mut mac = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(&app_secret()).ok()?;
     mac.update(format!("{ts}.{}.{path}", method.to_uppercase()).as_bytes());
     Some(format!("v2.{ts}.{}", hex::encode(mac.finalize().into_bytes())))
 }
@@ -204,7 +204,7 @@ pub unsafe extern "C" fn app_play_token(path: *const c_char, ttl_secs: u64) -> *
         return string_to_cptr(String::new());
     }
     let exp = unix_now() + ttl_secs.clamp(60, 24 * 60 * 60);
-    let Ok(mut mac) = hmac::Hmac::<sha2::Sha256>::new_from_slice(&app_secret()) else {
+    let Ok(mut mac) = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(&app_secret()) else {
         return string_to_cptr(String::new());
     };
     mac.update(format!("play.{path}.{exp}").as_bytes());
@@ -254,7 +254,6 @@ pub unsafe extern "C" fn app_sign(
     method: *const c_char,
     path: *const c_char,
 ) -> *mut c_char {
-    use hmac::Mac;
 
     if SECRET_LEN == 0 {
         return string_to_cptr(String::new());
@@ -272,7 +271,7 @@ pub unsafe extern "C" fn app_sign(
 
     // Vaqtni Dart beradi (u so'rov yuborishdan oldin oladi), qolgani
     // `sign_v2` bilan bir xil qoida.
-    let Ok(mut mac) = hmac::Hmac::<sha2::Sha256>::new_from_slice(&app_secret()) else {
+    let Ok(mut mac) = <hmac::Hmac<sha2::Sha256> as hmac::KeyInit>::new_from_slice(&app_secret()) else {
         return string_to_cptr(String::new());
     };
     hmac::Mac::update(&mut mac, format!("{ts}.{}.{path}", method.to_uppercase()).as_bytes());

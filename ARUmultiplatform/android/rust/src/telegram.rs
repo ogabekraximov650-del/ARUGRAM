@@ -2762,7 +2762,7 @@ pub extern "C" fn rust_tg_start_bot(bot_ptr: *const c_char, param_ptr: *const c_
                 })
                 .ok_or("bot topilmadi")?;
             let mut rnd = [0u8; 8];
-            getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+            getrandom::fill(&mut rnd).map_err(|e| e.to_string())?;
             client
                 .invoke(&tl::functions::messages::StartBot {
                     bot: tl::enums::InputUser::User(tl::types::InputUser { user_id: id, access_hash: hash }),
@@ -2985,7 +2985,7 @@ async fn upload_to_channel(
     let _ = &key;
     let caption = name.clone();
     let mut rnd = [0u8; 8];
-    getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+    getrandom::fill(&mut rnd).map_err(|e| e.to_string())?;
     let random_id = i64::from_le_bytes(rnd);
     let mut req = tl::functions::messages::SendMedia {
         silent: true,
@@ -3092,7 +3092,7 @@ async fn upload_parts(
     let parts = total.div_ceil(UP_PART) as i32;
     let big = total > UP_BIG;
     let mut rnd = [0u8; 8];
-    getrandom::getrandom(&mut rnd).map_err(|e| e.to_string())?;
+    getrandom::fill(&mut rnd).map_err(|e| e.to_string())?;
     let file_id = i64::from_le_bytes(rnd);
     let next = Arc::new(AtomicU32::new(0));
     let failed = Arc::new(AtomicBool::new(false));
@@ -3280,7 +3280,7 @@ pub extern "C" fn rust_tg_upload_start(
         let mime = if mime.is_empty() { "video/mp4".to_string() } else { mime };
         // Har faylga yangi tasodifiy kalit.
         let mut key = [0u8; 16];
-        getrandom::getrandom(&mut key).map_err(|e| e.to_string())?;
+        getrandom::fill(&mut key).map_err(|e| e.to_string())?;
         if let Ok(mut s) = state.lock() {
             s.key = hex::encode(key);
         }
