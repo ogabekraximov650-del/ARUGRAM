@@ -297,7 +297,12 @@ async fn write_manifest(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<()> {
         let chunks: Vec<J> = s.chunks.iter().filter(|c| c.meta.file_id.is_some()).map(|c| serde_json::to_value(&c.meta).unwrap()).collect();
         (json!({"v": 1, "at": now_ms(), "seq": s.seq, "snapshot": s.snap, "chunks": chunks}), s.manifest_msg)
     };
-    let (_, msg) = tg.send("manifest.bin", crypto::seal(key, m.to_string().as_bytes())).await?;
+    let data = crypto::seal(key, m.to_string().as_bytes());
+    // UZ: ro'yxat bir marta pin qilinadi, keyin joyida almashtiriladi (kanalda "pin qildi" xabarlari to'planmaydi). EN/RU: pin once, then edit in place.
+    if let Some(o) = old {
+        if tg.edit(o, "manifest.bin", data.clone()).await.is_ok() { return Ok(()); }
+    }
+    let (_, msg) = tg.send("manifest.bin", data).await?;
     tg.pin(msg).await;
     if let Some(o) = old { tg.del(o).await; }
     let mut s = st.lock().await;

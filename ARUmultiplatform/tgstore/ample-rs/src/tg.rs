@@ -45,6 +45,15 @@ impl Tg {
         Err(anyhow!("telegram sendDocument: qayta urinishlar tugadi"))
     }
 
+    /// Mavjud hujjatni joyida almashtiradi (pin saqlanadi, "pin qildi" xizmat xabari chiqmaydi). EN/RU: replace a document in place (keeps the pin, no new service message).
+    pub async fn edit(&self, msg_id: i64, name: &str, data: Vec<u8>) -> Result<()> {
+        let part = reqwest::multipart::Part::bytes(data).file_name(name.to_string());
+        let media = json!({"type": "document", "media": "attach://f"}).to_string();
+        let form = reqwest::multipart::Form::new().text("chat_id", self.channel.clone()).text("message_id", msg_id.to_string()).text("media", media).part("f", part);
+        let j: Value = self.client.post(self.url("editMessageMedia")).multipart(form).send().await?.json().await.unwrap_or(json!({}));
+        if j["ok"] == json!(true) { Ok(()) } else { Err(anyhow!("telegram editMessageMedia: {}", j["description"].as_str().unwrap_or("xato"))) }
+    }
+
     pub async fn get(&self, file_id: &str) -> Result<Vec<u8>> {
         let f = self.call("getFile", json!({"file_id": file_id})).await?;
         let path = f["file_path"].as_str().ok_or_else(|| anyhow!("telegram fayl yo'lini bermadi"))?;
