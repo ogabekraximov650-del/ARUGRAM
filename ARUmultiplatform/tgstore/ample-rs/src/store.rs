@@ -300,7 +300,7 @@ async fn write_manifest(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<()> {
     let data = crypto::seal(key, m.to_string().as_bytes());
     // UZ: ro'yxat bir marta pin qilinadi, keyin joyida almashtiriladi (kanalda "pin qildi" xabarlari to'planmaydi). EN/RU: pin once, then edit in place.
     if let Some(o) = old {
-        if tg.edit(o, "manifest.bin", data.clone()).await.is_ok() { return Ok(()); }
+        if tg.edit(o, "manifest.bin", data.clone()).await.is_ok() { st.lock().await.save_snap_meta(); return Ok(()); }
     }
     let (_, msg) = tg.send("manifest.bin", data).await?;
     tg.pin(msg).await;
