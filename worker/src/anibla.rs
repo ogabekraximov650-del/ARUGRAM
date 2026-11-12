@@ -152,7 +152,14 @@ async fn http(url: &str, method: Method, body: Option<Value>, cookie: Option<&st
         let host = url.strip_prefix("https://").unwrap_or("").split('/').next().unwrap_or("");
         host == "anibla.uz" || host.ends_with(".anibla.uz")
     });
-    if let Some((base, token)) = via { return http_via(&base, &token, url, method, body, cookie).await; }
+    if let Some((base, token)) = via {
+        // UZ: Ample qayta ishga tushayotgan/band paytda bitta qisqa qayta urinish (o'tkazgich xatosi yoki tarmoq xatosi).
+        // EN: one short retry when Ample is restarting/busy (pass-through or network error).
+        let first = http_via(&base, &token, url, method.clone(), body.clone(), cookie).await;
+        if first.is_ok() { return first; }
+        worker::Delay::from(core::time::Duration::from_millis(700)).await;
+        return http_via(&base, &token, url, method, body, cookie).await.or(first);
+    }
     let h = Headers::new();
     let _ = h.set("User-Agent", UA);
     let _ = h.set("Accept", "application/json, text/plain, */*");
@@ -197,7 +204,8 @@ async fn http_via(base: &str, token: &str, url: &str, method: Method, body: Opti
     let text = r.text().await.unwrap_or_default();
     let v: Value = serde_json::from_str(&text).map_err(|_| format!("o'tkazgich javobi tushunarsiz (HTTP {})", r.status_code()))?;
     if r.status_code() != 200 {
-        return Err(format!("o'tkazgich: {}", v["message"].as_str().unwrap_or("xato")));
+        let why = v["message"].as_str().map(|m| m.to_string()).unwrap_or_else(|| text.chars().take(120).collect());
+        return Err(format!("o'tkazgich (HTTP {}): {why}", r.status_code()));
     }
     Ok((v["status"].as_u64().unwrap_or(0) as u16, v["body"].as_str().unwrap_or("").to_string()))
 }
