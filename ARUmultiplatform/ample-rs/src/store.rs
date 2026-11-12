@@ -171,7 +171,10 @@ impl Store {
         }).collect();
         match self.chunks.iter().rposition(|c| !c.meta.sealed) { Some(i) => self.cur = i, None => self.open_next() }
         let top = self.chunks.iter().map(|c| c.meta.last_seq).max().unwrap_or(0);
-        self.gap = self.seq > top;
+        // UZ: snapshotdan keyin jurnal bo'sh bo'ladi — bo'shliq faqat snapshotdan ham, jurnaldan ham ilgarigi yozuv bo'lsa. Aks holda har qayta ishga tushganda keraksiz snapshot yuklanardi.
+        // EN: after a snapshot the journal is empty; a gap exists only if seq is ahead of both the journal and the snapshot.
+        let base = top.max(self.snap.as_ref().map(|s| s.seq).unwrap_or(0));
+        self.gap = self.seq > base;
         Ok(())
     }
 
