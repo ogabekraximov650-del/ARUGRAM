@@ -31,3 +31,7 @@
 -dontwarn org.conscrypt.**
 -dontwarn org.openjsse.**
 -dontwarn javax.annotation.**
+
+# AGP 9: standart fayl endi "-dontoptimize" ni o'z ichiga olmaydi; avvalgi xatti-harakatni saqlash uchun (R8 optimizatsiyasini yoqish alohida, sinab ko'rib qilinadi).
+# AGP 9: the default file no longer carries -dontoptimize; keep the previous behaviour (enabling R8 optimization is a separate, tested step).
+-dontoptimize
