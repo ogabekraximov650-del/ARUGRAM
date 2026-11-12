@@ -14,6 +14,21 @@ pub fn key32(hex_key: &str) -> Result<[u8; 32]> {
     b.try_into().map_err(|_| anyhow!("kalit 32 bayt (64 hex) bo'lishi kerak"))
 }
 
+/// Siqish (deflate): jurnal (SQL matn) 5-10, baza ~2-4 baravar kichrayadi. EN: deflate; journal text shrinks 5-10x.
+pub fn deflate(b: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::new(6));
+    e.write_all(b).expect("deflate");
+    e.finish().expect("deflate")
+}
+
+pub fn inflate(b: &[u8]) -> Result<Vec<u8>> {
+    use std::io::Read;
+    let mut out = Vec::new();
+    flate2::read::ZlibDecoder::new(b).read_to_end(&mut out).map_err(|e| anyhow!("siqilgan ma'lumot buzilgan: {e}"))?;
+    Ok(out)
+}
+
 pub fn random_key_hex() -> String { let mut k = [0u8; 32]; rand::fill(&mut k); hex::encode(k) }
 
 pub fn seal(key: &[u8; 32], plain: &[u8]) -> Vec<u8> {
@@ -85,6 +100,15 @@ mod tests {
         let key: [u8; 32] = core::array::from_fn(|i| i as u8);
         let sealed = hex::decode("6465666768696a6b6c6d6e6f948ab89be3cd0529b339ab68c1432411257aa600109076e45f1a369abb5f4a8e23ae6967ab08861cdebe").unwrap();
         assert_eq!(open(&key, &sealed).unwrap(), "maxfiy zaxira: salom dunyo".as_bytes());
+    }
+
+    #[test]
+    fn deflate_roundtrip_and_shrinks_text() {
+        let t = "{\"q\":1,\"s\":[[\"UPDATE sessions_db SET last_seen_at=?\",[{\"type\":\"integer\",\"value\":\"1794481325893\"}]]]}\n".repeat(200);
+        let z = deflate(t.as_bytes());
+        assert!(z.len() * 5 < t.len(), "{} -> {}", t.len(), z.len());
+        assert_eq!(inflate(&z).unwrap(), t.as_bytes());
+        assert!(inflate(b"yaroqsiz").is_err());
     }
 
     #[test]

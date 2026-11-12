@@ -24,6 +24,8 @@ jobs:
         run: cargo test
       - name: Release yig'ish
         run: cargo build --release
+      - name: Zaxira/tiklash E2E (soxta Telegram bilan)
+        run: python3 -u tests/e2e.py target/release/tgstore-jr
       - uses: actions/upload-artifact@v7
         with:
           name: tgstore-jr-linux-x64

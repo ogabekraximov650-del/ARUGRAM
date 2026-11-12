@@ -8,24 +8,37 @@ use base64::Engine;
 use libsql::Value;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value as J};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 const MB: u64 = 1024 * 1024;
+/// UZ: snapshot bo'lagi 18 MiB (Telegram: yuklash 50 MB gacha, Bot API orqali yuklab olish 20 MB gacha). EN: snapshot part size; fits the Bot API 20 MB download limit.
+const SNAP_PART: u64 = 18 * MB;
+
+/// UZ: jurnal bo'lagining Telegram'ga yuklangan QISMI: faylning `from..from+len` baytlari (siqilgan + shifrlangan). EN: an uploaded slice of the journal file.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Seg { pub file_id: String, pub msg_id: i64, pub key: String, pub from: u64, pub len: u64, #[serde(default)] pub z: bool }
 
 #[derive(Serialize, Deserialize, Clone, Default, Debug)]
 pub struct ChunkMeta {
     pub no: u64, pub ver: u64, pub sealed: bool,
     #[serde(default)] pub first_seq: u64, #[serde(default)] pub last_seq: u64,
+    /// Eski format (butun fayl har safar qayta yuklanardi). Yangi tizimda `segs` ishlatiladi; eski yozuv birinchi yuklashda almashtiriladi. EN: legacy whole-file upload.
     #[serde(default)] pub file_id: Option<String>, #[serde(default)] pub msg_id: Option<i64>, #[serde(default)] pub key: Option<String>,
+    /// Yangi format: yuklangan bo'laklar ketma-ketligi va ularning jami baytlari (`up_len` — fayl shu joygacha zaxirada).
+    #[serde(default)] pub segs: Vec<Seg>, #[serde(default)] pub up_len: u64,
 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct SnapPart { pub file_id: String, pub msg_id: i64 }
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct Snap { pub seq: u64, pub at: u64, pub key: String, pub parts: Vec<SnapPart>, #[serde(default)] pub bytes: u64 }
+pub struct Snap { pub seq: u64, pub at: u64, pub key: String, pub parts: Vec<SnapPart>, #[serde(default)] pub bytes: u64, #[serde(default)] pub z: bool }
 
 #[derive(Clone)]
-pub struct Cfg { pub dir: PathBuf, pub chunk_bytes: u64, pub limit_mb: u64 }
+pub struct Cfg {
+    pub dir: PathBuf, pub chunk_bytes: u64, pub limit_mb: u64,
+    /// Muhim yozuvdan keyin shuncha kutib yuklanadi (yig'ish uchun). Faqat "arzon" yozuvlar bo'lsa — `idle_ms` da. EN: debounce for important writes / max wait for cheap ones.
+    pub crit_ms: u64, pub idle_ms: u64,
+}
 
 pub struct Chunk { pub meta: ChunkMeta, pub dir: PathBuf }
 
@@ -45,6 +58,9 @@ pub struct Store {
     pub snap: Option<Snap>,
     pub manifest_msg: Option<i64>,
     pub gap: bool,
+    /// Yuklanmagan MUHIM yozuv paydo bo'lgan vaqt (ms) va oxirgi muvaffaqiyatli yuklash vaqti. EN: first unflushed important write; last flush.
+    pub crit_since: Option<u64>,
+    pub last_flush: u64,
 }
 
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as u64 }
@@ -57,6 +73,27 @@ fn is_write(sql: &str) -> bool {
 fn is_ddl(sql: &str) -> bool {
     let l = sql.trim_start().to_lowercase();
     ["create", "drop", "alter", "reindex"].iter().any(|k| l.starts_with(k) && !l[k.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_'))
+}
+
+/// Buyruq nishonidagi jadval: `(amal, jadval)` (insert/update/delete). EN: statement kind and target table.
+fn target_table(sql: &str) -> Option<(&'static str, String)> {
+    let l = sql.trim_start().to_lowercase();
+    let w: Vec<&str> = l.split(|c: char| c.is_whitespace() || c == '(' || c == '"' || c == '`' || c == ';').filter(|x| !x.is_empty()).collect();
+    let tbl = |i: usize| w.get(i).map(|x| x.to_string());
+    match *w.first()? {
+        "update" => { let i = if w.get(1) == Some(&"or") { 3 } else { 1 }; Some(("update", tbl(i)?)) }
+        "delete" => { let i = w.iter().position(|x| *x == "from")? + 1; Some(("delete", tbl(i)?)) }
+        "insert" | "replace" => { let i = w.iter().position(|x| *x == "into")? + 1; Some(("insert", tbl(i)?)) }
+        _ => None,
+    }
+}
+
+/// UZ: "ARZON" yozuv — yo'qolsa zarar kichik (statistika, tomosha pozitsiyasi, sessiyaning oxirgi ko'rilgan vaqti). Faqat arzon yozuvlar bo'lsa Telegram'ga kam yuklanadi.
+/// EN: a cheap write (stats, watch position, session last-seen): losing it hurts little, so it is backed up less often. `JR_CHEAP` overrides the table list.
+pub fn is_cheap(sql: &str) -> bool {
+    let Some((kind, t)) = target_table(sql) else { return false };
+    let cheap = std::env::var("JR_CHEAP").unwrap_or_else(|_| "stats_hourly,stats_daily,watch_history_db".to_string());
+    cheap.split(',').any(|c| c.trim() == t) || (t == "sessions_db" && kind == "update")
 }
 
 pub fn to_value(a: &J) -> Result<Value> {
@@ -91,7 +128,7 @@ impl Store {
         let conn = db.connect()?;
         let _ = conn.query("pragma journal_mode=wal", ()).await?; // qator qaytaradi. EN/RU: returns a row
         conn.execute_batch("pragma synchronous=full; pragma foreign_keys=off; create table if not exists jr_state(k text primary key, v integer); insert or ignore into jr_state values('seq',0); create table if not exists kv_marks(k text primary key, v integer not null default 0);").await?;
-        let mut st = Store { cfg, db, conn, seq: 0, chunks: vec![], cur: 0, dirty: BTreeSet::new(), snap: None, manifest_msg: None, gap: false };
+        let mut st = Store { cfg, db, conn, seq: 0, chunks: vec![], cur: 0, dirty: BTreeSet::new(), snap: None, manifest_msg: None, gap: false, crit_since: None, last_flush: now_ms() };
         st.seq = st.scalar_i64("select v from jr_state where k='seq'").await?.max(0) as u64;
         if let Ok(b) = std::fs::read(st.cfg.dir.join("jr_snap.json")) {
             if let Ok(j) = serde_json::from_slice::<J>(&b) {
@@ -100,6 +137,9 @@ impl Store {
             }
         }
         st.scan()?;
+        // Qayta ishga tushganda yuklanmagan yozuv bo'lsa — tez orada yuklanadi.
+        st.refresh_dirty();
+        if !st.dirty.is_empty() { st.crit_since = Some(now_ms()); }
         Ok(st)
     }
 
@@ -216,6 +256,8 @@ impl Store {
         if c.meta.first_seq == 0 { c.meta.first_seq = q; }
         c.meta.last_seq = q;
         self.dirty.insert(c.meta.no);
+        let critical = writes.iter().any(|w| !is_cheap(w[0].as_str().unwrap_or("")));
+        if critical && self.crit_since.is_none() { self.crit_since = Some(now_ms()); }
         let size = std::fs::metadata(c.dir.join("journal.jsonl")).map(|m| m.len()).unwrap_or(0);
         if size >= chunk_bytes { c.meta.sealed = true; write_meta(c); self.open_next(); }
     }
@@ -266,8 +308,20 @@ impl Store {
         let _ = std::fs::write(self.cfg.dir.join("jr_snap.json"), json!({"snap": self.snap, "manifest_msg": self.manifest_msg}).to_string());
     }
 
+    /// UZ: yangi snapshot: yo'q bo'lsa yoki zaxirada bo'shliq bo'lsa; aks holda FAQAT o'zgarish bo'lgan bo'lsa va (6 soatdan keyin jurnal hajmi snapshot hajmiga yetgan bo'lsa, yoki 7 kun o'tgan bo'lsa).
+    /// Shunda umumiy trafik haqiqiy o'zgarish hajmidan ~2 baravardan oshmaydi. EN: snapshot only when changed and the journal has grown to the snapshot's size (min 6 h) or 7 days passed.
     pub fn need_snapshot(&self) -> bool {
-        match &self.snap { None => true, Some(s) => self.gap || self.seq.saturating_sub(s.seq) > 5000 || now_ms().saturating_sub(s.at) > 24 * 3600_000 }
+        let Some(s) = &self.snap else { return true };
+        if self.gap { return true; }
+        if self.seq <= s.seq { return false; }
+        let age = now_ms().saturating_sub(s.at);
+        let journal: u64 = self.chunks.iter().map(|c| std::fs::metadata(c.dir.join("journal.jsonl")).map(|m| m.len()).unwrap_or(0)).sum();
+        (age >= 6 * 3600_000 && journal >= s.bytes.max(MB)) || age >= 7 * 24 * 3600_000
+    }
+
+    /// Fayli `up_len` dan uzun bo'lgan (yuklanmagan baytlari bor) jurnal bo'laklari. EN: chunks with bytes not yet backed up.
+    pub fn refresh_dirty(&mut self) {
+        self.dirty = self.chunks.iter().filter(|c| std::fs::metadata(c.dir.join("journal.jsonl")).map(|m| m.len()).unwrap_or(0) > c.meta.up_len || (c.meta.up_len == 0 && c.meta.file_id.is_none() && c.meta.last_seq > 0)).map(|c| c.meta.no).collect();
     }
 
     /// Sxemani qo'llaydi (mavjud jadval/ustun xatolari e'tiborsiz). EN/RU: apply the bootstrap schema.
@@ -287,39 +341,72 @@ impl Store {
 
 pub type Shared = std::sync::Arc<tokio::sync::Mutex<Store>>;
 
-/// O'zgargan jurnal bo'laklarini yuklaydi (eski xabar o'chadi) va pin qilingan ro'yxatni yangilaydi. EN/RU: replicate dirty chunks + manifest.
-pub async fn replicate(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<J> {
-    let jobs: Vec<(u64, Vec<u8>, Option<i64>, u64)> = {
-        let s = st.lock().await;
-        s.dirty.iter().filter_map(|no| s.chunks.iter().find(|c| c.meta.no == *no).map(|c| {
-            let mut f = BTreeMap::new();
-            f.insert("journal.jsonl".to_string(), std::fs::read(c.dir.join("journal.jsonl")).unwrap_or_default());
-            (*no, crypto::pack(&f), c.meta.msg_id, c.meta.ver)
-        })).collect()
+/// UZ: jurnalning YANGI qismini yuklaydi (butun fayl emas), siqilgan va shifrlangan. Muhim yozuv bo'lsa `crit_ms` dan keyin, faqat arzon yozuv bo'lsa `idle_ms` dan keyin; `force` — darhol.
+/// Telegram'ga: bo'lak uchun 1 so'rov + ro'yxatni yangilash uchun 1 so'rov. 24 bo'lakdan oshsa bo'lak butun fayl sifatida bitta bo'lakka birlashtiriladi.
+/// EN: uploads only the NEW journal bytes (compressed + sealed); debounced by importance; compacts after 24 segments.
+pub async fn replicate(st: &Shared, tg: &Tg, key: &[u8; 32], force: bool) -> Result<J> {
+    struct Job { no: u64, ver: u64, from: u64, total: u64, bytes: Vec<u8>, replace: bool }
+    let now = now_ms();
+    let (jobs, prev_crit, need_manifest) = {
+        let mut s = st.lock().await;
+        s.refresh_dirty();
+        let sealed_pending = s.chunks.iter().any(|c| c.meta.sealed && s.dirty.contains(&c.meta.no));
+        let due = force || sealed_pending
+            || s.crit_since.is_some_and(|t| now.saturating_sub(t) >= s.cfg.crit_ms)
+            || (!s.dirty.is_empty() && now.saturating_sub(s.last_flush) >= s.cfg.idle_ms);
+        let need_manifest = s.manifest_msg.is_none();
+        if s.dirty.is_empty() && !need_manifest { return Ok(json!({"uploaded": 0, "pending": false})); }
+        if !due && !need_manifest { return Ok(json!({"uploaded": 0, "pending": true})); }
+        let prev = s.crit_since;
+        s.crit_since = None;
+        let jobs: Vec<Job> = s.dirty.iter().filter_map(|no| s.chunks.iter().find(|c| c.meta.no == *no)).filter_map(|c| {
+            let all = std::fs::read(c.dir.join("journal.jsonl")).unwrap_or_default();
+            let replace = c.meta.file_id.is_some() || c.meta.segs.len() >= 24;
+            let from = if replace { 0 } else { c.meta.up_len } as usize;
+            if all.len() <= from && !replace { return None; }
+            Some(Job { no: c.meta.no, ver: c.meta.ver, from: from as u64, total: all.len() as u64, bytes: all[from.min(all.len())..].to_vec(), replace })
+        }).collect();
+        (jobs, prev, need_manifest)
     };
-    let mut n = 0;
-    for (no, plain, old, ver) in jobs {
-        let kh = crypto::random_key_hex();
-        let sealed = crypto::seal(&key32(&kh)?, &plain);
-        let (file_id, msg_id) = tg.send(&format!("db_{}_v{}.bin", no, ver), sealed).await?;
-        {
+    let res: Result<(usize, Vec<i64>)> = async {
+        let mut n = 0usize;
+        let mut old_msgs: Vec<i64> = vec![];
+        for j in jobs {
+            let kh = crypto::random_key_hex();
+            let sealed = crypto::seal(&key32(&kh)?, &crypto::deflate(&j.bytes));
+            let (file_id, msg_id) = tg.send(&format!("db_{}_v{}_{}.bin", j.no, j.ver, j.from), sealed).await?;
             let mut s = st.lock().await;
-            if let Some(c) = s.chunks.iter_mut().find(|c| c.meta.no == no) { c.meta.file_id = Some(file_id); c.meta.msg_id = Some(msg_id); c.meta.key = Some(kh); write_meta(c); }
-            s.dirty.remove(&no);
+            if let Some(c) = s.chunks.iter_mut().find(|c| c.meta.no == j.no) {
+                if j.replace {
+                    old_msgs.extend(c.meta.segs.iter().map(|g| g.msg_id));
+                    if let Some(m) = c.meta.msg_id.take() { old_msgs.push(m); }
+                    c.meta.file_id = None; c.meta.key = None; c.meta.segs.clear();
+                }
+                c.meta.segs.push(Seg { file_id, msg_id, key: kh, from: j.from, len: j.total - j.from, z: true });
+                c.meta.up_len = j.total;
+                write_meta(c);
+            }
+            s.refresh_dirty();
+            n += 1;
         }
-        n += 1;
-        if let Some(o) = old { tg.del(o).await; }
+        Ok((n, old_msgs))
+    }.await;
+    match res {
+        Err(e) => { let mut s = st.lock().await; if s.crit_since.is_none() { s.crit_since = Some(prev_crit.unwrap_or(now)); } Err(e) }
+        Ok((n, old_msgs)) => {
+            if n > 0 || need_manifest { write_manifest(st, tg, key).await?; }
+            if !old_msgs.is_empty() { tg.del_many(&old_msgs).await; }
+            if n > 0 { st.lock().await.last_flush = now_ms(); }
+            Ok(json!({"uploaded": n, "pending": false}))
+        }
     }
-    let need = { st.lock().await.manifest_msg.is_none() };
-    if n > 0 || need { write_manifest(st, tg, key).await?; }
-    Ok(json!({"uploaded": n}))
 }
 
 async fn write_manifest(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<()> {
     let (m, old) = {
         let s = st.lock().await;
-        let chunks: Vec<J> = s.chunks.iter().filter(|c| c.meta.file_id.is_some()).map(|c| serde_json::to_value(&c.meta).unwrap()).collect();
-        (json!({"v": 1, "at": now_ms(), "seq": s.seq, "snapshot": s.snap, "chunks": chunks}), s.manifest_msg)
+        let chunks: Vec<J> = s.chunks.iter().filter(|c| c.meta.file_id.is_some() || !c.meta.segs.is_empty()).map(|c| serde_json::to_value(&c.meta).unwrap()).collect();
+        (json!({"v": 2, "at": now_ms(), "seq": s.seq, "snapshot": s.snap, "chunks": chunks}), s.manifest_msg)
     };
     let data = crypto::seal(key, m.to_string().as_bytes());
     // UZ: ro'yxat bir marta pin qilinadi, keyin joyida almashtiriladi (kanalda "pin qildi" xabarlari to'planmaydi). EN/RU: pin once, then edit in place.
@@ -335,66 +422,94 @@ async fn write_manifest(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<()> {
     Ok(())
 }
 
-/// To'liq surat: baza fayli 1 MB bo'laklarda yuklanadi; suratga to'liq kirgan jurnal bo'laklari (ochiq bo'lak ham) o'chiriladi va raqamlash qaytadan `db_1_v1` dan boshlanadi. EN/RU: full snapshot in 1 MB parts.
+/// To'liq surat: baza fayli 18 MiB bo'laklarda (har biri siqiladi va shifrlanadi) yuklanadi; suratga to'liq kirgan jurnal bo'laklari (ochiq bo'lak ham) o'chiriladi va raqamlash qaytadan `db_1_v1` dan boshlanadi.
+/// EN/RU: full snapshot in 18 MiB parts, each compressed and sealed; the superseded journal chunks and old parts are deleted in batches.
 pub async fn snapshot(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<J> {
-    let (seq, buf) = {
+    use std::io::Read;
+    let (seq, tmp) = {
         let s = st.lock().await;
         let tmp = s.cfg.dir.join("snap.tmp");
         let _ = std::fs::remove_file(&tmp);
         s.conn.execute("vacuum into ?1", vec![Value::Text(tmp.to_string_lossy().to_string())]).await?;
-        let b = std::fs::read(&tmp)?; let _ = std::fs::remove_file(&tmp);
-        (s.seq, b)
+        (s.seq, tmp)
     };
     let kh = crypto::random_key_hex();
     let sk = key32(&kh)?;
     let mut parts = vec![];
-    let mut i = 0usize; let mut p = 0;
-    loop {
-        let end = (i + MB as usize).min(buf.len());
-        let (file_id, msg_id) = tg.send(&format!("snap_{}_{}.bin", seq, p), crypto::seal(&sk, &buf[i..end])).await?;
-        parts.push(SnapPart { file_id, msg_id });
-        i = end; p += 1;
-        if i >= buf.len() { break; }
+    let mut raw_total = 0u64;
+    {
+        let mut f = std::fs::File::open(&tmp)?;
+        let mut p = 0;
+        loop {
+            let mut buf = vec![0u8; SNAP_PART as usize];
+            let mut got = 0usize;
+            while got < buf.len() { let n = f.read(&mut buf[got..])?; if n == 0 { break; } got += n; }
+            if got == 0 && p > 0 { break; }
+            buf.truncate(got);
+            raw_total += got as u64;
+            let (file_id, msg_id) = tg.send(&format!("snap_{}_{}.bin", seq, p), crypto::seal(&sk, &crypto::deflate(&buf))).await?;
+            parts.push(SnapPart { file_id, msg_id });
+            p += 1;
+            if got < SNAP_PART as usize { break; }
+        }
     }
-    let (old_parts, del_chunks) = {
+    let _ = std::fs::remove_file(&tmp);
+    let (old_parts, del_msgs) = {
         let mut s = st.lock().await;
         let old = s.snap.take().map(|o| o.parts);
-        s.snap = Some(Snap { seq, at: now_ms(), key: kh, parts: parts.clone(), bytes: buf.len() as u64 });
-        let mut del = vec![];
+        s.snap = Some(Snap { seq, at: now_ms(), key: kh, parts: parts.clone(), bytes: raw_total, z: true });
+        let mut del: Vec<i64> = vec![];
         let keep: Vec<Chunk> = std::mem::take(&mut s.chunks).into_iter().filter_map(|c| {
-            if c.meta.last_seq <= seq { del.push((c.meta.msg_id, c.dir.clone())); None } else { Some(c) }
+            if c.meta.last_seq <= seq { del.extend(c.meta.segs.iter().map(|g| g.msg_id)); if let Some(m) = c.meta.msg_id { del.push(m); } let _ = std::fs::remove_dir_all(&c.dir); None } else { Some(c) }
         }).collect();
         s.chunks = keep;
-        for (_, d) in &del { let _ = std::fs::remove_dir_all(d); }
         match s.chunks.iter().rposition(|c| !c.meta.sealed) { Some(i) => s.cur = i, None => s.open_next() }
-        let live: BTreeSet<u64> = s.chunks.iter().map(|c| c.meta.no).collect();
-        s.gap = false; s.dirty.retain(|no| live.contains(no));
+        s.gap = false; s.refresh_dirty();
         (old, del)
     };
-    for (m, _) in del_chunks { if let Some(m) = m { tg.del(m).await; } }
     write_manifest(st, tg, key).await?;
-    if let Some(o) = old_parts { for p in o { tg.del(p.msg_id).await; } }
-    Ok(json!({"seq": seq, "parts": parts.len(), "bytes": buf.len()}))
+    if !del_msgs.is_empty() { tg.del_many(&del_msgs).await; }
+    if let Some(o) = old_parts { let ids: Vec<i64> = o.iter().map(|p| p.msg_id).collect(); tg.del_many(&ids).await; }
+    Ok(json!({"seq": seq, "parts": parts.len(), "bytes": raw_total}))
 }
 
-/// Disk yo'qolsa: Telegram'dagi pin qilingan ro'yxat -> surat -> jurnallarni qayta o'ynash. EN/RU: disaster recovery.
+/// Disk yo'qolsa: Telegram'dagi pin qilingan ro'yxat -> surat -> jurnallarni qayta o'ynash (yangi bo'laklar va eski butun-fayl formati ikkalasi ham o'qiladi). EN/RU: disaster recovery.
 pub async fn recover(cfg: Cfg, tg: &Tg, key: &[u8; 32]) -> Result<(Store, u64)> {
     let (pmsg, pfile) = tg.get_pinned().await?.ok_or_else(|| anyhow!("Telegram'da ro'yxat (pin) topilmadi"))?;
     let manifest: J = serde_json::from_slice(&crypto::open(key, &tg.get(&pfile).await?)?)?;
     std::fs::create_dir_all(&cfg.dir)?;
     let snap: Snap = serde_json::from_value(manifest["snapshot"].clone())?;
     let sk = key32(&snap.key)?;
-    let mut db = vec![];
-    for p in &snap.parts { db.extend(crypto::open(&sk, &tg.get(&p.file_id).await?)?); }
-    std::fs::write(cfg.dir.join("main.db"), db)?;
+    let mut db = std::fs::File::create(cfg.dir.join("main.db"))?;
+    for p in &snap.parts {
+        let part = crypto::open(&sk, &tg.get(&p.file_id).await?)?;
+        let part = if snap.z { crypto::inflate(&part)? } else { part };
+        std::io::Write::write_all(&mut db, &part)?;
+    }
+    drop(db);
     let mut metas: Vec<ChunkMeta> = serde_json::from_value(manifest["chunks"].clone()).unwrap_or_default();
     metas.sort_by_key(|m| m.no);
     for m in &metas {
         let d = cfg.dir.join(format!("db_{}_v{}", m.no, m.ver));
         std::fs::create_dir_all(&d)?;
-        let files = crypto::unpack(&crypto::open(&key32(m.key.as_deref().unwrap_or(""))?, &tg.get(m.file_id.as_deref().unwrap_or("")).await?)?)?;
-        std::fs::write(d.join("journal.jsonl"), files.get("journal.jsonl").cloned().unwrap_or_default())?;
-        std::fs::write(d.join("meta.json"), serde_json::to_vec(m)?)?;
+        let mut journal: Vec<u8> = vec![];
+        if !m.segs.is_empty() {
+            let mut segs = m.segs.clone();
+            segs.sort_by_key(|g| g.from);
+            for g in &segs {
+                let part = crypto::open(&key32(&g.key)?, &tg.get(&g.file_id).await?)?;
+                let part = if g.z { crypto::inflate(&part)? } else { part };
+                if g.from as usize != journal.len() { return Err(anyhow!("jurnal bo'lagi tartibi buzilgan ({} != {})", g.from, journal.len())); }
+                journal.extend(part);
+            }
+        } else if let Some(fid) = &m.file_id {
+            let files = crypto::unpack(&crypto::open(&key32(m.key.as_deref().unwrap_or(""))?, &tg.get(fid).await?)?)?;
+            journal = files.get("journal.jsonl").cloned().unwrap_or_default();
+        }
+        std::fs::write(d.join("journal.jsonl"), &journal)?;
+        let mut meta = m.clone();
+        meta.up_len = journal.len() as u64;
+        std::fs::write(d.join("meta.json"), serde_json::to_vec(&meta)?)?;
     }
     let mut st = Store::open(cfg).await?;
     let mut lines: Vec<J> = vec![];

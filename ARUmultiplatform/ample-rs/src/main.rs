@@ -72,7 +72,7 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
             let journal = b["journal"] != json!(false);
             json_resp(200, json!({"results": res_json(app.st.lock().await.exec(&stmts, journal).await)}))
         }
-        "usage" => json_resp(200, app.st.lock().await.usage()),
+        "usage" => { let mut u = app.st.lock().await.usage(); u["telegram_stats"] = tg::stats(); json_resp(200, u) }
         "marks" => {
             let list = |k: &str| b[k].as_array().cloned().unwrap_or_default().iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect::<Vec<_>>();
             match app.st.lock().await.marks(&list("bump"), &list("get"), b["at"].as_i64().unwrap_or(0)).await { Ok(v) => json_resp(200, v), Err(e) => json_resp(500, json!({"message": e.to_string()})) }
@@ -82,6 +82,9 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
             let mut u = s.usage();
             u["snapshot"] = s.snap.as_ref().map(|x| json!({"seq": x.seq, "at": x.at, "parts": x.parts.len()})).unwrap_or(J::Null);
             u["dirty"] = json!(s.dirty);
+            u["pending_important_since"] = json!(s.crit_since);
+            u["last_flush"] = json!(s.last_flush);
+            u["telegram_stats"] = tg::stats();
             u["telegram"] = json!(app.tg.is_some() && app.key.is_some());
             json_resp(200, u)
         }
@@ -104,7 +107,7 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
         }
         "replicate" | "snapshot" => {
             let (Some(tg), Some(key)) = (app.tg.as_ref(), app.key.as_ref()) else { return json_resp(200, json!({"skipped": true})) };
-            let r = if path == "replicate" { store::replicate(&app.st, tg, key).await } else { store::snapshot(&app.st, tg, key).await };
+            let r = if path == "replicate" { store::replicate(&app.st, tg, key, true).await } else { store::snapshot(&app.st, tg, key).await };
             match r { Ok(v) => json_resp(200, v), Err(e) => json_resp(500, json!({"message": e.to_string()})) }
         }
         _ => json_resp(404, json!({"message": "no such endpoint"})),
@@ -118,6 +121,9 @@ async fn main() {
         dir: env("JR_DIR").unwrap_or_else(|| "/var/lib/tgstore-data".into()).into(),
         chunk_bytes: env("JR_CHUNK_BYTES").and_then(|v| v.parse().ok()).unwrap_or(1024 * 1024),
         limit_mb: env("DB_LIMIT_MB").and_then(|v| v.parse().ok()).unwrap_or(1024),
+        // Muhim yozuvdan keyin 2 daqiqa (yig'ish), faqat arzon yozuvlar bo'lsa 3 soat. EN: debounce / idle flush.
+        crit_ms: env("JR_CRIT_SECS").and_then(|v| v.parse::<u64>().ok()).unwrap_or(120) * 1000,
+        idle_ms: env("JR_IDLE_SECS").and_then(|v| v.parse::<u64>().ok()).unwrap_or(3 * 3600) * 1000,
     };
     let tg = match (env("TG_BOT_TOKEN"), env("TG_CHANNEL_ID")) { (Some(t), Some(c)) => Some(tg::Tg::new(t, c)), _ => None };
     let key = env("JR_KEY").and_then(|k| crypto::key32(&k).ok());
@@ -147,7 +153,7 @@ async fn main() {
 
     if let (Some(tg), Some(key)) = (tg, key) {
         let (st2, tg2) = (st.clone(), tg.clone());
-        tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; if let Err(e) = store::replicate(&st2, &tg2, &key).await { log(&format!("replicate xato: {}", e)); } } });
+        tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(15)).await; if let Err(e) = store::replicate(&st2, &tg2, &key, false).await { log(&format!("replicate xato: {}", e)); } } });
         tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(300)).await; let need = st.lock().await.need_snapshot(); if need { if let Err(e) = store::snapshot(&st, &tg, &key).await { log(&format!("snapshot xato: {}", e)); } } } });
     }
 
