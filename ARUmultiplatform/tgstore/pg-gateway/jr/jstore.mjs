@@ -7,7 +7,12 @@
 //     snapshot + journals. All reads and writes go through this one node, so no stale copy can ever be served.
 // RU: ЖУРНАЛЬНАЯ БАЗА (Ample): данные в SQLite, каждая запись добавляется в журнал в папках db_N_vV/ (ротация по 1 МБ); чанки и снимки шифруются и уходят
 //     в Telegram — при потере диска база восстанавливается. Все чтения и записи идут через один узел: устаревших данных нет.
-import { DatabaseSync } from 'node:sqlite';
+// UZ: dvigatel: `libsql` (Turso'ning SQLite varianti, barqaror) bo'lsa o'sha, bo'lmasa Node'ning o'rnatilgan `node:sqlite` (tajribaviy) ga qaytadi. `JR_ENGINE=node` majburlaydi.
+// EN/RU: engine: `libsql` (Turso's SQLite fork, stable) when installed, otherwise Node's built-in `node:sqlite`; `JR_ENGINE=node` forces the fallback.
+let LIBSQL = null;
+if (process.env.JR_ENGINE !== 'node') { try { LIBSQL = (await import('libsql')).default; } catch { /* o'rnatilmagan: node:sqlite */ } }
+const { DatabaseSync } = LIBSQL ? { DatabaseSync: null } : await import('node:sqlite');
+export const ENGINE = LIBSQL ? 'libsql' : 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -41,7 +46,7 @@ export class JStore {
   init() {
     fs.mkdirSync(this.dir, { recursive: true });
     this.dbPath = path.join(this.dir, 'main.db');
-    this.db = new DatabaseSync(this.dbPath);
+    this.db = LIBSQL ? new LIBSQL(this.dbPath) : new DatabaseSync(this.dbPath);
     this.db.exec('pragma journal_mode=wal; pragma synchronous=full; pragma foreign_keys=off;');
     this.db.exec("create table if not exists jr_state(k text primary key, v integer); insert or ignore into jr_state values('seq',0);");
     this.db.exec('create table if not exists kv_marks(k text primary key, v integer not null default 0);');
@@ -78,13 +83,13 @@ export class JStore {
   // ── so'rovlar ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   #prep(sql) {
     let s = this.stmts.get(sql);
-    if (!s) { s = this.db.prepare(sql); s.setReadBigInts(true); s.setReturnArrays(true); if (this.stmts.size > 500) this.stmts.clear(); this.stmts.set(sql, s); }
+    if (!s) { s = this.db.prepare(sql); if (LIBSQL) { if (s.reader) s.raw(true); s.safeIntegers(true); } else { s.setReadBigInts(true); s.setReturnArrays(true); } if (this.stmts.size > 500) this.stmts.clear(); this.stmts.set(sql, s); }
     return s;
   }
   #one(st) {
     const s = this.#prep(st.sql); const args = (st.args || []).map(toParam);
     const write = WRITE_RX.test(st.sql);
-    if (s.columns().length) {
+    if (s.reader !== false && s.columns().length) {
       const cols = s.columns().map((c) => ({ name: c.name }));
       const rows = s.all(...args).map((r) => r.map(toCell));
       return { write, res: { cols, rows, affected_row_count: rows.length, rows_read: rows.length, rows_written: write ? rows.length : 0 } };

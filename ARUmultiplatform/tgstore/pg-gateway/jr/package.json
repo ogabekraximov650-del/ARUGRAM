@@ -1,0 +1,8 @@
+{
+  "name": "tgstore-jr",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "UZ: jurnal-baza serveri (SQLite). EN: journal-store server. RU: сервер журнальной базы.",
+  "dependencies": { "libsql": "0.5.29" }
+}
