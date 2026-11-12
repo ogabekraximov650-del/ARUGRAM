@@ -93,7 +93,13 @@ fn target_table(sql: &str) -> Option<(&'static str, String)> {
 pub fn is_cheap(sql: &str) -> bool {
     let Some((kind, t)) = target_table(sql) else { return false };
     let cheap = std::env::var("JR_CHEAP").unwrap_or_else(|_| "stats_hourly,stats_daily,watch_history_db".to_string());
-    cheap.split(',').any(|c| c.trim() == t) || (t == "sessions_db" && kind == "update")
+    if cheap.split(',').any(|c| c.trim() == t) || (t == "sessions_db" && kind == "update") { return true; }
+    // UZ: ilova trafik hisoboti: sync_batches (takror-himoya) va users_db.traffic_bytes — yo'qolsa zarar kichik.
+    // EN: app traffic report: sync_batches (replay guard) and users_db.traffic_bytes — cheap to lose.
+    let l = sql.to_lowercase();
+    let set = l.split(" set ").nth(1).unwrap_or("").split(" where ").next().unwrap_or("").replace("coalesce(traffic_bytes,0)", "").replace("coalesce(traffic_bytes, 0)", "");
+    (t == "sync_batches" && kind == "insert")
+        || (t == "users_db" && kind == "update" && set.trim_start().starts_with("traffic_bytes") && !set.contains(','))
 }
 
 pub fn to_value(a: &J) -> Result<Value> {
@@ -531,4 +537,19 @@ pub async fn recover(cfg: Cfg, tg: &Tg, key: &[u8; 32]) -> Result<(Store, u64)> 
     }
     st.snap = Some(snap); st.manifest_msg = Some(pmsg); st.save_snap_meta();
     Ok((st, replayed))
+}
+
+#[cfg(test)]
+mod cheap_tests {
+    use super::is_cheap;
+    #[test]
+    fn traffic_report_is_cheap() {
+        assert!(is_cheap("INSERT INTO stats_hourly (hour,metric,value) VALUES (?,?,?)\n     ON CONFLICT(hour,metric) DO UPDATE SET value=value+excluded.value"));
+        assert!(is_cheap("UPDATE users_db SET traffic_bytes=COALESCE(traffic_bytes,0)+? WHERE id=?"));
+        assert!(is_cheap("INSERT INTO sync_batches (user_id,batch_id,at) VALUES (?,?,?)"));
+        assert!(is_cheap("UPDATE sessions_db SET last_seen_at=? WHERE session_token=?"));
+        assert!(!is_cheap("UPDATE users_db SET traffic_bytes=1, password_hash=? WHERE id=?"));
+        assert!(!is_cheap("UPDATE users_db SET name=? WHERE id=?"));
+        assert!(!is_cheap("INSERT INTO comments_db (a) VALUES (?)"));
+    }
 }
