@@ -6,6 +6,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import pg from 'pg';
 import { translate, finalSql } from './translate.mjs';
+import { Archive, makeTelegram, THRESHOLD } from './archive.mjs';
 
 const E = process.env;
 const STORE_KEY = E.STORE_KEY || '';
@@ -105,6 +106,15 @@ async function usage() {
   return { used_bytes: size, limit_bytes: limit, percent: limit ? (size / limit) * 100 : 0, top };
 }
 
+// UZ: doira tizimi shu serverda: TG_BOT_TOKEN + TG_CHANNEL_ID berilganda (yoki TG_MOCK=1 — sinov) yoqiladi, har 5 daqiqada bazani tekshiradi.
+// EN/RU: the circle system runs here when TG_BOT_TOKEN + TG_CHANNEL_ID are set (or TG_MOCK=1 for tests).
+const arch = (E.TG_BOT_TOKEN && E.TG_CHANNEL_ID) || E.TG_MOCK === '1'
+  ? new Archive(pool, makeTelegram({ token: E.TG_BOT_TOKEN, channel: E.TG_CHANNEL_ID, mock: E.TG_MOCK === '1' }), { usage: async () => (await usage()).percent, cacheDir: E.ARCH_CACHE_DIR })
+  : null;
+if (arch && E.ARCHIVE_ON !== '0') {
+  setInterval(() => { arch.run().then((r) => { if (r.active) log('doira:', JSON.stringify(r).slice(0, 300)); }).catch((e) => log('doira xato:', e.message)); }, 5 * 60_000).unref();
+}
+
 http.createServer((req, res) => {
   const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
   if (req.method === 'GET') return send(200, { ok: true, service: 'tgstore-pg-gateway' });
@@ -132,6 +142,16 @@ http.createServer((req, res) => {
           return x.ok ? { type: 'ok', response: { type: 'execute', result: x.result } } : { type: 'error', error: { message: x.error } };
         });
         return send(200, { baton: null, base_url: null, results });
+      }
+      if (fn.startsWith('archive/')) {
+        if (!arch) return send(503, { message: 'doira yoqilmagan (TG_BOT_TOKEN/TG_CHANNEL_ID yo\'q)' });
+        const a = fn.slice(8);
+        if (a === 'run') return send(200, await arch.run({ force: !!b.force, dry: !!b.dry, max: b.max || 5 }));
+        if (a === 'files') return send(200, { files: await arch.files(), threshold: THRESHOLD });
+        if (a === 'get') return send(200, { row: await arch.lookup(String(b.table), String(b.key)) });
+        if (a === 'warm') return send(200, await arch.warm(String(b.table), String(b.key), { warmDays: b.days || 7 }));
+        if (a === 'restore') return send(200, await arch.restore(Number(b.id), { warmDays: b.days || 7 }));
+        return send(404, { message: 'no such endpoint' });
       }
       if (fn === 'sql') return send(200, await sql(b));
       if (fn === 'usage') return send(200, await usage());

@@ -14324,9 +14324,8 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
             let _ = turso_exec_pg(&env, "INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, ?)",
                 vec![TursoArg::text("__lat_cron"), TursoArg::text(&json!({"ms": ms, "at": now_ms()}).to_string())]).await;
         }
-        // UZ: doira tizimi: baza 70% dan oshsa sovuq qatorlar Telegram'ga ketadi. EN/RU: circle system at >= 70%.
-        let r = circle::run(&env, false, false).await;
-        console_log!("tgstore circle: {:?}", r.as_ref().map(|v| v.to_string()).map_err(|e| e.to_string()));
+        // UZ: doira tizimi (arxivlash/tiklash) endi Ample serverining o'zida ishlaydi (`pg-gateway/archive.mjs`); Worker faqat uyg'otadi. Ikki marta arxivlanmasin.
+        // EN/RU: the circle system now runs on the Ample server itself; the Worker only keeps it awake (no double archiving).
         // UZ: katalog nusxasi (Telegram) yangilanadi, eski bo'laklar tozalanadi. EN/RU: refresh the catalog copy, GC old chunks.
         let p = snap::publish(&env, false).await;
         let g = kvdb::gc(&env).await;

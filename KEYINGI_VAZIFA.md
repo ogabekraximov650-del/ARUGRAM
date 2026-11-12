@@ -7304,3 +7304,12 @@ Ilova: paketlab yuborish (`SyncQueue`) 5 daqiqaga o'zgartirildi; yuborilmagan ta
 
 - **Yangilanish (o'qish tartibi):** baza `circle::THRESHOLD` (70%) dan kam to'lgan bo'lsa katalog ham Ample'dan o'qiladi; 70% dan keyin Telegram nusxa + kesh orqali (`snap::circle_on`, 60 soniya eslab qolinadi). Nusxa har doim yangilanib turadi (Ample yiqilsa zaxira: `snap::can_read_any`). Arxivlangan sovuq qatorlarni qayta o'qish (`arch_files` + kalit indeksi) hali QURILMAGAN.
 - **Yangilik ko'rinishi:** katalogga tuzilma yozuvi (anime/qism/bo'lim qo'shish, tahrir, o'chirish; ko'rish/baho hisoblagichlari EMAS) `snap_struct` belgisini bosadi (`snap::is_structural`, `turso_after`). Belgi nusxadan yangi bo'lsa katalog o'qishlari darhol Ample'dan ketadi, cron (har daqiqa) nusxani zudlik bilan yangilaydi (`snap::urgent`). Hisoblagichlar o'zgarishi nusxani 5 daqiqada bir yangilaydi.
+
+## tgstore: doira tizimi Ample serverida (2026-11)
+
+- **O'zgarish:** arxivlash/arxivdan o'qish/tiklash Worker'dan Ample'dagi `pg-gateway` ga ko'chirildi (`pg-gateway/archive.mjs`): Worker'ning 50 ta chaqiruv va CPU chegarasi yo'q, Supabase kerak emas. Worker cron endi faqat har daqiqa Ample'ni uyg'otadi (`circle::run` cron'dan olib tashlandi; `/__circle?force=1&dry=1` faqat sanash uchun qoldi).
+- **Ishlashi:** har 5 daqiqada baza foizi tekshiriladi; >= 70% bo'lsa sovuq qatorlar (`SPECS`) 500 tadan `COPY ... CSV HEADER` formatidagi AES-256-GCM bilan shifrlangan faylga yig'ilib Telegram'ga yuklanadi, `arch_files` + `arch_keys` ga yoziladi va bazadan o'chiriladi (bir tranzaksiyada; o'chirishda "sovuqlik" qayta tekshiriladi; yiqilsa Telegram fayli o'chadi). 65% ga tushsa to'xtaydi.
+- **Arxivdan o'qish:** `POST /archive/get {table,key}` (qator), `/archive/warm {table,key,days}` (qatorni o'z fayli bilan bazaga qaytaradi va `days` kunga qayta arxivlanishdan himoya qiladi), `/archive/restore {id}`, `/archive/files`, `/archive/run {force,dry}`. Fayllar diskda 200 MB gacha keshlanadi.
+- **Yoqish:** Ample'da maxfiy sozlamalar `TG_BOT_TOKEN`, `TG_CHANNEL_ID` (ixtiyoriy `ARCHIVE_ON=0` o'chiradi; `TG_MOCK=1` — xotiradagi soxta Telegram, sinov uchun).
+- **Sinov:** soxta Telegram bilan haqiqiy bazada to'liq aylanish o'tdi: arxivlash -> o'chirish -> o'qish (qo'shtirnoq/qator ko'chishi saqlangan) -> isitish -> qayta arxivlanmaslik.
+- **Qilinmadi:** haqiqiy Telegram bilan sinov (token kerak); ilova/Worker eski ma'lumot so'raydigan ekranlarni `/archive/get|warm` ga ulash; kunlik to'liq zaxira.
