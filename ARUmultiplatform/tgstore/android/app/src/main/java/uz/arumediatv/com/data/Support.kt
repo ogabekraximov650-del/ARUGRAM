@@ -174,7 +174,7 @@ class ChatStore(
                     val fresh = rows.filter { it.id !in have }
                     if (fresh.isNotEmpty()) list = list.filter { !it.pending } + fresh
                     list
-                } else rows
+                } else { val ids = rows.map { it.id }.toSet(); rows + list.filter { it.pending || (it.id !in ids && System.currentTimeMillis() - it.createdAt < 60_000) } }
             }
             saveDisk()
             loaded = true
@@ -195,7 +195,6 @@ class ChatStore(
         val temp = "tmp${System.nanoTime()}"
         if (mediaFile.isEmpty()) {
             _items.update { it + ChatMessage(temp, adminView, text, System.currentTimeMillis(), pending = true) }
-            loaded = true
         }
         val b = JSONObject().put("body", text)
         userId?.let { b.put("user_id", it) }
@@ -208,8 +207,7 @@ class ChatStore(
         if (!r.ok || j == null) return@withContext r.error ?: if (r.code == 0) "Internet yo'q — qaytadan urinib ko'ring" else "Yuborilmadi"
         val saved = ChatMessage.from(j)
         _items.update { l -> if (l.any { it.id == saved.id }) l else l + saved }
-        loaded = true
-        saveDisk()
+        if (loaded) saveDisk()
         null
     }
 
