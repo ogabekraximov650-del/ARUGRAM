@@ -8,6 +8,15 @@ use serde_json::{json, Value as J};
 use std::time::Duration;
 
 const MAX_BODY: usize = 8 * 1024 * 1024;
+/// UZ: loginsiz GET javoblari Ample xotirasida 3 daqiqa saqlanadi — Worker'ning HAR izolyati (ko'p, tez o'chadi) bir xil keshdan foydalanadi, sayt (~1 s) qayta so'ralmaydi.
+/// EN: cookie-less GET responses are kept 3 minutes in Ample's memory — shared by every Worker isolate, so the slow site (~1 s) is not re-queried.
+const CACHE_MS: u128 = 3 * 60 * 1000;
+const CACHE_MAX: usize = 200;
+
+fn cache() -> &'static std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, J)>> {
+    static C: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, J)>>> = std::sync::OnceLock::new();
+    C.get_or_init(Default::default)
+}
 
 pub fn host_allowed(host: &str, allow: &str) -> bool {
     let h = host.to_ascii_lowercase();
@@ -21,6 +30,13 @@ pub async fn run(b: &J) -> Result<J> {
     let allow = std::env::var("PROXY_HOSTS").unwrap_or_else(|_| "anibla.uz".to_string());
     if !host_allowed(u.host_str().unwrap_or(""), &allow) { return Err(anyhow!("host ruxsat etilmagan")); }
     let method = reqwest::Method::from_bytes(b["method"].as_str().unwrap_or("GET").to_ascii_uppercase().as_bytes()).map_err(|_| anyhow!("method noto'g'ri"))?;
+    let cacheable = method == reqwest::Method::GET && b["body"].is_null() && b["headers"].as_object().map(|h| !h.keys().any(|k| k.eq_ignore_ascii_case("cookie") || k.eq_ignore_ascii_case("authorization"))).unwrap_or(true);
+    let key = u.as_str().to_string();
+    if cacheable {
+        if let Some((t, v)) = cache().lock().ok().and_then(|c| c.get(&key).cloned()) {
+            if t.elapsed().as_millis() < CACHE_MS { let mut v = v; v["cached"] = json!(true); return Ok(v); }
+        }
+    }
     let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(20)).build()?;
     let mut rq = client.request(method, u);
     if let Some(h) = b["headers"].as_object() {
@@ -31,7 +47,14 @@ pub async fn run(b: &J) -> Result<J> {
     let status = r.status().as_u16();
     let bytes = r.bytes().await.map_err(|e| anyhow!("javob: {e}"))?;
     if bytes.len() > MAX_BODY { return Err(anyhow!("javob juda katta")); }
-    Ok(json!({"status": status, "body": String::from_utf8_lossy(&bytes)}))
+    let out = json!({"status": status, "body": String::from_utf8_lossy(&bytes)});
+    if cacheable && status == 200 {
+        if let Ok(mut c) = cache().lock() {
+            if c.len() >= CACHE_MAX { c.retain(|_, (t, _)| t.elapsed().as_millis() < CACHE_MS); if c.len() >= CACHE_MAX { c.clear(); } }
+            c.insert(key, (std::time::Instant::now(), out.clone()));
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
