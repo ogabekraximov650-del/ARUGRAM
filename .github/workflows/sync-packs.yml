@@ -42,7 +42,7 @@ jobs:
     timeout-minutes: 10
     environment: secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fayllarni yuklash
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}

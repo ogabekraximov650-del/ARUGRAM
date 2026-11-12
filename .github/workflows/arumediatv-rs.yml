@@ -25,7 +25,7 @@ jobs:
     # `APP_SIGN_SECRET` (so'rov imzosi siri) Environment secret (android-native.yml bilan bir xil).
     environment: secret
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -114,7 +114,7 @@ jobs:
             rm -f "$S.session"
           done
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: arumediatv-rs-${{ github.run_number }}
           path: ${{ steps.apk.outputs.dir }}

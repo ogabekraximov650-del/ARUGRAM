@@ -32,8 +32,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: ffmpeg
@@ -63,7 +63,7 @@ jobs:
       - name: Sessiyani o'chirish
         if: always()
         run: rm -f tool/video/pyro_session.session
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: video-assets
           path: tool/video/assets
@@ -79,13 +79,13 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         continue-on-error: true
         with:
           name: video-assets
           path: tool/video/assets
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Shriftlar va ffmpeg
@@ -102,7 +102,7 @@ jobs:
           mkdir -p seg
           python3 tool/video/render.py segment "$A" "$Z" "seg/seg_${{ matrix.shard }}.mp4"
           ffprobe -v error -show_entries stream=nb_frames -of csv=p=0 "seg/seg_${{ matrix.shard }}.mp4"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: seg-${{ matrix.shard }}
           path: seg/seg_${{ matrix.shard }}.mp4
@@ -112,13 +112,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - run: pip install --no-cache-dir numpy
       - run: python3 tool/video/audio.py audio.wav
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: video-audio
           path: audio.wav
@@ -129,10 +129,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: parts
       - name: Birlashtirish
@@ -143,7 +143,7 @@ jobs:
           ffmpeg -v error -y -f concat -safe 0 -i list.txt -i parts/video-audio/audio.wav \
             -c:v copy -c:a aac -b:a 192k -ar 44100 -shortest -movflags +faststart aru_video.mp4
           ffprobe -v error -show_entries format=duration,size:stream=codec_name,width,height -of default=nw=1 aru_video.mp4
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: aru-video
           path: aru_video.mp4
@@ -156,15 +156,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: ffmpeg va paketlar
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
           pip install --no-cache-dir -r tool/video/requirements.txt
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: aru-video
           path: out

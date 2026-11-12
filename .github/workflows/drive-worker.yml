@@ -27,7 +27,7 @@ jobs:
       run:
         working-directory: ARUmultiplatform/drive/worker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -45,7 +45,7 @@ jobs:
       - name: worker-build
         run: cargo install worker-build --locked
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
 

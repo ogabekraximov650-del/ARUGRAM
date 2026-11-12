@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Qayta boshlash
         env:
           NEW_GH_TOKEN: ${{ secrets.NEW_GH_TOKEN }}

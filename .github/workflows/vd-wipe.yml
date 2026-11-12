@@ -26,7 +26,7 @@ jobs:
       API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
       PYTHONUNBUFFERED: '1'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # JONLI baza: worker `tool/migrate/new_turso.enc` dagi yangi bazani ishlatadi (deploy uni GitHub Secret'dan USTUN qo'yadi). Birinchi urinish
       # xato bilan ESKI (secret) bazani tozalagan edi — endi worker ishlatadigan baza tanlanadi. URL/token logda ko'rinmaydi.
       - name: Jonli baza ulanishi
@@ -57,7 +57,7 @@ jobs:
           ls -la "$RUNNER_TEMP/turso_backup.jsonl.gz.enc"
       - name: Zaxirani saqlash (artifact)
         if: steps.backup.outputs.ok == '1'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turso-zaxira-shifrlangan
           path: ${{ runner.temp }}/turso_backup.jsonl.gz.enc
