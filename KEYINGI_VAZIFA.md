@@ -7382,3 +7382,10 @@ Sabab: jurnal bo'lagi (`db_1_v1`) har yozuvdan keyin butun fayl bo'lib (≤1 MiB
 - **O'lchagich:** `/status` va `/usage` da `telegram_stats` (so'rovlar, yuborilgan/yuklab olingan baytlar, ishga tushgandan beri).
 - **Sinov:** `tests/e2e.py` + `tests/mock_tg.py` (soxta Telegram: arzon yozuv yuklanmaydi, muhim yuklanadi, 24 bo'lakdan keyin birlashadi, snapshot eskilarini o'chiradi, disk yo'qolganda tiklanadi) — `ample-rs.yml` CI'da ham ishlaydi. Eski format bilan moslik qo'lda sinalgan (eski binar bilan yaratib, yangi binar bilan tiklash).
 - Narxi: server diski butunlay yo'qolsa, so'nggi ≤2 daqiqadagi muhim va ≤3 soatdagi arzon yozuvlar tiklanmaydi.
+
+## Anibla: so'rovlar Ample o'tkazgichi orqali (2026-11-12)
+
+**Nima:** anibla.uz (nginx) Worker'ning Cloudflare IP'larini bloklaydi ("403 Forbidden", Ample'dan esa 200). Shu sabab Worker'ning `anibla.rs::http()` anibla.uz so'rovlarini Ample'dagi `POST /ahttp` orqali yuboradi (`AMPLE_URL`/`AMPLE_TOKEN`; ular bo'sh bo'lsa avvalgidek to'g'ridan-to'g'ri).
+**Xavfsizlik:** `ample-rs/src/fetch.rs` — faqat `PROXY_HOSTS` (standart `anibla.uz`) hostlari, faqat https, yo'naltirishsiz, javob <= 8 MiB, 20 s; admin kaliti kerak.
+**Qolgan xavf:** GitHub Actions (`anibla.yml` videoni yuklaydi) ham bloklangan bo'lishi mumkin — alohida tekshirish kerak.
+**Fayllar:** `ARUmultiplatform/ample-rs/src/fetch.rs`, `main.rs`, `worker/src/anibla.rs` (`PROXY`, `set_proxy`, `http_via`).

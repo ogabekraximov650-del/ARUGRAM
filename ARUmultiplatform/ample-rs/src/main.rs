@@ -3,6 +3,7 @@
 //! RU: tgstore-jr (Rust): запросы формата Turso pipeline на libSQL, журнал в папках db_N_vV и копия в Telegram.
 mod archive;
 mod crypto;
+mod fetch;
 mod store;
 mod tg;
 
@@ -105,6 +106,7 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
             };
             match r { Ok(v) => json_resp(200, v), Err(e) => json_resp(500, json!({"message": e.to_string()})) }
         }
+        "ahttp" => match fetch::run(&b).await { Ok(v) => json_resp(200, v), Err(e) => json_resp(502, json!({"message": e.to_string()})) },
         "replicate" | "snapshot" => {
             let (Some(tg), Some(key)) = (app.tg.as_ref(), app.key.as_ref()) else { return json_resp(200, json!({"skipped": true})) };
             let r = if path == "replicate" { store::replicate(&app.st, tg, key, true).await } else { store::snapshot(&app.st, tg, key).await };

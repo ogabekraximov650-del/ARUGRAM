@@ -95,7 +95,20 @@ fn creds(env: &Env) -> Option<Creds> {
     })
 }
 
+thread_local! {
+    /// UZ: Ample o'tkazgichi (`AMPLE_URL`, `AMPLE_TOKEN`): anibla.uz Cloudflare IP'larini bloklaydi (nginx 403), shuning uchun so'rov Ample orqali ketadi.
+    /// EN: Ample pass-through config: anibla.uz blocks Cloudflare IPs (nginx 403), so requests go through Ample.
+    static PROXY: std::cell::RefCell<Option<(String, String)>> = const { std::cell::RefCell::new(None) };
+}
+
+fn set_proxy(env: &Env) {
+    let u = env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default();
+    let t = env.secret("AMPLE_TOKEN").map(|v| v.to_string()).unwrap_or_default();
+    PROXY.with(|p| *p.borrow_mut() = if u.is_empty() || t.is_empty() { None } else { Some((u.trim_end_matches('/').to_string(), t)) });
+}
+
 fn site(env: &Env) -> String {
+    set_proxy(env);
     creds(env).map(|c| c.site).unwrap_or_else(|| DEFAULT_SITE.to_string())
 }
 
@@ -135,6 +148,11 @@ const HTTP_TIMEOUT_MS: u32 = 20_000;
 
 async fn http(url: &str, method: Method, body: Option<Value>, cookie: Option<&str>)
     -> std::result::Result<(u16, String), String> {
+    let via = PROXY.with(|p| p.borrow().clone()).filter(|_| {
+        let host = url.strip_prefix("https://").unwrap_or("").split('/').next().unwrap_or("");
+        host == "anibla.uz" || host.ends_with(".anibla.uz")
+    });
+    if let Some((base, token)) = via { return http_via(&base, &token, url, method, body, cookie).await; }
     let h = Headers::new();
     let _ = h.set("User-Agent", UA);
     let _ = h.set("Accept", "application/json, text/plain, */*");
@@ -158,6 +176,30 @@ async fn http(url: &str, method: Method, body: Option<Value>, cookie: Option<&st
     let code = r.status_code();
     let text = r.text().await.unwrap_or_default();
     Ok((code, text))
+}
+
+async fn http_via(base: &str, token: &str, url: &str, method: Method, body: Option<Value>, cookie: Option<&str>)
+    -> std::result::Result<(u16, String), String> {
+    let mut hd = json!({"User-Agent": UA, "Accept": "application/json, text/plain, */*"});
+    if body.is_some() { hd["Content-Type"] = json!("application/json"); }
+    if let Some(c) = cookie { hd["Cookie"] = json!(c); }
+    let mut payload = json!({"url": url, "method": method.to_string(), "headers": hd});
+    if let Some(b) = body { payload["body"] = json!(b.to_string()); }
+    let h = Headers::new();
+    let _ = h.set("Authorization", &format!("Bearer {token}"));
+    let _ = h.set("Content-Type", "application/json");
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post).with_headers(h).with_body(Some(payload.to_string().into()));
+    let req = Request::new_with_init(&format!("{base}/ahttp"), &init).map_err(|e| e.to_string())?;
+    let signal = AbortSignal::from(worker::web_sys::AbortSignal::timeout_with_u32(HTTP_TIMEOUT_MS + 5_000));
+    let mut r = Fetch::Request(req).send_with_signal(&signal).await
+        .map_err(|e| if signal.aborted() { format!("sayt {} s ichida javob bermadi", HTTP_TIMEOUT_MS / 1000) } else { format!("tarmoq: {e}") })?;
+    let text = r.text().await.unwrap_or_default();
+    let v: Value = serde_json::from_str(&text).map_err(|_| format!("o'tkazgich javobi tushunarsiz (HTTP {})", r.status_code()))?;
+    if r.status_code() != 200 {
+        return Err(format!("o'tkazgich: {}", v["message"].as_str().unwrap_or("xato")));
+    }
+    Ok((v["status"].as_u64().unwrap_or(0) as u16, v["body"].as_str().unwrap_or("").to_string()))
 }
 
 // ── Bot orqali ulangan Anibla akkaunti ───────────────────────
@@ -243,6 +285,7 @@ pub(crate) async fn connect_account(env: &Env, phone: &str, password: &str) -> s
 }
 
 async fn login(env: &Env) -> std::result::Result<String, String> {
+    set_proxy(env);
     let cfg = creds_cfg(env).await;
     let Some(c) = cfg.or_else(|| creds(env)) else {
         return Err("login/parol sozlanmagan (ANIBLA_CREDS)".into());
