@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { toCsv, parseCsv, csvObjects, seal, open, keyOf, SPECS, makeTelegram } from './archive.mjs';
+import { toCsv, parseCsv, csvObjects, seal, open, keyOf, SPECS, makeTelegram, packFiles, unpackFiles } from './archive.mjs';
 
 test('CSV keeps NULL, empty string, quotes, commas and newlines', () => {
   const cols = ['id', 'body', 'note'];
@@ -33,4 +33,12 @@ test('mock telegram stores and returns files', async () => {
   assert.equal((await tg.get(r.file_id)).toString(), 'abc');
   await tg.del(r.msg_id);
   await assert.rejects(() => tg.get(r.file_id));
+});
+
+test('chunk container packs and unpacks named files', () => {
+  const files = { 'billing_log.csv': Buffer.from('id\n"1"\n'), 'reports_db.csv': Buffer.from('') };
+  const out = unpackFiles(packFiles(files));
+  assert.deepEqual(Object.keys(out).sort(), ['billing_log.csv', 'reports_db.csv']);
+  assert.equal(out['billing_log.csv'].toString(), 'id\n"1"\n');
+  assert.equal(out['reports_db.csv'].length, 0);
 });

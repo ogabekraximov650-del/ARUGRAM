@@ -109,7 +109,7 @@ async function usage() {
 // UZ: doira tizimi shu serverda: TG_BOT_TOKEN + TG_CHANNEL_ID berilganda (yoki TG_MOCK=1 — sinov) yoqiladi, har 5 daqiqada bazani tekshiradi.
 // EN/RU: the circle system runs here when TG_BOT_TOKEN + TG_CHANNEL_ID are set (or TG_MOCK=1 for tests).
 const arch = (E.TG_BOT_TOKEN && E.TG_CHANNEL_ID) || E.TG_MOCK === '1'
-  ? new Archive(pool, makeTelegram({ token: E.TG_BOT_TOKEN, channel: E.TG_CHANNEL_ID, mock: E.TG_MOCK === '1' }), { usage: async () => (await usage()).percent, cacheDir: E.ARCH_CACHE_DIR })
+  ? new Archive(pool, makeTelegram({ token: E.TG_BOT_TOKEN, channel: E.TG_CHANNEL_ID, mock: E.TG_MOCK === '1' }), { usage: async () => (await usage()).percent, dir: E.ARCH_DIR })
   : null;
 if (arch && E.ARCHIVE_ON !== '0') {
   setInterval(() => { arch.run().then((r) => { if (r.active) log('doira:', JSON.stringify(r).slice(0, 300)); }).catch((e) => log('doira xato:', e.message)); }, 5 * 60_000).unref();
