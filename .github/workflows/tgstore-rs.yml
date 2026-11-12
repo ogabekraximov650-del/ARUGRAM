@@ -48,7 +48,7 @@ jobs:
 
       - name: worker-build va wrangler
         run: |
-          cargo install worker-build --locked
+          cargo install worker-build --version 0.8.7 --locked
           npm install -g wrangler
 
       - name: WASM yig'ish (SQLite WASM bilan)

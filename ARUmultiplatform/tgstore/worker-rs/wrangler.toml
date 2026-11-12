@@ -7,7 +7,7 @@ compatibility_date = "2024-01-01"
 workers_dev = true
 
 [build]
-command = "cargo install -q worker-build && worker-build --release"
+command = "cargo install -q worker-build --version 0.8.7 && worker-build --release"
 
 [vars]
 # UZ: baza = Ample PostgreSQL (pg-gateway orqali, Turso formatida). EN: DB = Ample PostgreSQL via the pg-gateway (Turso-shaped). RU: baza = Ample PostgreSQL.
