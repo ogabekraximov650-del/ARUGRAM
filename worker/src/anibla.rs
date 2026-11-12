@@ -1527,7 +1527,12 @@ async fn video_of(env: &Env, it: &Item, ep: Option<(&str, &Episode)>) -> std::re
         Some((season, e)) => {
             match get(env, &format!("episodes/{}/{}/{}", enc(&it.s), enc(season), enc(&e.slug)), true).await {
                 Ok(v) => v,
-                Err(_) => get(env, &format!("episodes/{}", enc(&e.slug)), true).await?,
+                // UZ: zaxira yo'l ham xato bersa, ASOSIY yo'lning xatosi ko'rsatiladi (zaxiranikidagi "Cannot GET 404" haqiqiy sababni yashirardi).
+                // EN: if the fallback also fails, report the PRIMARY path's error (the fallback's "Cannot GET 404" hid the real cause).
+                Err(first) => match get(env, &format!("episodes/{}", enc(&e.slug)), true).await {
+                    Ok(v) => v,
+                    Err(_) => return Err(first),
+                },
             }
         }
         None => get(env, &format!("movies/{}", enc(&it.s)), true).await?,
