@@ -76,7 +76,7 @@ fn bad(msg: &str) -> Result<Response> {
 /// 1000 kun (ARUDRIVE `LIST_TTL`/`CHUNK_CACHE_SECONDS` bilan bir xil). `META_V` — kesh kalitining versiyasi: o'zgartirib qayta deploy qilinsa
 /// eski yozuvlarning hammasi ko'rinmay qoladi (masalan, bazani noldan boshlaganda).
 const META_TTL: u64 = 1000 * 24 * 3600;
-const META_V: &str = "3";
+const META_V: &str = "4";
 
 fn meta_url(name: &str) -> String {
     cache_key_url(&format!("vd~{name}"), &format!("meta{META_V}"))
