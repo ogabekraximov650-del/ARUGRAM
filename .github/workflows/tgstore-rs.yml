@@ -103,7 +103,7 @@ jobs:
           # UZ: ilova so'rov imzosi production bilan bir xil bo'lishi uchun. EN: same app-signature secret as production. RU: tot zhe sekret podpisi.
           if [ -n "$APP_SIGN_SECRET" ]; then printf '%s' "$APP_SIGN_SECRET" | wrangler secret put APP_SIGN_SECRET; fi
           # UZ: baza = Ample PostgreSQL darvozasi. Kalit hali o'rnatilmagan bo'lsa, birinchi chaqiruv o'rnatadi (`/setkey`). EN/RU: Ample PG gateway; key set on first call.
-          GW=https://kzc46nt5ap8a.ample.run
+          GW=https://5fyhcmq3jq3j.ample.run
           curl -sS -m 30 -X POST "$GW/setkey" -d "{\"key\":\"$SK\"}" || true; echo
           printf '%s' "$GW" | wrangler secret put TURSO_URL
           printf '%s' "$SK" | wrangler secret put TURSO_TOKEN

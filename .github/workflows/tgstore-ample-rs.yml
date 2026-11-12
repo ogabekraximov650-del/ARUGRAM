@@ -1,0 +1,30 @@
+# UZ: Ample jurnal-baza serveri (Rust, `ARUmultiplatform/tgstore/ample-rs/`): testlar + release yig'ish (artifakt). EN: tests + release build of the Ample journal-store server. RU: тесты и сборка.
+name: tgstore-ample-rs (Rust) — testlar va yig'ish
+
+on:
+  push:
+    paths:
+      - 'ARUmultiplatform/tgstore/ample-rs/**'
+      - '.github/workflows/tgstore-ample-rs.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/tgstore/ample-rs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ARUmultiplatform/tgstore/ample-rs
+      - name: Testlar
+        run: cargo test
+      - name: Release yig'ish
+        run: cargo build --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tgstore-jr-linux-x64
+          path: ARUmultiplatform/tgstore/ample-rs/target/release/tgstore-jr
