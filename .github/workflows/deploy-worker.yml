@@ -17,6 +17,7 @@ on:
       - 'tool/bot/main_bot.enc'
       - 'tool/bot/encode_bot.enc'
       - 'tool/migrate/new_turso.enc'
+      - 'tool/migrate/ample.enc'
       - 'tool/r2/r2_keys.enc'
       - '.github/workflows/deploy-worker.yml'
   workflow_dispatch:
@@ -106,6 +107,21 @@ jobs:
           # Ample (jurnal-baza): berilsa asosiy ma'lumotlar shu yerda; "Post kodlash" va "Anibla yuklash" navbatlari Turso'da qoladi.
           put AMPLE_URL "${{ secrets.AMPLE_URL }}"
           put AMPLE_TOKEN "${{ secrets.AMPLE_TOKEN }}"
+          # Ample manzili va kaliti shifrlangan faylda: `tool/migrate/ample.enc` (JSON {"url","token"}, AES-256-CBC/PBKDF2, kalit — ENCODE_TOKEN).
+          # Bo'lsa GitHub Secret'dagi qiymatdan USTUN turadi. Ochilmasa — avvalgi qiymat saqlanadi.
+          if [ -f ../tool/migrate/ample.enc ]; then
+            K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+            AT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../tool/migrate/ample.enc 2>/dev/null || true)
+            AU=$(printf '%s' "$AT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
+            AK=$(printf '%s' "$AT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])' 2>/dev/null || true)
+            if [ -n "$AU" ] && [ -n "$AK" ]; then
+              put AMPLE_URL "$AU"
+              put AMPLE_TOKEN "$AK"
+              echo "✅ AMPLE_URL/AMPLE_TOKEN shifrlangan fayldan o'rnatildi"
+            else
+              echo "⚠️  ample.enc ochilmadi — Ample qiymatlari o'zgarmadi"
+            fi
+          fi
           # Yangi Turso bazasi: `tool/migrate/new_turso.enc` (JSON {"url","token"}, AES-256-CBC/PBKDF2, kalit — ENCODE_TOKEN)
           # bo'lsa GitHub Secret'dagi (eski) qiymatdan USTUN turadi. Ochilmasa — eski qiymat saqlanadi.
           if [ -f ../tool/migrate/new_turso.enc ]; then
