@@ -103,8 +103,8 @@ pub async fn probe(cfg: &Cfg, url: &str) -> Result<Info> {
         Ok(i) => Ok(i),
         Err(e) => {
             // Rumble sahifasi serverga Cloudflare tekshiruvini beradi (403); embed sahifasi va CDN esa ochiq — to'g'ridan-to'g'ri havolalar olinadi.
-            if let Some(id) = rumble_id(url) {
-                match rumble_probe(&id).await {
+            if rumble_id(url).is_some() {
+                match rumble_probe(url).await {
                     Ok(i) => return Ok(i),
                     Err(e2) => return Err(anyhow!("{e}\n(Rumble embed yo'li ham ishlamadi: {e2})")),
                 }
@@ -200,20 +200,53 @@ pub fn parse_rumble_embed(html: &str, id: &str) -> Option<Info> {
     })
 }
 
-async fn rumble_probe(id: &str) -> Result<Info> {
-    let url = format!("https://rumble.com/embed/{id}/");
-    // Avval `curl` (Cloudflare uni oddiy brauzerdek qabul qiladi), bo'lmasa o'zimizning HTTP mijoz.
-    let mut html = match Command::new("curl").args(["-sL", "-m", "30", "-A", UA]).arg(&url).output().await {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => String::new(),
-    };
-    if !html.contains("p.f[") {
-        html = reqwest::Client::builder().user_agent(UA).timeout(std::time::Duration::from_secs(30)).build()?.get(&url).send().await?.text().await?;
+/// oEmbed javobidan haqiqiy embed ID: `...src="https://rumble.com/embed/v72cjsq/"...` -> `v72cjsq`.
+pub fn embed_id_from_oembed(v: &Value) -> Option<String> {
+    let html = v["html"].as_str()?;
+    let rest = &html[html.find("/embed/")? + 7..];
+    let id: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+    if id.len() >= 4 { Some(id) } else { None }
+}
+
+fn pct(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// Matnni `curl` bilan oladi (Cloudflare uni oddiy brauzerdek qabul qiladi); bo'lmasa o'zimizning HTTP mijoz.
+async fn fetch_text(url: &str) -> Result<String> {
+    if let Ok(o) = Command::new("curl").args(["-sL", "-m", "30", "-A", UA]).arg(url).output().await {
+        if o.status.success() && !o.stdout.is_empty() {
+            return Ok(String::from_utf8_lossy(&o.stdout).to_string());
+        }
     }
+    Ok(reqwest::Client::builder().user_agent(UA).timeout(std::time::Duration::from_secs(30)).build()?.get(url).send().await?.text().await?)
+}
+
+/// Rumble: sahifa ID'si (v74j7sy) va embed ID'si (v72cjsq) HAR XIL — haqiqiy embed ID oEmbed orqali olinadi, so'ng embed sahifasidan to'g'ridan-to'g'ri MP4 havolalari.
+async fn rumble_probe(url: &str) -> Result<Info> {
+    let (mut embed_id, mut title, mut dur) = (None::<String>, None::<String>, 0i64);
+    if let Some(rest) = url.split("rumble.com/embed/").nth(1) {
+        embed_id = Some(rest.chars().take_while(|c| c.is_ascii_alphanumeric()).collect());
+    } else {
+        let oe = fetch_text(&format!("https://rumble.com/api/Media/oembed.json?url={}", pct(url))).await?;
+        let v: Value = serde_json::from_str(&oe).map_err(|_| anyhow!("Rumble oEmbed javobi tushunarsiz"))?;
+        embed_id = embed_id_from_oembed(&v);
+        title = v["title"].as_str().map(|t| t.to_string());
+        dur = v["duration"].as_i64().unwrap_or(0);
+    }
+    let id = embed_id.ok_or_else(|| anyhow!("Rumble: embed ID topilmadi"))?;
+    let html = fetch_text(&format!("https://rumble.com/embed/{id}/")).await?;
     if !html.contains("p.f[") {
         return Err(anyhow!("Rumble embed sahifasi video ma'lumotini bermadi ({} bayt)", html.len()));
     }
-    parse_rumble_embed(&html, id).ok_or_else(|| anyhow!("Rumble embed ma'lumotini o'qib bo'lmadi"))
+    let mut info = parse_rumble_embed(&html, &id).ok_or_else(|| anyhow!("Rumble embed ma'lumotini o'qib bo'lmadi"))?;
+    if let Some(t) = title {
+        info.title = t;
+    }
+    if dur > 0 {
+        info.duration = dur;
+    }
+    Ok(info)
 }
 
 async fn probe_ytdlp(cfg: &Cfg, url: &str) -> Result<Info> {
@@ -451,6 +484,14 @@ mod tests {
         assert_eq!(i.opts[0].size, Some(82_000_000)); // video-only + audio
         assert_eq!(i.opts[1].size, Some(42_000_000)); // taxminiy hajm ham hisobga olinadi
         assert_eq!(i.audio_size, Some(2_000_000));
+    }
+
+    #[test]
+    fn oembed_gives_real_embed_id() {
+        let v = json!({"html": "<iframe src=\"https://rumble.com/embed/v72cjsq/\" width=\"1024\"></iframe>", "title": "Duo aura"});
+        assert_eq!(embed_id_from_oembed(&v), Some("v72cjsq".to_string()));
+        assert_eq!(embed_id_from_oembed(&json!({"html": "yo'q"})), None);
+        assert_eq!(pct("https://rumble.com/v1-a b.html"), "https%3A%2F%2Frumble.com%2Fv1-a%20b.html");
     }
 
     #[test]
