@@ -335,6 +335,31 @@ pub async fn probe_duration(path: &Path) -> f64 {
     out.ok().and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().ok()).unwrap_or(0.0)
 }
 
+/// Video uchun kichik rasm (thumbnail): Telegram talabi — JPEG, eni/bo'yi 320 px dan oshmasin, hajmi 200 KB dan kichik. Natija: rasm fayli yo'li.
+pub async fn make_thumb(video: &Path, out: &Path) -> Option<PathBuf> {
+    let dur = probe_duration(video).await;
+    // Boshidan 1 soniya (qora kadr bo'lmasin), qisqa videoda o'rtasidan.
+    let at = if dur > 3.0 { 1.0 } else { dur / 2.0 };
+    for q in ["4", "8", "14", "22"] {
+        let ok = Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-ss", &format!("{at:.2}"), "-i"])
+            .arg(video)
+            .args(["-frames:v", "1", "-vf", "scale='min(320,iw)':'min(320,ih)':force_original_aspect_ratio=decrease", "-q:v", q])
+            .arg(out)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok && std::fs::metadata(out).map(|m| m.len() > 0 && m.len() < 200_000).unwrap_or(false) {
+            return Some(out.to_path_buf());
+        }
+    }
+    let _ = std::fs::remove_file(out);
+    None
+}
+
 /// Bitta paket: (ko'rsatish vaqti soniyada, hajm baytda, kalit kadrmi).
 pub type Pkt = (f64, u64, bool);
 
@@ -583,10 +608,13 @@ mod tests {
                 assert!(*sz >= 45_000_000, "{i}-qism 45 MB dan kichik: {sz}");
             }
         }
-        // Har qism ochiladigan (buzilmagan) video.
+        // Har qism ochiladigan (buzilmagan) video va undan thumbnail yasaladi (JPEG, < 200 KB).
         for p in &parts {
             assert!(probe_duration(p).await > 1.0, "{p:?} ochilmadi");
         }
+        let th = make_thumb(&parts[0], &dir.join("t.jpg")).await.expect("thumbnail yasalmadi");
+        let tsz = std::fs::metadata(&th).unwrap().len();
+        assert!(tsz > 500 && tsz < 200_000, "thumbnail hajmi {tsz}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

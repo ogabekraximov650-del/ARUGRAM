@@ -50,8 +50,12 @@ impl Bot {
     }
 
     /// Faylni (video yoki audio) yuboradi. 429 (`retry_after`) va tarmoq xatolarida 3 martagacha qayta uriniladi.
-    async fn send_file(&self, chat: i64, audio: bool, path: &Path, caption: &str, dur: u64, w: i64, h: i64) -> Result<()> {
+    async fn send_file(&self, chat: i64, audio: bool, path: &Path, caption: &str, dur: u64, w: i64, h: i64, thumb: Option<&Path>) -> Result<()> {
         let bytes = tokio::fs::read(path).await?;
+        let thumb_bytes = match thumb {
+            Some(t) => tokio::fs::read(t).await.ok(),
+            None => None,
+        };
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or(if audio { "audio.mp3" } else { "video.mp4" }).to_string();
         let mut last = anyhow!("yuborilmadi");
         for attempt in 0..3 {
@@ -66,6 +70,9 @@ impl Bot {
                 form = form.text("duration", dur.to_string());
             }
             form = form.part(field, reqwest::multipart::Part::bytes(bytes.clone()).file_name(name.clone()).mime_str(mime)?);
+            if let Some(tb) = &thumb_bytes {
+                form = form.part("thumbnail", reqwest::multipart::Part::bytes(tb.clone()).file_name("thumb.jpg").mime_str("image/jpeg")?);
+            }
             match self.up.post(format!("{}/{method}", self.base)).multipart(form).send().await {
                 Ok(resp) => {
                     let r: Value = resp.json().await.unwrap_or(json!({}));
@@ -383,9 +390,11 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
         let psize = std::fs::metadata(part)?.len();
         app.bot.edit(job.chat_id, job.status_msg, &format!("📤 #{} qism {}/{} yuborilmoqda ({})…\n{title}", job.id, i + 1, n, dl::human(psize)), None).await;
         let dur = dl::probe_duration(part).await.round() as u64;
+        // Kichik rasm (thumbnail): faqat video uchun; yasalmasa Telegram o'zi tanlaydi.
+        let thumb = if is_audio { None } else { dl::make_thumb(part, &dir.join(format!("thumb{i}.jpg"))).await };
         let caption = if n > 1 { format!("{} ({}/{})", job.title.chars().take(900).collect::<String>(), i + 1, n) } else { job.title.chars().take(900).collect::<String>() };
         let r = tokio::select! {
-            r = app.bot.send_file(job.chat_id, is_audio, part, &caption, dur, w, h) => r,
+            r = app.bot.send_file(job.chat_id, is_audio, part, &caption, dur, w, h, thumb.as_deref()) => r,
             _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
         };
         r.map_err(|e| anyhow!("{}/{} qism yuborilmadi: {e}", i + 1, n))?;
