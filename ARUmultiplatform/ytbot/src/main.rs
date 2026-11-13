@@ -45,6 +45,11 @@ async fn main() -> Result<()> {
         return Err(anyhow::anyhow!("WEBHOOK_SECRET kamida 16 belgi bo'lishi kerak (harf, raqam, _ va -)"));
     }
     std::fs::create_dir_all(&cfg.data_dir)?;
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(|a| a == "sendcode").unwrap_or(false) {
+        let phone = args.get(2).cloned().unwrap_or_default();
+        return bot::cli_sendcode(cfg, &phone, args.get(3).map(|a| a == "resend").unwrap_or(false)).await;
+    }
     eprintln!("ytbot ishga tushdi");
     bot::run(cfg).await
 }

@@ -667,3 +667,27 @@ async fn stream_upload(app: &Arc<App>, url: &str, fid: &str, size: u64, name: &s
         Err(_) => Err(anyhow!("oqim vaqti tugadi")),
     }
 }
+
+
+/// Tashxis: `ytbot sendcode +998... [resend]` — kodni so'raydi va QAYSI USULDA yuborilganini chiqaradi (kodning o'zi ko'rinmaydi, sign-in qilinmaydi).
+pub async fn cli_sendcode(cfg: Arc<Cfg>, phone: &str, resend: bool) -> Result<()> {
+    let conn = db::open(&format!("{}/ytbot.db", cfg.data_dir)).await?;
+    let bot = Bot::new(&cfg.bot_token);
+    let session = Arc::new(SqliteSession::open(format!("{}/session.sqlite", cfg.data_dir)).await?);
+    let pool = grammers_client::SenderPool::new(Arc::clone(&session), cfg.api_id);
+    let tg = Client::new(pool.handle);
+    tokio::spawn(pool.runner.run());
+    let mut updates = pool.updates;
+    tokio::spawn(async move { while updates.recv().await.is_some() {} });
+    let app = App { cfg, db: conn, bot, username: String::new(), tg, pending: Mutex::new(Pending::None), peer: Mutex::new(None) };
+    let sent = send_code(&app, phone).await?;
+    println!("1-yuborish: usul = {} | keyingi = {:?}", sent.kind, sent.next);
+    if resend {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        match resend_code(&app, &sent).await {
+            Ok(n) => println!("2-yuborish (resend): usul = {} | keyingi = {:?}", n.kind, n.next),
+            Err(e) => println!("resend xato: {e}"),
+        }
+    }
+    Ok(())
+}
