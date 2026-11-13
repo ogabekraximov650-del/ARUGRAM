@@ -1,26 +1,26 @@
-// UZ: bot mantig'i: Telegram Bot API (long polling), akkauntni kod bilan ulash, navbat ishchisi. EN: bot logic: Bot API long polling, code-based account login, queue worker.
+// UZ: bot mantig'i: Bot API (webhook yoki long polling), navbat ishchisi, video ~45 MB li qismlarga bo'linib yuboriladi. EN: bot logic: Bot API, queue worker, video sent in ~45 MB parts.
 use crate::{db, dl, Cfg};
 use anyhow::{anyhow, Result};
-use grammers_client::client::PasswordToken;
-use grammers_client::tl;
-use grammers_client::message::InputMessage;
-use grammers_client::{media::Attribute, Client};
-use grammers_session::storages::SqliteSession;
-use grammers_session::types::PeerRef;
 use libsql::Connection;
 use serde_json::{json, Value};
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
 
 pub struct Bot {
     http: reqwest::Client,
+    /// Fayl yuborish uchun alohida mijoz: 50 MB lik qism sekin tarmoqda daqiqalab yuboriladi.
+    up: reqwest::Client,
     base: String,
 }
 
 impl Bot {
     fn new(token: &str) -> Self {
-        Self { http: reqwest::Client::builder().timeout(Duration::from_secs(70)).build().unwrap(), base: format!("https://api.telegram.org/bot{token}") }
+        Self {
+            http: reqwest::Client::builder().timeout(Duration::from_secs(70)).build().unwrap(),
+            up: reqwest::Client::builder().timeout(Duration::from_secs(900)).build().unwrap(),
+            base: format!("https://api.telegram.org/bot{token}"),
+        }
     }
 
     async fn call(&self, method: &str, body: Value) -> Result<Value> {
@@ -49,111 +49,44 @@ impl Bot {
         let _ = self.call("editMessageText", b).await;
     }
 
-    async fn delete(&self, chat: i64, msg: i64) {
-        let _ = self.call("deleteMessage", json!({"chat_id": chat, "message_id": msg})).await;
-    }
-}
-
-/// Yuborilgan kod: telefon, Telegram bergan `phone_code_hash`, qaysi usulda yuborilgani va keyingi usul.
-struct Sent {
-    phone: String,
-    hash: String,
-    kind: String,
-    next: Option<String>,
-}
-
-enum Pending {
-    None,
-    Code(Sent),
-    Pass(PasswordToken),
-}
-
-fn describe_type(t: &tl::enums::auth::SentCodeType) -> String {
-    use tl::enums::auth::SentCodeType as T;
-    match t {
-        T::App(_) => "Telegram ILOVASIGA (\"Telegram\" xizmat chati, boshqa qurilmangizdagi Telegram)".into(),
-        T::Sms(_) => "SMS orqali".into(),
-        T::Call(_) => "telefon qo'ng'irog'i orqali (kodni robot ovozi aytadi)".into(),
-        T::FlashCall(_) | T::MissedCall(_) => "o'tkazib yuborilgan qo'ng'iroq orqali (raqamning oxirgi raqamlari)".into(),
-        T::FirebaseSms(_) => "SMS orqali (Google/Firebase)".into(),
-        T::EmailCode(_) => "elektron pochtaga".into(),
-        T::SetUpEmailRequired(_) => "pochta ulanishi talab qilinadi (bu akkaunt uchun kod pochta orqali)".into(),
-        T::FragmentSms(_) => "Fragment orqali SMS".into(),
-        _ => "boshqa usulda".into(),
-    }
-}
-
-fn describe_next(t: &tl::enums::auth::CodeType) -> String {
-    use tl::enums::auth::CodeType as C;
-    match t {
-        C::Sms => "SMS".into(),
-        C::Call => "telefon qo'ng'irog'i".into(),
-        C::FlashCall => "flash-qo'ng'iroq".into(),
-        C::MissedCall => "o'tkazib yuborilgan qo'ng'iroq".into(),
-        C::FragmentSms => "Fragment SMS".into(),
-    }
-}
-
-fn sent_from(phone: &str, r: tl::enums::auth::SentCode) -> Result<Sent> {
-    match r {
-        tl::enums::auth::SentCode::Code(c) => Ok(Sent { phone: phone.to_string(), hash: c.phone_code_hash, kind: describe_type(&c.r#type), next: c.next_type.as_ref().map(describe_next) }),
-        _ => Err(anyhow!("kutilmagan javob (kod yuborilmadi)")),
-    }
-}
-
-/// Kodni so'raydi (usul ma'lum bo'ladi). Raqam boshqa data markazda bo'lsa kutubxona ko'chishni bajaradi, so'ng qayta so'raladi.
-async fn send_code(app: &App, phone: &str) -> Result<Sent> {
-    let req = tl::functions::auth::SendCode {
-        phone_number: phone.to_string(),
-        api_id: app.cfg.api_id,
-        api_hash: app.cfg.api_hash.clone(),
-        settings: tl::types::CodeSettings {
-            allow_flashcall: false,
-            current_number: false,
-            allow_app_hash: false,
-            allow_missed_call: false,
-            allow_firebase: false,
-            logout_tokens: None,
-            token: None,
-            app_sandbox: None,
-            unknown_number: false,
+    /// Faylni (video yoki audio) yuboradi. 429 (`retry_after`) va tarmoq xatolarida 3 martagacha qayta uriniladi.
+    async fn send_file(&self, chat: i64, audio: bool, path: &Path, caption: &str, dur: u64, w: i64, h: i64) -> Result<()> {
+        let bytes = tokio::fs::read(path).await?;
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or(if audio { "audio.mp3" } else { "video.mp4" }).to_string();
+        let mut last = anyhow!("yuborilmadi");
+        for attempt in 0..3 {
+            let (method, field, mime) = if audio { ("sendAudio", "audio", "audio/mpeg") } else { ("sendVideo", "video", "video/mp4") };
+            let mut form = reqwest::multipart::Form::new().text("chat_id", chat.to_string()).text("caption", caption.chars().take(1000).collect::<String>());
+            if !audio {
+                form = form.text("supports_streaming", "true").text("duration", dur.to_string());
+                if w > 0 && h > 0 {
+                    form = form.text("width", w.to_string()).text("height", h.to_string());
+                }
+            } else {
+                form = form.text("duration", dur.to_string());
+            }
+            form = form.part(field, reqwest::multipart::Part::bytes(bytes.clone()).file_name(name.clone()).mime_str(mime)?);
+            match self.up.post(format!("{}/{method}", self.base)).multipart(form).send().await {
+                Ok(resp) => {
+                    let r: Value = resp.json().await.unwrap_or(json!({}));
+                    if r["ok"].as_bool() == Some(true) {
+                        return Ok(());
+                    }
+                    let wait = r["parameters"]["retry_after"].as_u64();
+                    last = anyhow!("{}", r["description"].as_str().unwrap_or("Bot API xatosi"));
+                    match wait {
+                        Some(s) if attempt < 2 => tokio::time::sleep(Duration::from_secs(s.min(120) + 1)).await,
+                        _ if attempt < 2 && !last.to_string().contains("too big") => tokio::time::sleep(Duration::from_secs(3)).await,
+                        _ => break,
+                    }
+                }
+                Err(e) => {
+                    last = anyhow!("tarmoq: {e}");
+                    tokio::time::sleep(Duration::from_secs(3 * (attempt as u64 + 1))).await;
+                }
+            }
         }
-        .into(),
-    };
-    match app.tg.invoke(&req).await {
-        Ok(r) => sent_from(phone, r),
-        Err(e) if e.is("PHONE_MIGRATE_*") || e.is("NETWORK_MIGRATE_*") => {
-            // Kutubxonaning o'z usuli ko'chishni bajaradi (u kod ham yuboradi), keyin usulni bilish uchun qayta so'raymiz.
-            let _ = app.tg.request_login_code(phone, &app.cfg.api_hash).await;
-            sent_from(phone, app.tg.invoke(&req).await?)
-        }
-        Err(e) => Err(anyhow!("{e}")),
-    }
-}
-
-/// Keyingi usul bilan qayta yuboradi (SMS / qo'ng'iroq).
-async fn resend_code(app: &App, s: &Sent) -> Result<Sent> {
-    let r = app.tg.invoke(&tl::functions::auth::ResendCode { phone_number: s.phone.clone(), phone_code_hash: s.hash.clone(), reason: None }).await.map_err(|e| anyhow!("{e}"))?;
-    sent_from(&s.phone, r)
-}
-
-enum SignIn {
-    Ok,
-    Password(PasswordToken),
-    BadCode,
-    Other(String),
-}
-
-async fn sign_in(app: &App, s: &Sent, code: &str) -> SignIn {
-    match app.tg.invoke(&tl::functions::auth::SignIn { phone_number: s.phone.clone(), phone_code_hash: s.hash.clone(), phone_code: Some(code.to_string()), email_verification: None }).await {
-        Ok(tl::enums::auth::Authorization::Authorization(_)) => SignIn::Ok,
-        Ok(_) => SignIn::Other("bu raqamda Telegram akkaunt yo'q (avval ro'yxatdan o'ting)".into()),
-        Err(e) if e.is("SESSION_PASSWORD_NEEDED") => match app.tg.invoke(&tl::functions::account::GetPassword {}).await {
-            Ok(p) => SignIn::Password(PasswordToken::new(p.into())),
-            Err(e) => SignIn::Other(e.to_string()),
-        },
-        Err(e) if e.is("PHONE_CODE_*") => SignIn::BadCode,
-        Err(e) => SignIn::Other(e.to_string()),
+        Err(last)
     }
 }
 
@@ -161,38 +94,14 @@ pub struct App {
     cfg: Arc<Cfg>,
     db: Connection,
     bot: Bot,
-    username: String,
-    tg: Client,
-    pending: Mutex<Pending>,
-    peer: Mutex<Option<PeerRef>>,
 }
 
 pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
     let conn = db::open(&format!("{}/ytbot.db", cfg.data_dir)).await?;
     let bot = Bot::new(&cfg.bot_token);
     let me = bot.call("getMe", json!({})).await?;
-    let username = me["username"].as_str().unwrap_or("").to_string();
-    eprintln!("bot: @{username}");
-
-    let session = Arc::new(SqliteSession::open(format!("{}/session.sqlite", cfg.data_dir)).await?);
-    let pool = grammers_client::SenderPool::new(Arc::clone(&session), cfg.api_id);
-    let tg = Client::new(pool.handle);
-    tokio::spawn(pool.runner.run());
-    let mut updates = pool.updates;
-    tokio::spawn(async move { while updates.recv().await.is_some() {} }); // MTProto yangilanishlari kerak emas — navbat to'lib qolmasin.
-
-    let app = Arc::new(App { cfg, db: conn, bot, username, tg, pending: Mutex::new(Pending::None), peer: Mutex::new(None) });
-    // Tashxis: MTProto ulanishi va API kalitlari ishlayaptimi (yaroqsiz raqam so'raladi — hech kimga kod yuborilmaydi).
-    let a0 = Arc::clone(&app);
-    tokio::spawn(async move {
-        let authorized = a0.tg.is_authorized().await;
-        eprintln!("mtproto: is_authorized = {authorized:?}");
-        match tokio::time::timeout(Duration::from_secs(30), a0.tg.request_login_code("+10000000000", &a0.cfg.api_hash)).await {
-            Ok(Ok(_)) => eprintln!("mtproto: kod so'rovi ishladi (kutilmagan)"),
-            Ok(Err(e)) => eprintln!("mtproto: sinov javobi (xato kutilgan edi): {e}"),
-            Err(_) => eprintln!("mtproto: sinov 30 s ichida javob bermadi — ulanish muammosi"),
-        }
-    });
+    eprintln!("bot: @{}", me["username"].as_str().unwrap_or(""));
+    let app = Arc::new(App { cfg, db: conn, bot });
     let w = Arc::clone(&app);
     tokio::spawn(async move { worker(w).await });
 
@@ -239,7 +148,6 @@ fn handle_update(app: Arc<App>, u: Value) {
     tokio::spawn(async move {
         let kind = if u["message"].is_object() { "message" } else if u["callback_query"].is_object() { "callback" } else { "boshqa" };
         let head: String = u["message"]["text"].as_str().or_else(|| u["callback_query"]["data"].as_str()).unwrap_or("").chars().take(12).collect();
-        let head = if head.chars().all(|c| c.is_ascii_digit() || c == ' ' || c == '+') && head.len() > 3 { "<raqam/kod>".to_string() } else { head };
         eprintln!("yangilanish: {kind} {head}");
         let r = if u["message"].is_object() { on_message(&app, &u["message"]).await } else if u["callback_query"].is_object() { on_callback(&app, &u["callback_query"]).await } else { Ok(()) };
         if let Err(e) = r {
@@ -275,16 +183,11 @@ async fn owner(app: &App) -> i64 {
     db::kv_get(&app.db, "owner").await.and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
-const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\n/login — Telegram akkauntni ulash (katta fayllar uchun)\n/resend — kod kelmasa, SMS/qo'ng'iroq bilan qayta yuborish\n/queue — navbat\n/cancel <raqam> — bekor qilish\n/logout — akkauntni uzish\n\nBelgi: ⚡ — oqim bilan (diskka yozilmasdan) yuboriladi.";
-
-async fn authorized(app: &App) -> bool {
-    app.tg.is_authorized().await.unwrap_or(false)
-}
+const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\nKatta video ~45 MB li qismlarga bo'lib yuboriladi (bot limiti 50 MB).\n\n/queue — navbat\n/cancel <raqam> — bekor qilish";
 
 async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
     let from = msg["from"]["id"].as_i64().unwrap_or(0);
-    let mid = msg["message_id"].as_i64().unwrap_or(0);
     let text = msg["text"].as_str().unwrap_or("").trim().to_string();
     if chat == 0 || msg["chat"]["type"].as_str() != Some("private") {
         return Ok(());
@@ -301,41 +204,7 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
     let cmd = text.split_whitespace().next().unwrap_or("");
     match cmd {
         "/start" | "/help" => {
-            let st = if authorized(app).await { "✅ Telegram akkaunt ulangan." } else { "⚠️ Akkaunt ulanmagan — /login" };
-            app.bot.send(chat, &format!("{HELP}\n\n{st}"), None).await?;
-            return Ok(());
-        }
-        "/login" => {
-            db::kv_set(&app.db, "login_state", "phone").await?;
-            app.bot.send(chat, "📱 Telegram akkaunt telefon raqamini yuboring (masalan +998901234567). Kod Telegram ilovasiga keladi.", None).await?;
-            return Ok(());
-        }
-        "/resend" => {
-            let prev = std::mem::replace(&mut *app.pending.lock().await, Pending::None);
-            match prev {
-                Pending::Code(sent) => match resend_code(app, &sent).await {
-                    Ok(n) => {
-                        let msg = format!("📨 Kod qayta yuborildi: {}.{}", n.kind, n.next.as_ref().map(|x| format!("\nKeyingi usul (/resend): {x}")).unwrap_or_default());
-                        *app.pending.lock().await = Pending::Code(n);
-                        app.bot.send(chat, &msg, None).await?;
-                    }
-                    Err(e) => {
-                        eprintln!("resend xato: {e}");
-                        *app.pending.lock().await = Pending::Code(sent);
-                        app.bot.send(chat, &format!("❌ Qayta yuborib bo'lmadi: {e}\n(Telegram qayta yuborishni biroz kutishni talab qilishi mumkin.)"), None).await?;
-                    }
-                },
-                other => {
-                    *app.pending.lock().await = other;
-                    app.bot.send(chat, "Avval /login va telefon raqamni yuboring.", None).await?;
-                }
-            }
-            return Ok(());
-        }
-        "/logout" => {
-            let _ = app.tg.sign_out().await;
-            db::kv_set(&app.db, "login_state", "").await?;
-            app.bot.send(chat, "Akkaunt uzildi.", None).await?;
+            app.bot.send(chat, HELP, None).await?;
             return Ok(());
         }
         "/queue" => {
@@ -352,104 +221,10 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
         }
         _ => {}
     }
-
-    // Akkauntni ulash jarayoni: telefon -> kod -> (parol).
-    let state = db::kv_get(&app.db, "login_state").await.unwrap_or_default();
-    if !state.is_empty() && !text.starts_with("http") {
-        return login_step(app, chat, mid, &state, &text).await;
-    }
-
     if let Some(url) = text.split_whitespace().find(|w| w.starts_with("http://") || w.starts_with("https://")) {
         return handle_url(app, chat, url).await;
     }
     app.bot.send(chat, HELP, None).await?;
-    Ok(())
-}
-
-async fn login_step(app: &Arc<App>, chat: i64, mid: i64, state: &str, text: &str) -> Result<()> {
-    match state {
-        "phone" => {
-            let digits: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
-            if digits.len() < 9 {
-                app.bot.send(chat, "Raqam noto'g'ri. Masalan: +998901234567", None).await?;
-                return Ok(());
-            }
-            match send_code(app, &format!("+{digits}")).await {
-                Ok(t) => {
-                    eprintln!("kod yuborildi: usul = {}", t.kind);
-                    let msg = format!("🔐 Kod yuborildi: {}.\nKodni raqamlar orasiga probel qo'yib yuboring: 1 2 3 4 5 (probelsiz yuborsangiz Telegram kodni bekor qilishi mumkin).{}", t.kind, t.next.as_ref().map(|x| format!("\n\nKod kelmasa /resend — keyingi usul: {x}.")).unwrap_or_else(|| "\n\nKod kelmasa /resend.".into()));
-                    *app.pending.lock().await = Pending::Code(t);
-                    db::kv_set(&app.db, "login_state", "code").await?;
-                    app.bot.send(chat, &msg, None).await?;
-                }
-                Err(e) => {
-                    eprintln!("kod so'rash xato: {e}");
-                    db::kv_set(&app.db, "login_state", "").await?;
-                    app.bot.send(chat, &format!("❌ Kod so'rab bo'lmadi: {e}"), None).await?;
-                }
-            }
-        }
-        "code" => {
-            app.bot.delete(chat, mid).await;
-            let code: String = text.chars().filter(|c| c.is_ascii_digit()).collect();
-            let token = match std::mem::replace(&mut *app.pending.lock().await, Pending::None) {
-                Pending::Code(t) => t,
-                _ => {
-                    db::kv_set(&app.db, "login_state", "").await?;
-                    app.bot.send(chat, "Jarayon uzilgan. /login", None).await?;
-                    return Ok(());
-                }
-            };
-            match sign_in(app, &token, &code).await {
-                SignIn::Ok => {
-                    db::kv_set(&app.db, "login_state", "").await?;
-                    app.bot.send(chat, "✅ Akkaunt ulandi. Endi havola yuborishingiz mumkin.", None).await?;
-                }
-                SignIn::Password(p) => {
-                    *app.pending.lock().await = Pending::Pass(p);
-                    db::kv_set(&app.db, "login_state", "pass").await?;
-                    app.bot.send(chat, "🔑 2 bosqichli parolni yuboring (xabar o'chiriladi).", None).await?;
-                }
-                SignIn::BadCode => {
-                    *app.pending.lock().await = Pending::Code(token);
-                    app.bot.send(chat, "❌ Kod noto'g'ri yoki eskirgan. Qayta yuboring (1 2 3 4 5), kod kelmasa /resend.", None).await?;
-                }
-                SignIn::Other(e) => {
-                    eprintln!("sign_in xato: {e}");
-                    db::kv_set(&app.db, "login_state", "").await?;
-                    app.bot.send(chat, &format!("❌ Ulanmadi: {e}"), None).await?;
-                }
-            }
-        }
-        "pass" => {
-            app.bot.delete(chat, mid).await;
-            let p = match std::mem::replace(&mut *app.pending.lock().await, Pending::None) {
-                Pending::Pass(p) => p,
-                _ => {
-                    db::kv_set(&app.db, "login_state", "").await?;
-                    app.bot.send(chat, "Jarayon uzilgan. /login", None).await?;
-                    return Ok(());
-                }
-            };
-            match app.tg.check_password(p, text.as_bytes()).await {
-                Ok(_) => {
-                    db::kv_set(&app.db, "login_state", "").await?;
-                    app.bot.send(chat, "✅ Akkaunt ulandi.", None).await?;
-                }
-                Err(grammers_client::client::SignInError::InvalidPassword(p2)) => {
-                    *app.pending.lock().await = Pending::Pass(p2);
-                    app.bot.send(chat, "❌ Parol noto'g'ri. Qayta yuboring yoki /login.", None).await?;
-                }
-                Err(e) => {
-                    db::kv_set(&app.db, "login_state", "").await?;
-                    app.bot.send(chat, &format!("❌ Ulanmadi: {e}"), None).await?;
-                }
-            }
-        }
-        _ => {
-            db::kv_set(&app.db, "login_state", "").await?;
-        }
-    }
     Ok(())
 }
 
@@ -462,15 +237,12 @@ async fn handle_url(app: &Arc<App>, chat: i64, url: &str) -> Result<()> {
             return Ok(());
         }
     };
-    let meta = json!({
-        "w": info.w, "h": info.h, "dur": info.duration,
-        "opts": info.opts.iter().map(|o| json!({"h": o.h, "size": o.size, "stream": o.stream.as_ref().map(|(id, sz, ext)| json!([id, sz, ext]))})).collect::<Vec<_>>(),
-    });
+    let meta = json!({"w": info.w, "h": info.h, "dur": info.duration});
     let id = db::job_new(&app.db, chat, url, &info.title, &meta.to_string()).await?;
     let mut rows: Vec<Value> = Vec::new();
     let mut row: Vec<Value> = Vec::new();
     for o in &info.opts {
-        let label = format!("{}p{}{}", o.h, o.size.map(|s| format!(" ~{}", dl::human(s))).unwrap_or_default(), if o.stream.is_some() { " ⚡" } else { "" });
+        let label = format!("{}p{}", o.h, o.size.map(|s| format!(" ~{}", dl::human(s))).unwrap_or_default());
         row.push(json!({"text": label, "callback_data": format!("q:{id}:{}", o.h)}));
         if row.len() == 2 {
             rows.push(Value::Array(std::mem::take(&mut row)));
@@ -501,8 +273,7 @@ async fn on_callback(app: &Arc<App>, cb: &Value) -> Result<()> {
             let id: i64 = id.parse().unwrap_or(0);
             if db::job_enqueue(&app.db, id, fmt, msg).await? {
                 let ahead = db::queue_list(&app.db).await.iter().filter(|(i, _, _)| *i < id).count();
-                let note = if authorized(app).await { "" } else { "\n⚠️ Akkaunt ulanmagan: avval /login" };
-                app.bot.edit(chat, msg, &format!("✅ Navbatga qo'yildi (#{id}). Oldinda: {ahead} ta.{note}"), None).await;
+                app.bot.edit(chat, msg, &format!("✅ Navbatga qo'yildi (#{id}). Oldinda: {ahead} ta."), None).await;
             }
             let _ = app.bot.call("answerCallbackQuery", json!({"callback_query_id": cid})).await;
         }
@@ -547,17 +318,6 @@ async fn worker(app: Arc<App>) {
     }
 }
 
-async fn peer(app: &App) -> Result<PeerRef> {
-    let mut g = app.peer.lock().await;
-    if let Some(p) = g.clone() {
-        return Ok(p);
-    }
-    let p = app.tg.resolve_username(&app.username).await?.ok_or_else(|| anyhow!("bot topilmadi: @{}", app.username))?;
-    let r = p.to_ref().await.map_err(|e| anyhow!("{e}"))?.ok_or_else(|| anyhow!("bot manzili aniqlanmadi"))?;
-    *g = Some(r.clone());
-    Ok(r)
-}
-
 /// Bekor qilingunga qadar kutadi (ish holatini har 3 soniyada tekshiradi).
 async fn cancelled(app: &App, id: i64) {
     loop {
@@ -569,125 +329,61 @@ async fn cancelled(app: &App, id: i64) {
 }
 
 async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
-    if !authorized(app).await {
-        return Err(anyhow!("Telegram akkaunt ulanmagan — /login, keyin havolani qayta yuboring"));
-    }
     let meta: Value = serde_json::from_str(&job.meta).unwrap_or(json!({}));
-    let (w, h, dur) = (meta["w"].as_i64().unwrap_or(0) as i32, meta["h"].as_i64().unwrap_or(0) as i32, meta["dur"].as_i64().unwrap_or(0) as u64);
+    let (w, h) = (meta["w"].as_i64().unwrap_or(0), meta["h"].as_i64().unwrap_or(0));
     let is_audio = job.fmt == "a";
-    app.bot.edit(job.chat_id, job.status_msg, &format!("⏬ #{} yuklanmoqda…\n{}", job.id, job.title.chars().take(100).collect::<String>()), None).await;
+    let title: String = job.title.chars().take(100).collect();
+    app.bot.edit(job.chat_id, job.status_msg, &format!("⏬ #{} yuklanmoqda…\n{title}", job.id), None).await;
 
-    // Oqim: faqat bitta tayyor fayl va hajmi ANIQ bo'lsa; muvaffaqiyatsiz bo'lsa diskka yuklashga o'tiladi.
-    let want: i64 = job.fmt.parse().unwrap_or(0);
-    let stream = meta["opts"].as_array().and_then(|a| a.iter().find(|o| o["h"].as_i64() == Some(want))).and_then(|o| o["stream"].as_array().cloned());
-    let mut uploaded = None;
-    let mut name = dl::safe_name(&job.title, if is_audio { "mp3" } else { "mp4" });
-    if let (Some(s), false) = (stream, is_audio) {
-        let (fid, size, ext) = (s[0].as_str().unwrap_or("").to_string(), s[1].as_u64().unwrap_or(0), s[2].as_str().unwrap_or("mp4").to_string());
-        if !fid.is_empty() && size > 0 {
-            let n = dl::safe_name(&job.title, &ext);
-            app.bot.edit(job.chat_id, job.status_msg, &format!("⚡ #{} oqim bilan yuborilmoqda (diskka yozilmaydi)…\n{}", job.id, job.title.chars().take(100).collect::<String>()), None).await;
-            let r = tokio::select! {
-                r = stream_upload(app, &job.url, &fid, size, &n) => r,
-                _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
-            };
-            match r {
-                Ok(up) => {
-                    uploaded = Some(up);
-                    name = n;
-                }
-                Err(e) => {
-                    if db::job_state(&app.db, job.id).await == "cancelled" {
-                        return Err(e);
-                    }
-                    eprintln!("#{} oqim bo'lmadi ({e}) — diskka yuklanadi", job.id);
-                }
+    // 1) Yuklash (progress har 5 soniyada).
+    let dir = std::path::PathBuf::from(format!("{}/tmp/{}", app.cfg.data_dir, job.id));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let a2 = Arc::clone(app);
+    let (chat, mid, jid, t80) = (job.chat_id, job.status_msg, job.id, job.title.chars().take(80).collect::<String>());
+    let edit_task = tokio::spawn(async move {
+        let mut last = std::time::Instant::now() - Duration::from_secs(10);
+        while let Some(p) = rx.recv().await {
+            if last.elapsed() >= Duration::from_secs(5) {
+                last = std::time::Instant::now();
+                let mut it = p.split('|');
+                let (pc, sp, eta) = (it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string());
+                a2.bot.edit(chat, mid, &format!("⏬ #{jid} {t80}\n{pc}  {sp}  qoldi {eta}"), None).await;
             }
         }
-    }
-
-    let up = match uploaded {
-        Some(u) => u,
-        None => {
-            let dir = std::path::PathBuf::from(format!("{}/tmp/{}", app.cfg.data_dir, job.id));
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-            let a2 = Arc::clone(app);
-            let (chat, mid, jid, title) = (job.chat_id, job.status_msg, job.id, job.title.chars().take(80).collect::<String>());
-            let edit_task = tokio::spawn(async move {
-                let mut last = std::time::Instant::now() - Duration::from_secs(10);
-                while let Some(p) = rx.recv().await {
-                    if last.elapsed() >= Duration::from_secs(5) {
-                        last = std::time::Instant::now();
-                        let mut it = p.split('|');
-                        let (pc, sp, eta) = (it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string());
-                        a2.bot.edit(chat, mid, &format!("⏬ #{jid} {title}\n{pc}  {sp}  qoldi {eta}"), None).await;
-                    }
-                }
-            });
-            let r = tokio::select! {
-                r = dl::download_file(&app.cfg, &job.url, &job.fmt, &dir, |p| { let _ = tx.send(p); }) => r,
-                _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
-            };
-            drop(tx);
-            let _ = edit_task.await;
-            let path = r?;
-            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("mp4").to_string();
-            name = dl::safe_name(&job.title, &ext);
-            let size = std::fs::metadata(&path)?.len();
-            app.bot.edit(job.chat_id, job.status_msg, &format!("📤 #{} Telegram'ga yuklanmoqda ({})…", job.id, dl::human(size)), None).await;
-            let mut f = tokio::fs::File::open(&path).await?;
-            let r = tokio::select! {
-                r = app.tg.upload_stream(&mut f, size as usize, name.clone()) => r.map_err(|e| anyhow!("yuklash: {e}")),
-                _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
-            };
-            r?
-        }
+    });
+    let r = tokio::select! {
+        r = dl::download_file(&app.cfg, &job.url, &job.fmt, &dir, |p| { let _ = tx.send(p); }) => r,
+        _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
     };
+    drop(tx);
+    let _ = edit_task.await;
+    let path = r?;
 
-    let mime = if is_audio { "audio/mpeg" } else if name.ends_with(".webm") { "video/webm" } else { "video/mp4" };
-    let mut m = InputMessage::new().text(job.title.chars().take(900).collect::<String>()).document(up).mime_type(mime);
-    if !is_audio {
-        m = m.attribute(Attribute::Video { round_message: false, supports_streaming: true, duration: Duration::from_secs(dur), w, h });
-    }
-    let to = peer(app).await?;
-    app.tg.send_message(to, m).await.map_err(|e| anyhow!("yuborish: {e}"))?;
-    app.bot.edit(job.chat_id, job.status_msg, &format!("✅ #{} tayyor: {}", job.id, job.title.chars().take(100).collect::<String>()), None).await;
-    Ok(())
-}
+    // 2) VAQT bo'yicha ~45 MB li qismlarga bo'lish (kerak bo'lsa).
+    let size = std::fs::metadata(&path)?.len();
+    app.bot.edit(job.chat_id, job.status_msg, &format!("✂️ #{} {} — qismlarga bo'linmoqda…", job.id, dl::human(size)), None).await;
+    let parts = tokio::select! {
+        r = dl::split(&path, &dir) => r?,
+        _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+    };
+    let n = parts.len();
 
-/// yt-dlp stdout'idan to'g'ridan-to'g'ri Telegram'ga (diskka yozilmaydi). Hajm aniq bo'lishi shart.
-async fn stream_upload(app: &Arc<App>, url: &str, fid: &str, size: u64, name: &str) -> Result<grammers_client::media::Uploaded> {
-    let mut child = dl::spawn_stream(&app.cfg, url, fid)?;
-    let mut out = child.stdout.take().ok_or_else(|| anyhow!("stdout yo'q"))?;
-    let r = tokio::time::timeout(Duration::from_secs(4 * 3600), app.tg.upload_stream(&mut out, size as usize, name.to_string())).await;
-    let _ = child.kill().await;
-    match r {
-        Ok(Ok(u)) => Ok(u),
-        Ok(Err(e)) => Err(anyhow!("oqim yuklash: {e}")),
-        Err(_) => Err(anyhow!("oqim vaqti tugadi")),
-    }
-}
-
-
-/// Tashxis: `ytbot sendcode +998... [resend]` — kodni so'raydi va QAYSI USULDA yuborilganini chiqaradi (kodning o'zi ko'rinmaydi, sign-in qilinmaydi).
-pub async fn cli_sendcode(cfg: Arc<Cfg>, phone: &str, resend: bool) -> Result<()> {
-    let conn = db::open(&format!("{}/ytbot.db", cfg.data_dir)).await?;
-    let bot = Bot::new(&cfg.bot_token);
-    let session = Arc::new(SqliteSession::open(format!("{}/session.sqlite", cfg.data_dir)).await?);
-    let pool = grammers_client::SenderPool::new(Arc::clone(&session), cfg.api_id);
-    let tg = Client::new(pool.handle);
-    tokio::spawn(pool.runner.run());
-    let mut updates = pool.updates;
-    tokio::spawn(async move { while updates.recv().await.is_some() {} });
-    let app = App { cfg, db: conn, bot, username: String::new(), tg, pending: Mutex::new(Pending::None), peer: Mutex::new(None) };
-    let sent = send_code(&app, phone).await?;
-    println!("1-yuborish: usul = {} | keyingi = {:?}", sent.kind, sent.next);
-    if resend {
-        tokio::time::sleep(Duration::from_secs(3)).await;
-        match resend_code(&app, &sent).await {
-            Ok(n) => println!("2-yuborish (resend): usul = {} | keyingi = {:?}", n.kind, n.next),
-            Err(e) => println!("resend xato: {e}"),
+    // 3) Qismlarni birin-ketin yuborish; yuborilgan qism darhol o'chiriladi (disk to'lmasin).
+    for (i, part) in parts.iter().enumerate() {
+        if db::job_state(&app.db, job.id).await == "cancelled" {
+            return Err(anyhow!("bekor qilindi"));
         }
+        let psize = std::fs::metadata(part)?.len();
+        app.bot.edit(job.chat_id, job.status_msg, &format!("📤 #{} qism {}/{} yuborilmoqda ({})…\n{title}", job.id, i + 1, n, dl::human(psize)), None).await;
+        let dur = dl::probe_duration(part).await.round() as u64;
+        let caption = if n > 1 { format!("{} ({}/{})", job.title.chars().take(900).collect::<String>(), i + 1, n) } else { job.title.chars().take(900).collect::<String>() };
+        let r = tokio::select! {
+            r = app.bot.send_file(job.chat_id, is_audio, part, &caption, dur, w, h) => r,
+            _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
+        };
+        r.map_err(|e| anyhow!("{}/{} qism yuborilmadi: {e}", i + 1, n))?;
+        let _ = std::fs::remove_file(part);
     }
+    app.bot.edit(job.chat_id, job.status_msg, &format!("✅ #{} tayyor: {title}{}", job.id, if n > 1 { format!("\n{n} qismda yuborildi") } else { String::new() }), None).await;
     Ok(())
 }

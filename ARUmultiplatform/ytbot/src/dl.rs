@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use tokio::process::Command;
 
 /// Bitta sifat tugmasi.
 #[derive(Clone, Debug, PartialEq)]
@@ -13,8 +13,6 @@ pub struct Opt {
     pub h: i64,
     /// Taxminiy yakuniy hajm (bayt), bilinsa.
     pub size: Option<u64>,
-    /// Oqim uchun nomzod: bitta tayyor fayl (video+audio birga), hajmi ANIQ ma'lum — (format_id, bayt, kengaytma).
-    pub stream: Option<(String, u64, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -52,15 +50,7 @@ pub fn parse_info(v: &Value) -> Info {
             (Some(v), None) => Some(v),
             _ => progressive,
         };
-        // Oqim nomzodi: aniq hajmli (`filesize`), oddiy http(s) yuklanadigan, video+audio birga fayl.
-        let stream = at_h
-            .iter()
-            .filter(|f| has_codec(&f["acodec"]) && f["filesize"].as_u64().unwrap_or(0) > 0)
-            .filter(|f| f["protocol"].as_str().map(|p| p == "https" || p == "http").unwrap_or(false))
-            .max_by_key(|f| f["filesize"].as_u64().unwrap_or(0))
-            .map(|f| (f["format_id"].as_str().unwrap_or("").to_string(), f["filesize"].as_u64().unwrap_or(0), f["ext"].as_str().unwrap_or("mp4").to_string()))
-            .filter(|(id, _, _)| !id.is_empty());
-        opts.push(Opt { h, size, stream });
+        opts.push(Opt { h, size });
     }
     Info {
         title: v["title"].as_str().unwrap_or("video").to_string(),
@@ -166,12 +156,148 @@ pub async fn download_file(cfg: &Cfg, url: &str, fmt: &str, dir: &Path, mut prog
     best.map(|(_, p)| p).ok_or_else(|| anyhow!("fayl yaratilmadi"))
 }
 
-/// Oqim: yt-dlp videoni stdout'ga yozadi (diskka emas).
-pub fn spawn_stream(cfg: &Cfg, url: &str, format_id: &str) -> Result<Child> {
-    let mut c = base(cfg);
-    c.arg("-f").arg(format_id).arg("-q").arg("-o").arg("-").arg("--").arg(url);
-    c.stdout(Stdio::piped()).stderr(Stdio::null());
-    Ok(c.spawn()?)
+// ── Bo'lish: Bot API fayl limiti 50 MB ──────────────────────
+
+/// Bitta qism uchun qattiq chegara (bayt): Bot API 50 MB dan kattasini qabul qilmaydi.
+pub const PART_LIMIT: u64 = 49_900_000;
+/// Bo'lishda maqsad: qismlar 45–50 MB oralig'ida chiqishi uchun chegaraga yaqin (kesish kalit kadrda bo'lgani uchun odatda 45–48,5 MB).
+pub const PART_TARGET: u64 = 48_500_000;
+
+/// Fayl hajmi va davomiyligidan har qism necha soniya bo'lishi kerak (kamida 5 s).
+pub fn seg_secs(size: u64, duration: f64, target: u64) -> u64 {
+    if size == 0 || duration <= 0.0 {
+        return 60;
+    }
+    let bps = size as f64 / duration; // bayt/soniya
+    ((target as f64 / bps).floor() as u64).max(5)
+}
+
+/// `ffprobe` bilan davomiylik (soniya); bilinmasa 0.
+pub async fn probe_duration(path: &Path) -> f64 {
+    let out = Command::new("ffprobe").args(["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1"]).arg(path).stdout(Stdio::piped()).stderr(Stdio::null()).output().await;
+    out.ok().and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().ok()).unwrap_or(0.0)
+}
+
+/// Bitta paket: (ko'rsatish vaqti soniyada, hajm baytda, kalit kadrmi).
+pub type Pkt = (f64, u64, bool);
+
+/// `ffprobe` bilan video (yoki audio) paketlari: vaqt, hajm, kalit kadr belgisi.
+pub async fn packets(path: &Path, stream: &str) -> Result<Vec<Pkt>> {
+    let out = Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", stream, "-show_entries", "packet=pts_time,size,flags", "-of", "csv=p=0"])
+        .arg(path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .await?;
+    let mut v: Vec<Pkt> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter_map(|l| {
+            let mut it = l.split(',');
+            let t: f64 = it.next()?.parse().ok()?;
+            let sz: u64 = it.next()?.parse().ok()?;
+            let key = it.next().map(|f| f.contains('K')).unwrap_or(false);
+            Some((t, sz, key))
+        })
+        .collect();
+    v.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(v)
+}
+
+/// Kesish vaqtlari (soniya): har qism `target` bayt atrofida, lekin undan oshmaydi; kesish FAQAT kalit kadrda — video buzilmaydi.
+/// `total` — butun fayl hajmi (audio va konteyner qo'shimchasi video hajmiga ulush bilan qo'shiladi).
+pub fn plan_cuts(pkts: &[Pkt], total: u64, target: u64) -> Result<Vec<f64>> {
+    let vsum: u64 = pkts.iter().map(|p| p.1).sum();
+    if vsum == 0 {
+        return Err(anyhow!("paketlar topilmadi"));
+    }
+    let f = (total as f64 / vsum as f64).max(1.0);
+    let target = target as f64;
+    let mut cuts: Vec<f64> = Vec::new();
+    let mut acc = 0.0f64;
+    let mut cand: Option<(f64, f64)> = None; // (kalit kadr vaqti, shu kadrgacha yig'ilgan bayt)
+    for &(t, sz, key) in pkts {
+        if key && acc > 0.0 && acc <= target {
+            cand = Some((t, acc));
+        }
+        acc += sz as f64 * f;
+        if acc > target {
+            match cand.take() {
+                Some((ct, a)) => {
+                    cuts.push(ct);
+                    acc -= a;
+                    if acc > target {
+                        return Err(anyhow!("kalit kadrlar juda siyrak: bitta guruh 50 MB dan katta"));
+                    }
+                }
+                None => return Err(anyhow!("kalit kadrlar juda siyrak: bitta guruh 50 MB dan katta")),
+            }
+        }
+    }
+    Ok(cuts)
+}
+
+/// Faylni VAQT bo'yicha qismlarga bo'ladi (qayta kodlamasdan, kalit kadrlarda): har qism 45–50 MB atrofida. Qism chegaradan oshsa, maqsad kamaytirilib qayta uriniladi.
+/// Natija: video tartibidagi qism fayllari (asl fayl o'chiriladi).
+pub async fn split(path: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
+    let size = std::fs::metadata(path)?.len();
+    if size <= PART_LIMIT {
+        return Ok(vec![path.to_path_buf()]);
+    }
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("mp4").to_string();
+    let audio_only = !matches!(ext.as_str(), "mp4" | "mkv" | "webm" | "mov");
+    let mut pkts = packets(path, if audio_only { "a:0" } else { "v:0" }).await.unwrap_or_default();
+    if pkts.is_empty() {
+        pkts = packets(path, "a:0").await.unwrap_or_default();
+    }
+    let mut target = PART_TARGET;
+    let mut last_err = anyhow!("bo'lib bo'lmadi");
+    for attempt in 0..4 {
+        let sub = dir.join(format!("s{attempt}"));
+        let _ = std::fs::remove_dir_all(&sub);
+        std::fs::create_dir_all(&sub)?;
+        // Kesish vaqtlari: paketlar bo'yicha aniq reja; bo'lmasa (ffprobe bermasa) o'rtacha bitreytdan teng vaqt.
+        let times: Vec<f64> = match plan_cuts(&pkts, size, target) {
+            Ok(c) => c,
+            Err(e) if pkts.is_empty() => {
+                let dur = probe_duration(path).await;
+                let seg = seg_secs(size, dur, target) as f64;
+                let n = if seg > 0.0 { (dur / seg).floor() as usize } else { 0 };
+                let _ = e;
+                (1..=n).map(|i| i as f64 * seg).collect()
+            }
+            Err(e) => return Err(e),
+        };
+        let mut c = Command::new("ffmpeg");
+        c.args(["-y", "-v", "error", "-i"]).arg(path).args(["-map", "0:v?", "-map", "0:a?", "-c", "copy", "-f", "segment"]);
+        if !times.is_empty() {
+            // Kalit kadr vaqtidan 1 ms oldin: segmentlovchi aynan o'sha kalit kadrdan boshlaydi.
+            c.arg("-segment_times").arg(times.iter().map(|t| format!("{:.3}", (t - 0.001).max(0.0))).collect::<Vec<_>>().join(","));
+        }
+        c.args(["-reset_timestamps", "1"]);
+        if ext == "mp4" {
+            c.args(["-segment_format_options", "movflags=+faststart"]);
+        }
+        c.arg(sub.join(format!("p%03d.{ext}"))).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
+        let out = c.output().await?;
+        if !out.status.success() {
+            return Err(anyhow!("ffmpeg: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("xato")));
+        }
+        let mut parts: Vec<PathBuf> = std::fs::read_dir(&sub)?.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
+        parts.sort();
+        if parts.is_empty() {
+            return Err(anyhow!("ffmpeg qism yaratmadi"));
+        }
+        let biggest = parts.iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).max().unwrap_or(0);
+        if biggest <= PART_LIMIT {
+            let _ = std::fs::remove_file(path); // asl fayl endi kerak emas — disk to'lib qolmasin
+            return Ok(parts);
+        }
+        last_err = anyhow!("qism {} dan katta chiqdi (kalit kadrlar siyrak)", human(biggest));
+        let _ = std::fs::remove_dir_all(&sub);
+        target = target * 92 / 100; // maqsad kamaytirilib qayta uriniladi
+    }
+    Err(last_err)
 }
 
 #[cfg(test)]
@@ -187,33 +313,89 @@ mod tests {
                 {"format_id": "18", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "filesize": 10_000_000, "protocol": "https", "ext": "mp4"},
                 {"format_id": "137", "vcodec": "avc1", "acodec": "none", "height": 1080, "filesize": 80_000_000, "protocol": "https", "ext": "mp4"},
                 {"format_id": "136", "vcodec": "avc1", "acodec": "none", "height": 720, "filesize_approx": 40_000_000.0, "protocol": "https", "ext": "mp4"},
-                {"format_id": "hls-360", "vcodec": "avc1", "acodec": "mp4a", "height": 360, "filesize": 11_000_000, "protocol": "m3u8_native", "ext": "mp4"},
                 {"format_id": "sb0", "vcodec": "none", "acodec": "none", "height": 90}
             ]
         })
     }
 
     #[test]
-    fn parses_heights_sizes_and_stream_candidates() {
+    fn parses_heights_and_sizes() {
         let i = parse_info(&sample());
         assert_eq!(i.title, "Test video");
         assert_eq!(i.duration, 125);
         assert_eq!(i.opts.iter().map(|o| o.h).collect::<Vec<_>>(), vec![1080, 720, 360]);
         assert_eq!(i.opts[0].size, Some(82_000_000)); // video-only + audio
         assert_eq!(i.opts[1].size, Some(42_000_000)); // taxminiy hajm ham hisobga olinadi
-        assert!(i.opts[0].stream.is_none()); // alohida video+audio — oqim emas
-        // 360p: tayyor fayl (https, aniq hajm); m3u8 nomzod emas.
-        assert_eq!(i.opts[2].stream, Some(("18".to_string(), 10_000_000, "mp4".to_string())));
         assert_eq!(i.audio_size, Some(2_000_000));
     }
 
     #[test]
-    fn selectors_and_names() {
+    fn selectors_names_and_segments() {
         assert_eq!(selector("720"), "bv*[height<=720]+ba/b[height<=720]/b");
         assert_eq!(selector("a"), "ba/b");
         assert_eq!(human(1_500_000), "1 MB");
         assert_eq!(human(3 * 1024 * 1024 * 1024), "3.0 GB");
         assert_eq!(safe_name("Salom/dunyo: 1?", "mp4"), "Salom_dunyo_ 1_.mp4");
         assert_eq!(safe_name("", "mp3"), "video.mp3");
+        // 500 MB / 1000 s = 0,5 MB/s -> 48,5 MB = ~97 s
+        assert_eq!(seg_secs(500_000_000, 1000.0, PART_TARGET), 97);
+        assert_eq!(seg_secs(0, 0.0, PART_TARGET), 60);
+        assert_eq!(seg_secs(100_000_000_000, 10.0, PART_TARGET), 5); // juda yuqori bitreyt: kamida 5 s
+    }
+
+    /// 1 s li paketlar, har 2 s da kalit kadr (jami 2 MB guruh), har paket 1 MB: kesishlar kalit kadrlarda, har qism <= maqsad va maqsadga yaqin.
+    #[test]
+    fn cuts_land_on_keyframes_and_fit_target() {
+        let pkts: Vec<Pkt> = (0..200).map(|i| (i as f64, 1_000_000u64, i % 2 == 0)).collect();
+        let cuts = plan_cuts(&pkts, 200_000_000, 10_500_000).unwrap();
+        assert!(!cuts.is_empty());
+        let mut prev = 0.0;
+        for c in &cuts {
+            assert_eq!(*c as u64 % 2, 0, "kesish kalit kadrda bo'lishi kerak"); // kalit kadrlar juft soniyalarda
+            let bytes = (c - prev) * 1_000_000.0;
+            assert!(bytes <= 10_500_000.0 && bytes >= 8_500_000.0, "qism hajmi {bytes}");
+            prev = *c;
+        }
+    }
+
+    #[test]
+    fn huge_gop_is_an_error() {
+        // 100 s lik bitta kalit guruh (100 MB) — 48,5 MB ga sig'maydi.
+        let pkts: Vec<Pkt> = (0..100).map(|i| (i as f64, 1_000_000u64, i == 0)).collect();
+        assert!(plan_cuts(&pkts, 100_000_000, 48_500_000).is_err());
+    }
+
+    /// Haqiqiy ffmpeg bilan: ~130 MB video yasaladi, bo'linadi; har qism <= 49,9 MB va oxirgisidan boshqalari >= 45 MB bo'lishi kerak. ffmpeg bo'lmasa o'tkaziladi.
+    #[tokio::test]
+    async fn split_real_video_parts_between_45_and_50_mb() {
+        if std::process::Command::new("ffmpeg").arg("-version").output().is_err() || std::process::Command::new("ffprobe").arg("-version").output().is_err() {
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("ytbot-split-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("in.mp4");
+        let st = std::process::Command::new("ffmpeg")
+            .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=640x360:rate=25", "-f", "lavfi", "-i", "sine=frequency=440", "-vf", "noise=alls=70:allf=t+u", "-t", "130", "-c:v", "libx264", "-b:v", "8M", "-maxrate", "8M", "-bufsize", "2M", "-g", "50", "-c:a", "aac", "-shortest"])
+            .arg(&src)
+            .status()
+            .unwrap();
+        assert!(st.success());
+        let before = std::fs::metadata(&src).unwrap().len();
+        assert!(before > 100_000_000, "sinov videosi kichik: {before}");
+        let parts = split(&src, &dir).await.unwrap();
+        assert!(parts.len() >= 3, "qismlar soni {}", parts.len());
+        let sizes: Vec<u64> = parts.iter().map(|p| std::fs::metadata(p).unwrap().len()).collect();
+        for (i, sz) in sizes.iter().enumerate() {
+            assert!(*sz <= PART_LIMIT, "{i}-qism {sz} chegaradan katta");
+            if i + 1 < sizes.len() {
+                assert!(*sz >= 45_000_000, "{i}-qism 45 MB dan kichik: {sz}");
+            }
+        }
+        // Har qism ochiladigan (buzilmagan) video.
+        for p in &parts {
+            assert!(probe_duration(p).await > 1.0, "{p:?} ochilmadi");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

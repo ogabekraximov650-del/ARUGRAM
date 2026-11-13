@@ -1,9 +1,7 @@
-// UZ: yt-dlp Telegram boti. Bot (token) — suhbat va navbat; Telegram AKKAUNT (MTProto, grammers) — katta fayllarni (2 GB gacha) yuklaydi.
-//     So'rovlar libsql bazadagi navbatda turadi va BIRIN-KETIN bajariladi. Fayl hajmi oldindan aniq bo'lsa video diskka yozilmasdan oqim bilan yuboriladi;
-//     video+audio birlashtirilsa (hajm noma'lum) vaqtincha diskka yoziladi va yuborilgach darhol o'chiriladi.
-// EN: yt-dlp Telegram bot. The bot (token) handles chat and the queue; a Telegram ACCOUNT (MTProto, grammers) uploads large files (up to 2 GB).
-//     Requests wait in a libsql queue and run ONE BY ONE. When the exact size is known the video is streamed without touching the disk;
-//     merged video+audio (unknown size) goes to a temp file that is deleted right after the upload.
+// UZ: yt-dlp Telegram boti. Faqat BOT (token): suhbat, navbat va yuborish. So'rovlar libsql bazadagi navbatda turadi va BIRIN-KETIN bajariladi.
+//     Video yuklanadi, VAQT bo'yicha ~45 MB li qismlarga bo'linadi (ffmpeg, qayta kodlamasdan) va har qism Bot API orqali yuboriladi (bot limiti 50 MB).
+// EN: yt-dlp Telegram bot. BOT only (token): chat, queue and delivery. Requests wait in a libsql queue and run ONE BY ONE.
+//     The video is downloaded, split by TIME into ~45 MB parts (ffmpeg, no re-encoding) and each part is sent through the Bot API (50 MB bot limit).
 mod bot;
 mod db;
 mod dl;
@@ -13,8 +11,6 @@ use std::sync::Arc;
 
 pub struct Cfg {
     pub bot_token: String,
-    pub api_id: i32,
-    pub api_hash: String,
     pub data_dir: String,
     pub ytdlp: String,
     pub cookies: Option<String>,
@@ -31,8 +27,6 @@ async fn main() -> Result<()> {
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     let cfg = Arc::new(Cfg {
         bot_token: env("BOT_TOKEN").ok_or_else(|| anyhow::anyhow!("BOT_TOKEN yo'q"))?,
-        api_id: env("API_ID").and_then(|v| v.parse().ok()).ok_or_else(|| anyhow::anyhow!("API_ID yo'q"))?,
-        api_hash: env("API_HASH").ok_or_else(|| anyhow::anyhow!("API_HASH yo'q"))?,
         data_dir: env("DATA_DIR").unwrap_or_else(|| "./data".into()),
         ytdlp: env("YTDLP").unwrap_or_else(|| "yt-dlp".into()),
         cookies: env("COOKIES"),
@@ -45,11 +39,6 @@ async fn main() -> Result<()> {
         return Err(anyhow::anyhow!("WEBHOOK_SECRET kamida 16 belgi bo'lishi kerak (harf, raqam, _ va -)"));
     }
     std::fs::create_dir_all(&cfg.data_dir)?;
-    let args: Vec<String> = std::env::args().collect();
-    if args.get(1).map(|a| a == "sendcode").unwrap_or(false) {
-        let phone = args.get(2).cloned().unwrap_or_default();
-        return bot::cli_sendcode(cfg, &phone, args.get(3).map(|a| a == "resend").unwrap_or(false)).await;
-    }
     eprintln!("ytbot ishga tushdi");
     bot::run(cfg).await
 }
