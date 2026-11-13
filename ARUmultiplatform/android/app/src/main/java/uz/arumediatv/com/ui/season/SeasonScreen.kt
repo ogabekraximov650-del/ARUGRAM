@@ -268,6 +268,12 @@ fun SeasonScreen(
         }
     }
 
+    // ── Jonli yangilanish: qism/bo'lim o'zgarsa (admin qo'shdi/tahrirladi) ro'yxat bir necha soniyada yangilanadi, ijro buzilmaydi ──
+    if (canWatch) uz.arumediatv.com.data.LiveEffect("content") {
+        repo.fetchEpisodes(season.animeId, season.seasonId, force = true)?.let { episodes = it }
+        repo.fetchSeasons(season.animeId, force = true)?.let { seasons = it }
+    }
+
     // ── Ijro nuqtasi: har 500 ms; 5 soniyada eslab qolish; tomosha vaqti ──
     LaunchedEffect(player) {
         var n = 0

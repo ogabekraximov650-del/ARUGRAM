@@ -66,8 +66,16 @@ class AdminUsersStore(private val api: AdminApi) {
         return Triple(emptyList(), false, api.errorOf(r, "Yuklanmadi"))
     }
 
-    suspend fun reload(sort: UserSort? = null, query: String? = null) {
-        _state.update { it.copy(sort = sort ?: it.sort, query = query ?: it.query, loading = true, error = null) }
+    private var lastQuiet = 0L
+
+    /** `quiet` — jonli yangilanish: aylanuvchi belgisiz va 10 soniyada ko'pi bilan bir marta (foydalanuvchilar jadvali har trafik hisobotida o'zgaradi). */
+    suspend fun reload(sort: UserSort? = null, query: String? = null, quiet: Boolean = false) {
+        if (quiet) {
+            val wait = 10_000 - (System.currentTimeMillis() - lastQuiet)
+            if (wait > 0) kotlinx.coroutines.delay(wait) // o'zgarish yo'qolmaydi: biroz kutib yangilanadi
+            lastQuiet = System.currentTimeMillis()
+        }
+        _state.update { it.copy(sort = sort ?: it.sort, query = query ?: it.query, loading = !quiet, error = null) }
         val (rows, more, err) = fetch(0)
         _state.update { it.copy(items = if (rows.isNotEmpty() || err == null) rows else it.items, hasMore = more, error = err, loading = false, page = 0) }
     }

@@ -6859,6 +6859,45 @@ async fn comments_wait(req: &Request, env: &Env) -> Result<Response> {
     ok_nostore(json!({"new": false, "mk": mk}))
 }
 
+/// Jonli yangilanish uchun jadvallar to'plamlari. `content` — hamma uchun (faqat o'zgarish VAQTI qaytadi, ma'lumot emas); `users`/`reports` — faqat admin.
+const LIVE_CONTENT: &[&str] = &["anime_db", "season_db", "epizod_db"];
+const LIVE_USERS: &[&str] = &["users_db"];
+const LIVE_REPORTS: &[&str] = &["reports_db"];
+
+/// GET /api/live/wait?k=content|users|reports&mk=<belgi> (users/reports — faqat admin) — ~20 s kutadi va tegishli jadvallar o'zgarganda `{new:true, mk}` qaytaradi.
+/// TURSO/AMPLE BAZASIGA BORMAYDI: faqat `MarkHub` belgisi (`comments_wait` kabi). Ilova o'zgarishni sezgach ma'lumotni o'zi yangilaydi.
+async fn live_wait(req: &Request, env: &Env) -> Result<Response> {
+    let url = req.url()?;
+    let q = |k: &str| url.query_pairs().find(|(n, _)| n == k).map(|(_, v)| v.to_string()).unwrap_or_default();
+    let tables: &[&str] = match q("k").as_str() {
+        k @ ("users" | "reports") => {
+            let ok = match session_user(env, &bearer(req)).await? { Some(u) => is_admin(&u), None => false };
+            if !ok { return json_resp(&json!({"error": "forbidden"}), 403); }
+            if k == "users" { LIVE_USERS } else { LIVE_REPORTS }
+        }
+        _ => LIVE_CONTENT,
+    };
+    let mk_before: i64 = q("mk").parse().unwrap_or(-1);
+    let steps = (CHAT_WAIT_TICKS as u64 * CHAT_WAIT_STEP_MS) / CHAT_MARK_STEP_MS;
+    let (first, _) = marks_get(env, tables).await;
+    // Birinchi so'rov (mk yo'q): faqat joriy belgini qaytaradi, kutmaydi — ilova shundan boshlab kuzatadi.
+    if mk_before < 0 {
+        return ok_nostore(json!({"new": false, "mk": first}));
+    }
+    let mut mk = first;
+    for i in 0..=steps {
+        if i > 0 {
+            Delay::from(core::time::Duration::from_millis(CHAT_MARK_STEP_MS)).await;
+            // Har 2-qadamda (~4 s) DO'ga qaraladi: boshqa data markazdagi yozuv ham ~4 s ichida ko'rinadi; oraliqda faqat kesh (bepul).
+            mk = if i % 2 == 0 { marks_get(env, tables).await.0.max(first) } else { first.max(marks_local(tables).await) };
+        }
+        if mk != mk_before {
+            return ok_nostore(json!({"new": true, "mk": mk}));
+        }
+    }
+    ok_nostore(json!({"new": false, "mk": mk}))
+}
+
 /// Foydalanuvchi yasagan emoji/GIF/stiker yuborish pullik obuna talab qiladi
 /// (admin — yo'q). `true` — ruxsat yo'q.
 async fn needs_pack_sub(env: &Env, u: &Value, uses_pack: bool) -> bool {
@@ -15121,6 +15160,9 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
     if path == "/api/comments/like" && method == Method::Post {
         return comments_like(req, &env).await;
+    }
+    if path == "/api/live/wait" && method == Method::Get {
+        return live_wait(&req, &env).await;
     }
     if path == "/api/comments/wait" && method == Method::Get {
         return comments_wait(&req, &env).await;

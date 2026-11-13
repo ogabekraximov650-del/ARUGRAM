@@ -257,6 +257,7 @@ fun AdminAnimeScreen(onBack: () -> Unit, onOpenAnime: (JSONObject) -> Unit, onEd
         loading = false
     }
     LaunchedEffect(Unit) { load() }
+    uz.arumediatv.com.data.LiveEffect("content") { load() }
     MgmtScaffold(onBack, { onEdit(null) }, snack, snackOk, header = {
         Text("Animelarni boshqarish", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
     }) {
@@ -455,6 +456,7 @@ fun AdminSeasonsScreen(anime: JSONObject, onBack: () -> Unit, onOpenSeason: (JSO
         loading = false
     }
     LaunchedEffect(Unit) { load() }
+    uz.arumediatv.com.data.LiveEffect("content") { load() }
     MgmtScaffold(onBack, { onEdit(null) }, snack, header = {
         MgmtPhoto(anime.optString("photo_url"), 48, 12, 144)
         Spacer(Modifier.width(12.dp))
@@ -620,6 +622,7 @@ fun AdminEpisodesScreen(anime: JSONObject, season: JSONObject, onBack: () -> Uni
         loading = false
     }
     LaunchedEffect(Unit) { load() }
+    uz.arumediatv.com.data.LiveEffect("content") { load() }
     val bolimId = season.optInt("bolim_id").takeIf { it > 0 } ?: season.optInt("season_id")
     val seasonName = season.optString("nomi").takeIf { it != "null" }.orEmpty()
     MgmtScaffold(onBack, { onEdit(null) }, snack, header = {

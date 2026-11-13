@@ -205,6 +205,8 @@ private fun AruApp() {
     fun push(p: Page) { stack.add(p) }
     fun pop() { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) }
     var askLogin by remember { mutableStateOf(false) }
+    // Jonli yangilanish: anime/bo'lim/qism o'zgarsa bosh sahifa va katalog ro'yxati bir necha soniyada yangilanadi (ekran ko'rinib turganda).
+    uz.arumediatv.com.data.LiveEffect("content") { AppServices.seasons.refreshQuiet() }
     // Oldingi safar Rust ichida halokat bo'lgan bo'lsa — sababi ko'rsatiladi (Flutter `_showLastCrash`).
     var crashText by remember { mutableStateOf<String?>(null) }
     androidx.compose.runtime.LaunchedEffect(Unit) {

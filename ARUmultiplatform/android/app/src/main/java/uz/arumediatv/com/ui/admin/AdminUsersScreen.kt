@@ -79,6 +79,7 @@ fun AdminUsersScreen(onBack: () -> Unit, onOpenProfile: (Long) -> Unit, onOpenCh
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
 
     LaunchedEffect(Unit) { store.reload() }
+    uz.arumediatv.com.data.LiveEffect("users") { store.reload(quiet = true) }
     LaunchedEffect(query) {
         if (query == st.query) return@LaunchedEffect
         delay(450)

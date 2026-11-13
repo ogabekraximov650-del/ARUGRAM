@@ -40,6 +40,12 @@ class SeasonsStore(private val repo: SeasonsRepository) {
         }
     }
 
+    /** Jonli yangilanish: ro'yxat serverdan jimgina (aylanuvchi belgisiz) qayta olinadi. */
+    suspend fun refreshQuiet() {
+        started = true
+        fetch(force = false, refreshing = false, live = true)
+    }
+
     fun refresh() {
         if (_state.value.refreshing) return
         scope.launch {
@@ -48,9 +54,9 @@ class SeasonsStore(private val repo: SeasonsRepository) {
         }
     }
 
-    private suspend fun fetch(force: Boolean, refreshing: Boolean) {
+    private suspend fun fetch(force: Boolean, refreshing: Boolean, live: Boolean = false) {
         lock.withLock {
-            val r = repo.fetch(force)
+            val r = repo.fetch(force, live)
             _state.update { s ->
                 when (r) {
                     is FetchResult.Fresh -> s.copy(items = r.items, loading = false, refreshing = false, offline = false, error = null)

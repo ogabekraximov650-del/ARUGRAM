@@ -161,8 +161,8 @@ class SeasonRepository(
     }
 
     /** `null` — tarmoq xatosi (kesh saqlanib qoladi). */
-    suspend fun fetchEpisodes(a: Long, s: Long): List<Episode>? = withContext(Dispatchers.IO) {
-        if (fresh("eps_${a}_$s.json", EPISODES_TTL)) return@withContext null // kesh yangi — server so'ralmaydi
+    suspend fun fetchEpisodes(a: Long, s: Long, force: Boolean = false): List<Episode>? = withContext(Dispatchers.IO) {
+        if (!force && fresh("eps_${a}_$s.json", EPISODES_TTL)) return@withContext null // kesh yangi — server so'ralmaydi
         val (code, text) = client.callText("$base/api/epizods/$a/$s")
         if (code != 200) return@withContext null
         val list = parseEpisodes(text)
@@ -181,8 +181,8 @@ class SeasonRepository(
         read("seasons_anime_$a.json")?.let(::parseSeasons)?.takeIf { it.isNotEmpty() }
     }
 
-    suspend fun fetchSeasons(a: Long): List<Season>? = withContext(Dispatchers.IO) {
-        if (fresh("seasons_anime_$a.json", SEASONS_TTL)) return@withContext null
+    suspend fun fetchSeasons(a: Long, force: Boolean = false): List<Season>? = withContext(Dispatchers.IO) {
+        if (!force && fresh("seasons_anime_$a.json", SEASONS_TTL)) return@withContext null
         val (code, text) = client.callText("$base/api/seasons/anime/$a")
         if (code != 200) return@withContext null
         write("seasons_anime_$a.json", text)
