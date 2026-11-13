@@ -73,6 +73,8 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
         mem.get(key)?.let { return it }
         // Diskda tayyor kadr bor — navbatni kutmasdan darhol (aylantirganda kadr yo'qolib qolmasin).
         withContext(Dispatchers.IO) { fromDisk(key) }?.let { mem.put(key, it); return it }
+        // Joy biroz o'zgargan bo'lsa (kalit joyni o'z ichiga oladi) ham diskdagi kadr yaroqli: tarmoqdan qayta olinmaydi, xotiradan chiqadi.
+        withContext(Dispatchers.IO) { nearOnDisk(item) }?.let { mem.put(key, it); return it }
         val last = failedAt[key]
         if (last != null && System.currentTimeMillis() - last < RETRY_MS) return null
         val mine = CompletableDeferred<Bitmap?>()
@@ -96,6 +98,24 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
     }
 
     private fun file(key: String) = File(dir, "thumb_$key.bin")
+
+    /**
+     * UZ: shu qismning diskdagi kadri, to'xtagan joyi hozirgisidan [NEAR_MS] dan kam farq qilsa. Ilgari faqat ANIQ bir xil joy topilardi: joy har ko'rishda
+     * o'zgargani uchun kadr deyarli har safar internetdan qayta olinardi.
+     * EN: the on-disk frame of this episode if its stored position is within [NEAR_MS] of the current one (previously only an exact match counted, so
+     * the frame was re-fetched over the network almost every time).
+     */
+    private fun nearOnDisk(item: HistoryItem): Bitmap? {
+        val id = identity(item)
+        val prefix = "thumb_${id}_"
+        val best = dir.listFiles()?.mapNotNull { f ->
+            if (!f.name.startsWith(prefix) || !f.name.endsWith(".bin")) return@mapNotNull null
+            val pos = f.name.removePrefix(prefix).removeSuffix(".bin").toLongOrNull() ?: return@mapNotNull null
+            val d = Math.abs(pos - item.positionMs)
+            if (d <= NEAR_MS) f to d else null
+        }?.minByOrNull { it.second }?.first ?: return null
+        return try { decodeSmall(SecureStore.open(best.readBytes())) } catch (_: Exception) { null }
+    }
 
     private fun decodeSmall(b: ByteArray): Bitmap? {
         val o = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -201,5 +221,7 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
 
     private companion object {
         const val RETRY_MS = 20_000L
+        /** Diskdagi kadr shu masofagacha (2 daqiqa) yaqin joyda bo'lsa qayta yasalmaydi. */
+        const val NEAR_MS = 120_000L
     }
 }
