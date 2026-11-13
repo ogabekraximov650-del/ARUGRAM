@@ -31,6 +31,11 @@ fn has_codec(v: &Value) -> bool {
     matches!(v.as_str(), Some(s) if s != "none" && !s.is_empty())
 }
 
+/// Video formatmi: `vcodec` aniq "none" bo'lmasa (noma'lum/null ham) — video.
+fn is_video(f: &Value) -> bool {
+    f["vcodec"].as_str() != Some("none")
+}
+
 fn size_of(f: &Value) -> Option<u64> {
     f["filesize"].as_u64().or_else(|| f["filesize_approx"].as_f64().map(|x| x as u64)).filter(|s| *s > 0)
 }
@@ -38,15 +43,15 @@ fn size_of(f: &Value) -> Option<u64> {
 /// `yt-dlp -J` javobidan sifatlar ro'yxati (balandlik bo'yicha kamayish tartibida).
 pub fn parse_info(v: &Value) -> Info {
     let formats = v["formats"].as_array().cloned().unwrap_or_default();
-    let mut heights: Vec<i64> = formats.iter().filter(|f| has_codec(&f["vcodec"])).filter_map(|f| f["height"].as_i64()).filter(|h| *h >= 144).collect();
+    let mut heights: Vec<i64> = formats.iter().filter(|f| is_video(f)).filter_map(|f| f["height"].as_i64()).filter(|h| *h >= 144).collect();
     heights.sort_unstable_by(|a, b| b.cmp(a));
     heights.dedup();
     let audio_size = formats.iter().filter(|f| !has_codec(&f["vcodec"]) && has_codec(&f["acodec"])).filter_map(size_of).max();
     let mut opts = Vec::new();
     for h in heights {
-        let at_h: Vec<&Value> = formats.iter().filter(|f| has_codec(&f["vcodec"]) && f["height"].as_i64() == Some(h)).collect();
-        let progressive = at_h.iter().filter(|f| has_codec(&f["acodec"])).filter_map(|f| size_of(f)).max();
-        let video_only = at_h.iter().filter(|f| !has_codec(&f["acodec"])).filter_map(|f| size_of(f)).max();
+        let at_h: Vec<&Value> = formats.iter().filter(|f| is_video(f) && f["height"].as_i64() == Some(h)).collect();
+        let progressive = at_h.iter().filter(|f| f["acodec"].as_str() != Some("none")).filter_map(|f| size_of(f)).max();
+        let video_only = at_h.iter().filter(|f| f["acodec"].as_str() == Some("none")).filter_map(|f| size_of(f)).max();
         let size = match (video_only, audio_size) {
             (Some(v), Some(a)) => Some(v + a),
             (Some(v), None) => Some(v),
@@ -69,6 +74,9 @@ pub fn parse_info(v: &Value) -> Info {
 pub fn selector(fmt: &str) -> String {
     if fmt == "d" {
         return "b".to_string(); // to'g'ridan-to'g'ri fayl: bitta format
+    }
+    if fmt == "b" {
+        return "bv*+ba/b".to_string(); // sifat ro'yxati yo'q: mavjud eng yaxshi fayl
     }
     match fmt.parse::<i64>() {
         Ok(h) => format!("bv*[height<={h}]+ba/b[height<={h}]/b"),
@@ -259,8 +267,10 @@ async fn probe_ytdlp(cfg: &Cfg, url: &str) -> Result<Info> {
     }
     let v: Value = serde_json::from_slice(&out.stdout)?;
     let info = parse_info(&v);
-    if info.opts.is_empty() && info.audio_size.is_none() && v["url"].as_str().is_none() {
-        return Err(anyhow!("sifatlar topilmadi"));
+    // Sifat ro'yxati bo'lmasa ham (balandlik berilmagan: Instagram, TikTok, oddiy fayl) mavjud fayl yuklanadi; faqat umuman format bo'lmasa xato.
+    let has_any = v["url"].as_str().is_some() || v["formats"].as_array().map(|a| !a.is_empty()).unwrap_or(false) || v["entries"].is_array();
+    if info.opts.is_empty() && info.audio_size.is_none() && !has_any {
+        return Err(anyhow!("yuklab olinadigan fayl topilmadi"));
     }
     Ok(info)
 }
@@ -543,6 +553,18 @@ mod tests {
         assert!(!i.direct.is_empty());
         assert!(i.direct.iter().all(|(_, u)| u.starts_with("https://") && u.ends_with(".mp4")), "{:?}", i.direct);
         eprintln!("rumble: {} | {} s | {:?}", i.title, i.duration, i.opts);
+    }
+
+    #[test]
+    fn no_height_formats_still_offer_a_download() {
+        // Instagram/TikTok kabi: balandlik yo'q, vcodec noma'lum — sifat tugmalari bo'sh, lekin format bor.
+        let v = json!({"title": "Reel", "duration": 12.0, "formats": [{"format_id": "mp4", "url": "https://x/y.mp4", "ext": "mp4"}]});
+        let i = parse_info(&v);
+        assert!(i.opts.is_empty());
+        assert_eq!(selector("b"), "bv*+ba/b");
+        // vcodec noma'lum, lekin balandlik bor — video sifatida hisoblanadi.
+        let v2 = json!({"title": "X", "formats": [{"format_id": "1", "height": 720, "filesize": 5_000_000, "ext": "mp4"}]});
+        assert_eq!(parse_info(&v2).opts.iter().map(|o| o.h).collect::<Vec<_>>(), vec![720]);
     }
 
     #[test]

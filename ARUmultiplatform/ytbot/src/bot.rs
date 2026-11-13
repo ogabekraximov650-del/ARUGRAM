@@ -259,9 +259,13 @@ async fn handle_url(app: &Arc<App>, chat: i64, url: &str) -> Result<()> {
     if !row.is_empty() {
         rows.push(Value::Array(row));
     }
+    if info.opts.is_empty() {
+        // Sifat ro'yxati yo'q: mavjud faylni yuklab olish tugmasi.
+        rows.push(json!([{"text": "⬇️ Yuklab olish (mavjud fayl)", "callback_data": format!("q:{id}:b")}]));
+    }
     rows.push(json!([{"text": format!("🎵 Audio{}", info.audio_size.map(|s| format!(" ~{}", dl::human(s))).unwrap_or_default()), "callback_data": format!("q:{id}:a")}, {"text": "✖️ Bekor", "callback_data": format!("x:{id}")}]));
     let dur = if info.duration > 0 { format!("\n⏱ {}:{:02}", info.duration / 60, info.duration % 60) } else { String::new() };
-    app.bot.edit(chat, st, &format!("🎬 {}{dur}\n\nSifatni tanlang:", info.title.chars().take(200).collect::<String>()), Some(json!({"inline_keyboard": rows}))).await;
+    app.bot.edit(chat, st, &format!("🎬 {}{dur}\n\n{}", info.title.chars().take(200).collect::<String>(), if info.opts.is_empty() { "Sifatlar ro'yxati yo'q — mavjud fayl yuklanadi:" } else { "Sifatni tanlang:" }), Some(json!({"inline_keyboard": rows}))).await;
     Ok(())
 }
 
