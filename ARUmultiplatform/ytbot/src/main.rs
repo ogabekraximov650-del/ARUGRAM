@@ -39,6 +39,15 @@ async fn main() -> Result<()> {
         return Err(anyhow::anyhow!("WEBHOOK_SECRET kamida 16 belgi bo'lishi kerak (harf, raqam, _ va -)"));
     }
     std::fs::create_dir_all(&cfg.data_dir)?;
+    // Tashxis: `ytbot probe <url>` — havola uchun sifatlar ro'yxatini chiqaradi (webhook/bot kerak emas).
+    if std::env::args().nth(1).as_deref() == Some("probe") {
+        let url = std::env::args().nth(2).unwrap_or_default();
+        match dl::probe(&cfg, &url).await {
+            Ok(i) => println!("{} | {} s | {} sifat | direct: {:?}", i.title, i.duration, i.opts.len(), i.direct.iter().map(|(h, _)| *h).collect::<Vec<_>>()),
+            Err(e) => println!("XATO: {e}"),
+        }
+        return Ok(());
+    }
     eprintln!("ytbot ishga tushdi");
     bot::run(cfg).await
 }

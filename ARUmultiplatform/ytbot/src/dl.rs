@@ -104,8 +104,9 @@ pub async fn probe(cfg: &Cfg, url: &str) -> Result<Info> {
         Err(e) => {
             // Rumble sahifasi serverga Cloudflare tekshiruvini beradi (403); embed sahifasi va CDN esa ochiq — to'g'ridan-to'g'ri havolalar olinadi.
             if let Some(id) = rumble_id(url) {
-                if let Ok(i) = rumble_probe(&id).await {
-                    return Ok(i);
+                match rumble_probe(&id).await {
+                    Ok(i) => return Ok(i),
+                    Err(e2) => return Err(anyhow!("{e}\n(Rumble embed yo'li ham ishlamadi: {e2})")),
                 }
             }
             Err(e)
@@ -166,7 +167,13 @@ fn json_object_at(s: &str, start: usize) -> Option<&str> {
 pub fn parse_rumble_embed(html: &str, id: &str) -> Option<Info> {
     let key = format!("p.f[\"{id}\"]=");
     let at = html.find(&key)? + key.len();
-    let v: Value = serde_json::from_str(json_object_at(html, at)?).ok()?;
+    // Obyekt oxirida JavaScript bor (`,loaded:v()}`) — bu JSON emas; shu qismdan oldini kesib `}` bilan yopamiz.
+    let mut obj = json_object_at(html, at)?.to_string();
+    if let Some(i) = obj.find(",loaded:") {
+        obj.truncate(i);
+        obj.push('}');
+    }
+    let v: Value = serde_json::from_str(&obj).ok()?;
     let mut direct: Vec<(i64, String, u64)> = Vec::new();
     if let Some(m) = v["ua"]["mp4"].as_object() {
         for (k, f) in m {
@@ -194,8 +201,19 @@ pub fn parse_rumble_embed(html: &str, id: &str) -> Option<Info> {
 }
 
 async fn rumble_probe(id: &str) -> Result<Info> {
-    let html = reqwest::Client::builder().user_agent(UA).timeout(std::time::Duration::from_secs(30)).build()?.get(format!("https://rumble.com/embed/{id}/")).send().await?.text().await?;
-    parse_rumble_embed(&html, id).ok_or_else(|| anyhow!("Rumble: video ma'lumoti topilmadi"))
+    let url = format!("https://rumble.com/embed/{id}/");
+    // Avval `curl` (Cloudflare uni oddiy brauzerdek qabul qiladi), bo'lmasa o'zimizning HTTP mijoz.
+    let mut html = match Command::new("curl").args(["-sL", "-m", "30", "-A", UA]).arg(&url).output().await {
+        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
+        _ => String::new(),
+    };
+    if !html.contains("p.f[") {
+        html = reqwest::Client::builder().user_agent(UA).timeout(std::time::Duration::from_secs(30)).build()?.get(&url).send().await?.text().await?;
+    }
+    if !html.contains("p.f[") {
+        return Err(anyhow!("Rumble embed sahifasi video ma'lumotini bermadi ({} bayt)", html.len()));
+    }
+    parse_rumble_embed(&html, id).ok_or_else(|| anyhow!("Rumble embed ma'lumotini o'qib bo'lmadi"))
 }
 
 async fn probe_ytdlp(cfg: &Cfg, url: &str) -> Result<Info> {
@@ -441,13 +459,24 @@ mod tests {
         assert_eq!(rumble_id("https://rumble.com/embed/v74j7sy/"), Some("v74j7sy".into()));
         assert_eq!(rumble_id("https://youtube.com/v74j7sy"), None);
         assert_eq!(rumble_id("https://rumble.com/user/x"), None);
-        let html = r#"<script>p.f["v74j7sy"]={"fps":29.97,"w":1280,"h":720,"u":{"mp4":{"url":"https:\/\/c.example\/a.gaa.mp4","meta":{"size":71227293,"w":1280,"h":720}}},"ua":{"mp4":{"360":{"url":"https:\/\/c.example\/a.baa.mp4","meta":{"bitrate":636,"size":21938969,"w":640,"h":360}},"720":{"url":"https:\/\/c.example\/a.gaa.mp4","meta":{"size":71227293,"w":1280,"h":720}}},"timeline":{"180":{"url":"x"}}},"x":"}{"};</script> {"title":"Salom","duration":275}"#;
+        let html = r#"<script>p.f["v74j7sy"]={"fps":29.97,"w":1280,"h":720,"u":{"mp4":{"url":"https:\/\/c.example\/a.gaa.mp4","meta":{"size":71227293,"w":1280,"h":720}}},"ua":{"mp4":{"360":{"url":"https:\/\/c.example\/a.baa.mp4","meta":{"bitrate":636,"size":21938969,"w":640,"h":360}},"720":{"url":"https:\/\/c.example\/a.gaa.mp4","meta":{"size":71227293,"w":1280,"h":720}}},"timeline":{"180":{"url":"x"}}},"x":"}{","viewer_id":"abc",loaded:v()};</script> {"title":"Salom","duration":275}"#;
         let i = parse_rumble_embed(html, "v74j7sy").unwrap();
         assert_eq!(i.title, "Salom");
         assert_eq!(i.duration, 275);
         assert_eq!(i.opts.iter().map(|o| o.h).collect::<Vec<_>>(), vec![720, 360]);
         assert_eq!(i.direct[0], (720, "https://c.example/a.gaa.mp4".to_string()));
         assert_eq!(i.opts[1].size, Some(21938969));
+    }
+
+    /// Haqiqiy Rumble embed sahifasi bilan (RUMBLE_FIXTURE=/yo'l/emb.html RUMBLE_ID=v74j7sy); berilmasa o'tkaziladi.
+    #[test]
+    fn real_rumble_embed_page() {
+        let (Ok(path), Ok(id)) = (std::env::var("RUMBLE_FIXTURE"), std::env::var("RUMBLE_ID")) else { return };
+        let html = std::fs::read_to_string(path).unwrap();
+        let i = parse_rumble_embed(&html, &id).expect("embed o'qilmadi");
+        assert!(!i.direct.is_empty());
+        assert!(i.direct.iter().all(|(_, u)| u.starts_with("https://") && u.ends_with(".mp4")), "{:?}", i.direct);
+        eprintln!("rumble: {} | {} s | {:?}", i.title, i.duration, i.opts);
     }
 
     #[test]
