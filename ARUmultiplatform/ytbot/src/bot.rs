@@ -1,7 +1,8 @@
 // UZ: bot mantig'i: Telegram Bot API (long polling), akkauntni kod bilan ulash, navbat ishchisi. EN: bot logic: Bot API long polling, code-based account login, queue worker.
 use crate::{db, dl, Cfg};
 use anyhow::{anyhow, Result};
-use grammers_client::client::{LoginToken, PasswordToken, SignInError};
+use grammers_client::client::PasswordToken;
+use grammers_client::tl;
 use grammers_client::message::InputMessage;
 use grammers_client::{media::Attribute, Client};
 use grammers_session::storages::SqliteSession;
@@ -53,10 +54,107 @@ impl Bot {
     }
 }
 
+/// Yuborilgan kod: telefon, Telegram bergan `phone_code_hash`, qaysi usulda yuborilgani va keyingi usul.
+struct Sent {
+    phone: String,
+    hash: String,
+    kind: String,
+    next: Option<String>,
+}
+
 enum Pending {
     None,
-    Code(LoginToken),
+    Code(Sent),
     Pass(PasswordToken),
+}
+
+fn describe_type(t: &tl::enums::auth::SentCodeType) -> String {
+    use tl::enums::auth::SentCodeType as T;
+    match t {
+        T::App(_) => "Telegram ILOVASIGA (\"Telegram\" xizmat chati, boshqa qurilmangizdagi Telegram)".into(),
+        T::Sms(_) => "SMS orqali".into(),
+        T::Call(_) => "telefon qo'ng'irog'i orqali (kodni robot ovozi aytadi)".into(),
+        T::FlashCall(_) | T::MissedCall(_) => "o'tkazib yuborilgan qo'ng'iroq orqali (raqamning oxirgi raqamlari)".into(),
+        T::FirebaseSms(_) => "SMS orqali (Google/Firebase)".into(),
+        T::EmailCode(_) => "elektron pochtaga".into(),
+        T::SetUpEmailRequired(_) => "pochta ulanishi talab qilinadi (bu akkaunt uchun kod pochta orqali)".into(),
+        T::FragmentSms(_) => "Fragment orqali SMS".into(),
+        _ => "boshqa usulda".into(),
+    }
+}
+
+fn describe_next(t: &tl::enums::auth::CodeType) -> String {
+    use tl::enums::auth::CodeType as C;
+    match t {
+        C::Sms => "SMS".into(),
+        C::Call => "telefon qo'ng'irog'i".into(),
+        C::FlashCall => "flash-qo'ng'iroq".into(),
+        C::MissedCall => "o'tkazib yuborilgan qo'ng'iroq".into(),
+        C::FragmentSms => "Fragment SMS".into(),
+    }
+}
+
+fn sent_from(phone: &str, r: tl::enums::auth::SentCode) -> Result<Sent> {
+    match r {
+        tl::enums::auth::SentCode::Code(c) => Ok(Sent { phone: phone.to_string(), hash: c.phone_code_hash, kind: describe_type(&c.r#type), next: c.next_type.as_ref().map(describe_next) }),
+        _ => Err(anyhow!("kutilmagan javob (kod yuborilmadi)")),
+    }
+}
+
+/// Kodni so'raydi (usul ma'lum bo'ladi). Raqam boshqa data markazda bo'lsa kutubxona ko'chishni bajaradi, so'ng qayta so'raladi.
+async fn send_code(app: &App, phone: &str) -> Result<Sent> {
+    let req = tl::functions::auth::SendCode {
+        phone_number: phone.to_string(),
+        api_id: app.cfg.api_id,
+        api_hash: app.cfg.api_hash.clone(),
+        settings: tl::types::CodeSettings {
+            allow_flashcall: false,
+            current_number: false,
+            allow_app_hash: false,
+            allow_missed_call: false,
+            allow_firebase: false,
+            logout_tokens: None,
+            token: None,
+            app_sandbox: None,
+            unknown_number: false,
+        }
+        .into(),
+    };
+    match app.tg.invoke(&req).await {
+        Ok(r) => sent_from(phone, r),
+        Err(e) if e.is("PHONE_MIGRATE_*") || e.is("NETWORK_MIGRATE_*") => {
+            // Kutubxonaning o'z usuli ko'chishni bajaradi (u kod ham yuboradi), keyin usulni bilish uchun qayta so'raymiz.
+            let _ = app.tg.request_login_code(phone, &app.cfg.api_hash).await;
+            sent_from(phone, app.tg.invoke(&req).await?)
+        }
+        Err(e) => Err(anyhow!("{e}")),
+    }
+}
+
+/// Keyingi usul bilan qayta yuboradi (SMS / qo'ng'iroq).
+async fn resend_code(app: &App, s: &Sent) -> Result<Sent> {
+    let r = app.tg.invoke(&tl::functions::auth::ResendCode { phone_number: s.phone.clone(), phone_code_hash: s.hash.clone(), reason: None }).await.map_err(|e| anyhow!("{e}"))?;
+    sent_from(&s.phone, r)
+}
+
+enum SignIn {
+    Ok,
+    Password(PasswordToken),
+    BadCode,
+    Other(String),
+}
+
+async fn sign_in(app: &App, s: &Sent, code: &str) -> SignIn {
+    match app.tg.invoke(&tl::functions::auth::SignIn { phone_number: s.phone.clone(), phone_code_hash: s.hash.clone(), phone_code: Some(code.to_string()), email_verification: None }).await {
+        Ok(tl::enums::auth::Authorization::Authorization(_)) => SignIn::Ok,
+        Ok(_) => SignIn::Other("bu raqamda Telegram akkaunt yo'q (avval ro'yxatdan o'ting)".into()),
+        Err(e) if e.is("SESSION_PASSWORD_NEEDED") => match app.tg.invoke(&tl::functions::account::GetPassword {}).await {
+            Ok(p) => SignIn::Password(PasswordToken::new(p.into())),
+            Err(e) => SignIn::Other(e.to_string()),
+        },
+        Err(e) if e.is("PHONE_CODE_*") => SignIn::BadCode,
+        Err(e) => SignIn::Other(e.to_string()),
+    }
 }
 
 pub struct App {
@@ -84,6 +182,17 @@ pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
     tokio::spawn(async move { while updates.recv().await.is_some() {} }); // MTProto yangilanishlari kerak emas — navbat to'lib qolmasin.
 
     let app = Arc::new(App { cfg, db: conn, bot, username, tg, pending: Mutex::new(Pending::None), peer: Mutex::new(None) });
+    // Tashxis: MTProto ulanishi va API kalitlari ishlayaptimi (yaroqsiz raqam so'raladi — hech kimga kod yuborilmaydi).
+    let a0 = Arc::clone(&app);
+    tokio::spawn(async move {
+        let authorized = a0.tg.is_authorized().await;
+        eprintln!("mtproto: is_authorized = {authorized:?}");
+        match tokio::time::timeout(Duration::from_secs(30), a0.tg.request_login_code("+10000000000", &a0.cfg.api_hash)).await {
+            Ok(Ok(_)) => eprintln!("mtproto: kod so'rovi ishladi (kutilmagan)"),
+            Ok(Err(e)) => eprintln!("mtproto: sinov javobi (xato kutilgan edi): {e}"),
+            Err(_) => eprintln!("mtproto: sinov 30 s ichida javob bermadi — ulanish muammosi"),
+        }
+    });
     let w = Arc::clone(&app);
     tokio::spawn(async move { worker(w).await });
 
@@ -128,6 +237,10 @@ pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
 
 fn handle_update(app: Arc<App>, u: Value) {
     tokio::spawn(async move {
+        let kind = if u["message"].is_object() { "message" } else if u["callback_query"].is_object() { "callback" } else { "boshqa" };
+        let head: String = u["message"]["text"].as_str().or_else(|| u["callback_query"]["data"].as_str()).unwrap_or("").chars().take(12).collect();
+        let head = if head.chars().all(|c| c.is_ascii_digit() || c == ' ' || c == '+') && head.len() > 3 { "<raqam/kod>".to_string() } else { head };
+        eprintln!("yangilanish: {kind} {head}");
         let r = if u["message"].is_object() { on_message(&app, &u["message"]).await } else if u["callback_query"].is_object() { on_callback(&app, &u["callback_query"]).await } else { Ok(()) };
         if let Err(e) = r {
             eprintln!("yangilanish xatosi: {e}");
@@ -162,7 +275,7 @@ async fn owner(app: &App) -> i64 {
     db::kv_get(&app.db, "owner").await.and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
-const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\n/login — Telegram akkauntni ulash (katta fayllar uchun)\n/queue — navbat\n/cancel <raqam> — bekor qilish\n/logout — akkauntni uzish\n\nBelgi: ⚡ — oqim bilan (diskka yozilmasdan) yuboriladi.";
+const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\n/login — Telegram akkauntni ulash (katta fayllar uchun)\n/resend — kod kelmasa, SMS/qo'ng'iroq bilan qayta yuborish\n/queue — navbat\n/cancel <raqam> — bekor qilish\n/logout — akkauntni uzish\n\nBelgi: ⚡ — oqim bilan (diskka yozilmasdan) yuboriladi.";
 
 async fn authorized(app: &App) -> bool {
     app.tg.is_authorized().await.unwrap_or(false)
@@ -195,6 +308,28 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
         "/login" => {
             db::kv_set(&app.db, "login_state", "phone").await?;
             app.bot.send(chat, "📱 Telegram akkaunt telefon raqamini yuboring (masalan +998901234567). Kod Telegram ilovasiga keladi.", None).await?;
+            return Ok(());
+        }
+        "/resend" => {
+            let prev = std::mem::replace(&mut *app.pending.lock().await, Pending::None);
+            match prev {
+                Pending::Code(sent) => match resend_code(app, &sent).await {
+                    Ok(n) => {
+                        let msg = format!("📨 Kod qayta yuborildi: {}.{}", n.kind, n.next.as_ref().map(|x| format!("\nKeyingi usul (/resend): {x}")).unwrap_or_default());
+                        *app.pending.lock().await = Pending::Code(n);
+                        app.bot.send(chat, &msg, None).await?;
+                    }
+                    Err(e) => {
+                        eprintln!("resend xato: {e}");
+                        *app.pending.lock().await = Pending::Code(sent);
+                        app.bot.send(chat, &format!("❌ Qayta yuborib bo'lmadi: {e}\n(Telegram qayta yuborishni biroz kutishni talab qilishi mumkin.)"), None).await?;
+                    }
+                },
+                other => {
+                    *app.pending.lock().await = other;
+                    app.bot.send(chat, "Avval /login va telefon raqamni yuboring.", None).await?;
+                }
+            }
             return Ok(());
         }
         "/logout" => {
@@ -239,13 +374,16 @@ async fn login_step(app: &Arc<App>, chat: i64, mid: i64, state: &str, text: &str
                 app.bot.send(chat, "Raqam noto'g'ri. Masalan: +998901234567", None).await?;
                 return Ok(());
             }
-            match app.tg.request_login_code(&format!("+{digits}"), &app.cfg.api_hash).await {
+            match send_code(app, &format!("+{digits}")).await {
                 Ok(t) => {
+                    eprintln!("kod yuborildi: usul = {}", t.kind);
+                    let msg = format!("🔐 Kod yuborildi: {}.\nKodni raqamlar orasiga probel qo'yib yuboring: 1 2 3 4 5 (probelsiz yuborsangiz Telegram kodni bekor qilishi mumkin).{}", t.kind, t.next.as_ref().map(|x| format!("\n\nKod kelmasa /resend — keyingi usul: {x}.")).unwrap_or_else(|| "\n\nKod kelmasa /resend.".into()));
                     *app.pending.lock().await = Pending::Code(t);
                     db::kv_set(&app.db, "login_state", "code").await?;
-                    app.bot.send(chat, "🔐 Telegram'dan kelgan kodni raqamlar orasiga probel qo'yib yuboring: 1 2 3 4 5\n(probelsiz yuborsangiz Telegram kodni bekor qilishi mumkin)", None).await?;
+                    app.bot.send(chat, &msg, None).await?;
                 }
                 Err(e) => {
+                    eprintln!("kod so'rash xato: {e}");
                     db::kv_set(&app.db, "login_state", "").await?;
                     app.bot.send(chat, &format!("❌ Kod so'rab bo'lmadi: {e}"), None).await?;
                 }
@@ -262,21 +400,22 @@ async fn login_step(app: &Arc<App>, chat: i64, mid: i64, state: &str, text: &str
                     return Ok(());
                 }
             };
-            match app.tg.sign_in(&token, &code).await {
-                Ok(_) => {
+            match sign_in(app, &token, &code).await {
+                SignIn::Ok => {
                     db::kv_set(&app.db, "login_state", "").await?;
                     app.bot.send(chat, "✅ Akkaunt ulandi. Endi havola yuborishingiz mumkin.", None).await?;
                 }
-                Err(SignInError::PasswordRequired(p)) => {
+                SignIn::Password(p) => {
                     *app.pending.lock().await = Pending::Pass(p);
                     db::kv_set(&app.db, "login_state", "pass").await?;
                     app.bot.send(chat, "🔑 2 bosqichli parolni yuboring (xabar o'chiriladi).", None).await?;
                 }
-                Err(SignInError::InvalidCode) => {
+                SignIn::BadCode => {
                     *app.pending.lock().await = Pending::Code(token);
-                    app.bot.send(chat, "❌ Kod noto'g'ri. Qayta yuboring (1 2 3 4 5) yoki /login.", None).await?;
+                    app.bot.send(chat, "❌ Kod noto'g'ri yoki eskirgan. Qayta yuboring (1 2 3 4 5), kod kelmasa /resend.", None).await?;
                 }
-                Err(e) => {
+                SignIn::Other(e) => {
+                    eprintln!("sign_in xato: {e}");
                     db::kv_set(&app.db, "login_state", "").await?;
                     app.bot.send(chat, &format!("❌ Ulanmadi: {e}"), None).await?;
                 }
@@ -297,7 +436,7 @@ async fn login_step(app: &Arc<App>, chat: i64, mid: i64, state: &str, text: &str
                     db::kv_set(&app.db, "login_state", "").await?;
                     app.bot.send(chat, "✅ Akkaunt ulandi.", None).await?;
                 }
-                Err(SignInError::InvalidPassword(p2)) => {
+                Err(grammers_client::client::SignInError::InvalidPassword(p2)) => {
                     *app.pending.lock().await = Pending::Pass(p2);
                     app.bot.send(chat, "❌ Parol noto'g'ri. Qayta yuboring yoki /login.", None).await?;
                 }
