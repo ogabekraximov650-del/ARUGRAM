@@ -86,6 +86,20 @@ pub fn selector(fmt: &str) -> String {
     }
 }
 
+/// yt-dlp progress qatori: `  45.3%|  2.10MiB/s|00:12` (shablon turi "download:" chiqishga KIRMAYDI). Mos kelsa tozalangan qator.
+pub fn progress_line(l: &str) -> Option<String> {
+    let t = l.trim();
+    let mut it = t.split('|');
+    let pc = it.next()?.trim();
+    it.next()?;
+    it.next()?;
+    if pc.ends_with('%') && pc.trim_end_matches('%').trim().parse::<f64>().is_ok() {
+        Some(t.to_string())
+    } else {
+        None
+    }
+}
+
 pub fn human(bytes: u64) -> String {
     let b = bytes as f64;
     if b >= 1024.0 * 1024.0 * 1024.0 { format!("{:.1} GB", b / 1073741824.0) } else if b >= 1048576.0 { format!("{:.0} MB", b / 1048576.0) } else { format!("{:.0} KB", b / 1024.0) }
@@ -305,8 +319,8 @@ pub async fn download_file(cfg: &Cfg, url: &str, fmt: &str, dir: &Path, mut prog
     });
     let mut lines = BufReader::new(out).lines();
     while let Ok(Some(l)) = lines.next_line().await {
-        if let Some(p) = l.strip_prefix("download:") {
-            progress(p.trim().to_string());
+        if let Some(p) = progress_line(&l) {
+            progress(p);
         }
     }
     let status = child.wait().await?;
@@ -599,6 +613,14 @@ mod tests {
         // vcodec noma'lum, lekin balandlik bor — video sifatida hisoblanadi.
         let v2 = json!({"title": "X", "formats": [{"format_id": "1", "height": 720, "filesize": 5_000_000, "ext": "mp4"}]});
         assert_eq!(parse_info(&v2).opts.iter().map(|o| o.h).collect::<Vec<_>>(), vec![720]);
+    }
+
+    #[test]
+    fn parses_ytdlp_progress_lines() {
+        assert_eq!(progress_line("  0.1%|  11.86MiB/s|00:02"), Some("0.1%|  11.86MiB/s|00:02".to_string()));
+        assert_eq!(progress_line(" 45.3%| Unknown B/s|Unknown").is_some(), true);
+        assert_eq!(progress_line("WARNING: [generic] Falling back"), None);
+        assert_eq!(progress_line("[download] Destination: x.mp4"), None);
     }
 
     #[test]

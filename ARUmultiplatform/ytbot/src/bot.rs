@@ -374,7 +374,7 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     let edit_task = tokio::spawn(async move {
         let mut last = std::time::Instant::now() - Duration::from_secs(10);
         while let Some(p) = rx.recv().await {
-            if last.elapsed() >= Duration::from_secs(5) {
+            if last.elapsed() >= Duration::from_secs(3) {
                 last = std::time::Instant::now();
                 let mut it = p.split('|');
                 let (pc, sp, eta) = (it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string());
@@ -405,8 +405,10 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
         let (a2, sp, chat, mid, jid) = (Arc::clone(app), Arc::clone(&split_pct), job.chat_id, job.status_msg, job.id);
         let sz = dl::human(size);
         tokio::spawn(async move {
+            let mut first = true;
             loop {
-                tokio::time::sleep(Duration::from_secs(4)).await;
+                tokio::time::sleep(Duration::from_millis(if first { 1200 } else { 3000 })).await;
+                first = false;
                 a2.bot.edit(chat, mid, &format!("✂️ #{jid} qismlarga bo'linmoqda ({sz})\n{}", bar(sp.load(Ordering::Relaxed) as f64)), None).await;
             }
         })
@@ -434,8 +436,10 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
         let up_tick = {
             let (a2, sn, chat, mid, jid, t100) = (Arc::clone(app), Arc::clone(&sent), job.chat_id, job.status_msg, job.id, title.clone());
             tokio::spawn(async move {
+                let mut first = true;
                 loop {
-                    tokio::time::sleep(Duration::from_secs(4)).await;
+                    tokio::time::sleep(Duration::from_millis(if first { 1200 } else { 3000 })).await;
+                    first = false;
                     let s = sn.load(Ordering::Relaxed);
                     let pct = (s as f64 / psize.max(1) as f64 * 100.0).min(99.0);
                     let overall = ((i as f64 + pct / 100.0) / n as f64) * 100.0;
