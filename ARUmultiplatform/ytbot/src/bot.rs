@@ -392,7 +392,22 @@ async fn handle_url(app: &Arc<App>, chat: i64, url: &str) -> Result<()> {
         }
     };
     let direct: serde_json::Map<String, Value> = info.direct.iter().map(|(h, u)| (h.to_string(), json!(u))).collect();
-    let meta = json!({"w": info.w, "h": info.h, "dur": info.duration, "direct": direct});
+    // Oqim manbalari (diskka yozilmasdan): `direct` havola (hajmi aniq) yoki yt-dlp stdout (aniq hajmli tayyor fayl). Hajmlar — bo'sh joy tekshiruvi uchun.
+    let mut stream = serde_json::Map::new();
+    let mut sizes = serde_json::Map::new();
+    for o in &info.opts {
+        if let Some(sz) = o.size {
+            sizes.insert(o.h.to_string(), json!(sz));
+        }
+        if let Some(u) = info.direct.iter().find(|(h, _)| *h == o.h).map(|(_, u)| u) {
+            if let Some(sz) = o.size {
+                stream.insert(o.h.to_string(), json!({"kind": "url", "url": u, "size": sz}));
+            }
+        } else if let Some((id, sz, _)) = &o.stream {
+            stream.insert(o.h.to_string(), json!({"kind": "yt", "id": id, "size": sz}));
+        }
+    }
+    let meta = json!({"w": info.w, "h": info.h, "dur": info.duration, "direct": direct, "stream": stream, "sizes": sizes});
     let id = db::job_new(&app.db, chat, url, &info.title, &meta.to_string()).await?;
     let mut rows: Vec<Value> = Vec::new();
     let mut row: Vec<Value> = Vec::new();
@@ -492,6 +507,34 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     let (w, h) = (meta["w"].as_i64().unwrap_or(0), meta["h"].as_i64().unwrap_or(0));
     let is_audio = job.fmt == "a";
     let title: String = job.title.chars().take(100).collect();
+    // 0) OQIM (diskka yozilmasdan): akkaunt ulangan, hajmi ANIQ ma'lum manba va fayl 50 MB dan katta bo'lsa. Xato bo'lsa diskka yuklashga o'tiladi.
+    if let (Some(acc), false) = (app.acc.as_ref(), is_audio) {
+        if let Some(sm) = meta["stream"][&job.fmt].as_object() {
+            let ssize = sm.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+            if ssize > dl::PART_LIMIT && ssize < 2_000_000_000 {
+                match stream_via_account(app, acc, job, sm, ssize, w as i32, h as i32, meta["dur"].as_u64().unwrap_or(0)).await {
+                    Ok(()) => {
+                        let note = if acc.me == owner(app).await { "" } else { "\n(bot nusxalaydi)" };
+                        app.bot.edit(job.chat_id, job.status_msg, &format!("✅ #{} tayyor: {title}\nBitta fayl ({}), oqim bilan (diskka yozilmasdan) yuborildi{note}", job.id, dl::human(ssize)), None).await;
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        if db::job_state(&app.db, job.id).await == "cancelled" {
+                            return Err(e);
+                        }
+                        eprintln!("#{} oqim bo'lmadi ({e}) — diskka yuklanadi", job.id);
+                    }
+                }
+            }
+        }
+    }
+
+    // Disk yetarlimi? (video+audio birlashtirilsa ~2 barobar joy kerak). Yetmasa foydalanuvchiga aniq xabar.
+    if let (Some(need), Some(free)) = (meta["sizes"][&job.fmt].as_u64(), dl::free_bytes(Path::new(&app.cfg.data_dir))) {
+        if need * 2 + 150_000_000 > free {
+            return Err(anyhow!("diskda joy yetarli emas: kerak ~{}, bo'sh {}. Pastroq sifatni tanlang", dl::human(need * 2), dl::human(free)));
+        }
+    }
     app.bot.edit(job.chat_id, job.status_msg, &format!("⏬ #{} yuklanmoqda…\n{title}", job.id), None).await;
 
     // 1) Yuklash (progress har 5 soniyada).
@@ -683,6 +726,63 @@ async fn send_via_account(app: &Arc<App>, acc: &Account, job: &db::Job, path: &P
         } else {
             m.attribute(Attribute::Video { round_message: false, supports_streaming: true, duration: Duration::from_secs(dur), w, h })
         };
+        let to = bot_peer(app, acc).await?;
+        acc.client.send_message(to, m).await.map_err(|e| anyhow!("yuborish: {e}"))?;
+        Ok(())
+    }
+    .await;
+    ticker.abort();
+    res
+}
+
+
+/// OQIM: manba (to'g'ridan-to'g'ri havola yoki yt-dlp stdout) -> Telegram, diskka yozilmaydi. Hajm manbadan ANIQ ma'lum bo'lishi shart.
+async fn stream_via_account(app: &Arc<App>, acc: &Account, job: &db::Job, src: &serde_json::Map<String, Value>, size: u64, w: i32, h: i32, dur: u64) -> Result<()> {
+    use futures_util::TryStreamExt;
+    let name = dl::safe_name(&job.title, "mp4");
+    let sent = Arc::new(AtomicU64::new(0));
+    app.bot.edit(job.chat_id, job.status_msg, &format!("⚡ #{} oqim bilan yuborilmoqda (diskka yozilmaydi)\n{}", job.id, job.title.chars().take(100).collect::<String>()), None).await;
+    let ticker = {
+        let (a2, sn, chat, mid, jid, t100) = (Arc::clone(app), Arc::clone(&sent), job.chat_id, job.status_msg, job.id, job.title.chars().take(100).collect::<String>());
+        tokio::spawn(async move {
+            let mut first = true;
+            loop {
+                tokio::time::sleep(Duration::from_millis(if first { 1200 } else { 3000 })).await;
+                first = false;
+                let s = sn.load(Ordering::Relaxed);
+                let pct = (s as f64 / size.max(1) as f64 * 100.0).min(99.0);
+                a2.bot.edit(chat, mid, &format!("⚡ #{jid} oqim: yuklab olish → Telegram\n{}  ({} / {})\n{t100}", bar(pct), dl::human(s), dl::human(size)), None).await;
+            }
+        })
+    };
+    let res: Result<()> = async {
+        let up = match src.get("kind").and_then(|k| k.as_str()) {
+            Some("url") => {
+                let url = src.get("url").and_then(|u| u.as_str()).ok_or_else(|| anyhow!("oqim manzili yo'q"))?;
+                let resp = reqwest::Client::builder().user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36").build()?.get(url).send().await?.error_for_status()?;
+                let stream = resp.bytes_stream().map_err(std::io::Error::other);
+                let mut rd = CountRead { inner: tokio_util::io::StreamReader::new(stream), n: Arc::clone(&sent) };
+                tokio::select! {
+                    r = acc.client.upload_stream(&mut rd, size as usize, name) => r.map_err(|e| anyhow!("oqim yuklash: {e}"))?,
+                    _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+                }
+            }
+            Some("yt") => {
+                let id = src.get("id").and_then(|u| u.as_str()).ok_or_else(|| anyhow!("format yo'q"))?;
+                let mut child = dl::spawn_stream(&app.cfg, &job.url, id)?;
+                let out = child.stdout.take().ok_or_else(|| anyhow!("stdout yo'q"))?;
+                let mut rd = CountRead { inner: out, n: Arc::clone(&sent) };
+                let r = tokio::select! {
+                    r = acc.client.upload_stream(&mut rd, size as usize, name) => r.map_err(|e| anyhow!("oqim yuklash: {e}")),
+                    _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
+                };
+                let _ = child.kill().await;
+                r?
+            }
+            _ => return Err(anyhow!("noma'lum oqim manbasi")),
+        };
+        let mut m = InputMessage::new().text(job.title.chars().take(900).collect::<String>()).document(up).mime_type("video/mp4");
+        m = m.attribute(Attribute::Video { round_message: false, supports_streaming: true, duration: Duration::from_secs(dur), w, h });
         let to = bot_peer(app, acc).await?;
         acc.client.send_message(to, m).await.map_err(|e| anyhow!("yuborish: {e}"))?;
         Ok(())

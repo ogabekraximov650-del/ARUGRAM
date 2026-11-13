@@ -15,6 +15,8 @@ pub struct Opt {
     pub h: i64,
     /// Taxminiy yakuniy hajm (bayt), bilinsa.
     pub size: Option<u64>,
+    /// Oqim nomzodi: bitta tayyor fayl (video+audio birga), hajmi ANIQ ma'lum, oddiy http(s) — (format_id, bayt, kengaytma).
+    pub stream: Option<(String, u64, String)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -59,7 +61,15 @@ pub fn parse_info(v: &Value) -> Info {
             (Some(v), None) => Some(v),
             _ => progressive,
         };
-        opts.push(Opt { h, size });
+        // Oqim nomzodi: aniq hajmli (`filesize`), oddiy http(s) yuklanadigan, video+audio birga fayl.
+        let stream = at_h
+            .iter()
+            .filter(|f| f["acodec"].as_str() != Some("none") && f["filesize"].as_u64().unwrap_or(0) > 0)
+            .filter(|f| f["protocol"].as_str().map(|p| p == "https" || p == "http").unwrap_or(false))
+            .max_by_key(|f| f["filesize"].as_u64().unwrap_or(0))
+            .map(|f| (f["format_id"].as_str().unwrap_or("").to_string(), f["filesize"].as_u64().unwrap_or(0), f["ext"].as_str().unwrap_or("mp4").to_string()))
+            .filter(|(id, _, _)| !id.is_empty());
+        opts.push(Opt { h, size, stream });
     }
     Info {
         title: v["title"].as_str().unwrap_or("video").to_string(),
@@ -218,7 +228,7 @@ pub fn parse_rumble_embed(html: &str, id: &str) -> Option<Info> {
         duration,
         w: v["w"].as_i64().unwrap_or(0),
         h: v["h"].as_i64().unwrap_or(0),
-        opts: direct.iter().map(|(h, _, sz)| Opt { h: *h, size: Some(*sz).filter(|s| *s > 0) }).collect(),
+        opts: direct.iter().map(|(h, _, sz)| Opt { h: *h, size: Some(*sz).filter(|s| *s > 0), stream: None }).collect(),
         audio_size: None,
         direct: direct.into_iter().map(|(h, u, _)| (h, u)).collect(),
     })
@@ -337,6 +347,21 @@ pub async fn download_file(cfg: &Cfg, url: &str, fmt: &str, dir: &Path, mut prog
         }
     }
     best.map(|(_, p)| p).ok_or_else(|| anyhow!("fayl yaratilmadi"))
+}
+
+/// Oqim: yt-dlp videoni stdout'ga yozadi (diskka emas).
+pub fn spawn_stream(cfg: &Cfg, url: &str, format_id: &str) -> Result<tokio::process::Child> {
+    let mut c = base(cfg);
+    c.arg("-f").arg(format_id).arg("-q").arg("-o").arg("-").arg("--").arg(url);
+    c.stdout(Stdio::piped()).stderr(Stdio::null());
+    Ok(c.spawn()?)
+}
+
+/// Papka joylashgan diskdagi bo'sh joy (bayt); bilinmasa `None`.
+pub fn free_bytes(dir: &Path) -> Option<u64> {
+    let _ = std::fs::create_dir_all(dir);
+    let out = std::process::Command::new("df").args(["-B1", "--output=avail"]).arg(dir).output().ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().nth(1)?.trim().parse().ok()
 }
 
 // ── Bo'lish: Bot API fayl limiti 50 MB ──────────────────────
@@ -567,6 +592,9 @@ mod tests {
         assert_eq!(i.opts[0].size, Some(82_000_000)); // video-only + audio
         assert_eq!(i.opts[1].size, Some(42_000_000)); // taxminiy hajm ham hisobga olinadi
         assert_eq!(i.audio_size, Some(2_000_000));
+        // 360p: tayyor fayl (https, aniq hajm) — oqim nomzodi; 1080p/720p (alohida video+audio) — emas.
+        assert_eq!(i.opts[2].stream, Some(("18".to_string(), 10_000_000, "mp4".to_string())));
+        assert!(i.opts[0].stream.is_none() && i.opts[1].stream.is_none());
     }
 
     #[test]
