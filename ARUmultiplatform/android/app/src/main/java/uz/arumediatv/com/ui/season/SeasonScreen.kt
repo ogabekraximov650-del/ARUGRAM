@@ -141,6 +141,8 @@ fun SeasonScreen(
     var info by remember { mutableStateOf<SeasonInfo?>(null) }
     var current by remember { mutableStateOf<Episode?>(null) }
     var currentUrl by remember { mutableStateOf("") }
+    // Pleyerda HOZIR ochiq video manzili (manba hal bo'lguncha bo'sh): har soniyada saqlash eski videoning joyini yangi qismga yozib yubormasin.
+    var progressUrl by remember { mutableStateOf("") }
     var viaTelegram by remember { mutableStateOf(false) }
     var viaVd by remember { mutableStateOf(false) }
     var viaLocal by remember { mutableStateOf(false) }
@@ -184,13 +186,26 @@ fun SeasonScreen(
     }
 
     fun saveProgress() {
-        if (currentUrl.isNotEmpty() && player.durationMs > 0) AppServices.progress.save(currentUrl, player.positionMs, player.durationMs)
+        if (progressUrl.isNotEmpty() && player.durationMs > 0) {
+            AppServices.progress.save(progressUrl, player.positionMs, player.durationMs)
+            current?.let { e -> AppServices.progress.saveEpisode("${season.animeId}:${season.seasonId}:${e.id}", player.positionMs, player.durationMs, e.qualityOf(progressUrl)) }
+        }
     }
 
     fun play(ep: Episode, quality: String? = null, resumeAt: Long? = null, resumePlaying: Boolean = true, preferWorker: Boolean = false) {
         scope.launch {
             val hist = AppServices.library.state.value.history.firstOrNull { it.animeId == season.animeId && it.seasonId == season.seasonId && it.epizodId == ep.id }
-            val q = quality ?: chosenQuality ?: hist?.quality?.takeIf { ep.urls.containsKey(it) }
+            val epKey = "${season.animeId}:${season.seasonId}:${ep.id}"
+            val saved = AppServices.progress.episodeState(epKey)
+            var q = quality ?: chosenQuality ?: saved?.second?.takeIf { ep.urls.containsKey(it) } ?: hist?.quality?.takeIf { ep.urls.containsKey(it) }
+            // Internet yo'q: telefonda to'liq bor sifat tanlanadi (aks holda boshqa sifat ochilib, "bu qism yuklab olinmagan" chiqardi va saqlangan joy topilmasdi).
+            if (!uz.arumediatv.com.data.Net.isOnline(ctx)) {
+                val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    val cands = listOfNotNull(q) + ep.urls.keys.filter { it != q }
+                    cands.firstOrNull { k -> ep.urls[k]?.let { AppServices.downloads.isComplete(it) } == true }
+                }
+                if (have != null) q = have
+            }
             val url = ep.urlFor(q)
             if (url.isEmpty()) {
                 toast("Bu qismda video yo'q")
@@ -203,10 +218,11 @@ fun SeasonScreen(
                 draft = HistoryDraft(season.animeId, season.seasonId, ep.id, url, ep.qualityOf(url), hist?.watchedMs ?: 0)
                 skippedRanges.clear()
             }
+            progressUrl = ""
             current = ep
             currentUrl = url
             player.error = null
-            val start = resumeAt ?: AppServices.progress.positionOf(url)
+            val start = resumeAt ?: AppServices.progress.positionOf(url).takeIf { it > 0 } ?: (saved?.first ?: 0L)
             val src = PlaySource.resolve(url, AppServices.telegram, preferWorker)
             if (src == null) {
                 player.error = if (!uz.arumediatv.com.data.Net.isOnline(ctx)) "Bu qism yuklab olinmagan — internetga ulaning" else "Videoni ochib bo'lmadi"
@@ -215,6 +231,7 @@ fun SeasonScreen(
             viaTelegram = src.viaTelegram
             viaVd = src.viaVd
             viaLocal = src.local
+            progressUrl = url
             player.open(src.uri, start, resumePlaying)
         }
     }
@@ -263,7 +280,7 @@ fun SeasonScreen(
                 d.durationMs = player.durationMs
                 if (player.playing) d.watchedMs = (d.watchedMs + 500).coerceAtMost(player.durationMs)
             }
-            if (++n % 10 == 0) saveProgress()
+            if (++n % 2 == 0) saveProgress() // har 1 soniyada (tick 500 ms)
             if (n % 120 == 0) flushHistory()
             // Intro: avto o'tkazish
             val ep = current

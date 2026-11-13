@@ -283,6 +283,25 @@ class WatchProgress(context: Context) {
         return if (p < 3000 || p > d - 5000) 0 else p
     }
 
+    /**
+     * QISM bo'yicha ijro joyi (sifatdan mustaqil): har sifat alohida fayl, shu sabab faqat fayl nomi bo'yicha saqlansa boshqa sifatda (yoki oflaynda yuklab olingan sifatda) ochilganda joy topilmasdi.
+     * Format: "pozitsiya/davomiylik/sifat".
+     */
+    fun saveEpisode(key: String, positionMs: Long, durationMs: Long, quality: String) {
+        if (key.isEmpty() || durationMs <= 0) return
+        prefs.edit().putString("e:$key", "$positionMs/$durationMs/$quality").apply()
+    }
+
+    /** Qism bo'yicha saqlangan (pozitsiya, sifat); tugab qolgan (oxirgi 5 s) yoki 3 s dan kam bo'lsa pozitsiya 0. */
+    fun episodeState(key: String): Pair<Long, String>? {
+        val v = prefs.getString("e:$key", null) ?: return null
+        val a = v.split('/')
+        val p = a.getOrNull(0)?.toLongOrNull() ?: return null
+        val d = a.getOrNull(1)?.toLongOrNull() ?: return null
+        val q = a.getOrNull(2).orEmpty()
+        return (if (p < 3000 || p > d - 5000) 0L else p) to q
+    }
+
     /** (pozitsiya, davomiylik) ms — saqlangan bo'lsa. */
     fun snapshot(url: String): Pair<Long, Long>? {
         val v = prefs.getString(Names.fileNameOf(url), null) ?: return null
