@@ -237,7 +237,8 @@ async fn handle_url(app: &Arc<App>, chat: i64, url: &str) -> Result<()> {
             return Ok(());
         }
     };
-    let meta = json!({"w": info.w, "h": info.h, "dur": info.duration});
+    let direct: serde_json::Map<String, Value> = info.direct.iter().map(|(h, u)| (h.to_string(), json!(u))).collect();
+    let meta = json!({"w": info.w, "h": info.h, "dur": info.duration, "direct": direct});
     let id = db::job_new(&app.db, chat, url, &info.title, &meta.to_string()).await?;
     let mut rows: Vec<Value> = Vec::new();
     let mut row: Vec<Value> = Vec::new();
@@ -351,8 +352,14 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
             }
         }
     });
+    // To'g'ridan-to'g'ri havolalar bo'lsa (masalan Rumble) — yt-dlp shu fayl havolasini yuklaydi.
+    let (src_url, src_fmt) = match meta["direct"].as_object().filter(|m| !m.is_empty()) {
+        Some(m) if is_audio => (m.iter().filter_map(|(k, u)| Some((k.parse::<i64>().ok()?, u.as_str()?))).min_by_key(|(h, _)| *h).map(|(_, u)| u).unwrap_or(&job.url).to_string(), "a".to_string()), // audio uchun eng kichik fayl
+        Some(m) => (m.get(&job.fmt).and_then(|u| u.as_str()).unwrap_or(&job.url).to_string(), "d".to_string()),
+        None => (job.url.clone(), job.fmt.clone()),
+    };
     let r = tokio::select! {
-        r = dl::download_file(&app.cfg, &job.url, &job.fmt, &dir, |p| { let _ = tx.send(p); }) => r,
+        r = dl::download_file(&app.cfg, &src_url, &src_fmt, &dir, |p| { let _ = tx.send(p); }) => r,
         _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
     };
     drop(tx);

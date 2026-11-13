@@ -23,6 +23,8 @@ pub struct Info {
     pub h: i64,
     pub opts: Vec<Opt>,
     pub audio_size: Option<u64>,
+    /// To'g'ridan-to'g'ri fayl havolalari (balandlik -> URL): yt-dlp sahifaga kira olmaydigan saytlar uchun (masalan Rumble embed).
+    pub direct: Vec<(i64, String)>,
 }
 
 fn has_codec(v: &Value) -> bool {
@@ -59,11 +61,15 @@ pub fn parse_info(v: &Value) -> Info {
         h: v["height"].as_i64().unwrap_or(0),
         opts,
         audio_size,
+        direct: Vec::new(),
     }
 }
 
 /// yt-dlp format tanlovchisi: `h` balandlik ("1080") yoki "a" (faqat audio).
 pub fn selector(fmt: &str) -> String {
+    if fmt == "d" {
+        return "b".to_string(); // to'g'ridan-to'g'ri fayl: bitta format
+    }
     match fmt.parse::<i64>() {
         Ok(h) => format!("bv*[height<={h}]+ba/b[height<={h}]/b"),
         Err(_) => "ba/b".to_string(),
@@ -93,6 +99,106 @@ fn base(cfg: &Cfg) -> Command {
 }
 
 pub async fn probe(cfg: &Cfg, url: &str) -> Result<Info> {
+    match probe_ytdlp(cfg, url).await {
+        Ok(i) => Ok(i),
+        Err(e) => {
+            // Rumble sahifasi serverga Cloudflare tekshiruvini beradi (403); embed sahifasi va CDN esa ochiq — to'g'ridan-to'g'ri havolalar olinadi.
+            if let Some(id) = rumble_id(url) {
+                if let Ok(i) = rumble_probe(&id).await {
+                    return Ok(i);
+                }
+            }
+            Err(e)
+        }
+    }
+}
+
+// ── Rumble: embed sahifasidan to'g'ridan-to'g'ri MP4 ──────────
+
+const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
+
+/// `https://rumble.com/v74j7sy-nom.html` yoki `/embed/v74j7sy/` -> `v74j7sy`.
+pub fn rumble_id(url: &str) -> Option<String> {
+    let rest = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let (host, path) = rest.split_once('/')?;
+    if !(host == "rumble.com" || host == "www.rumble.com") {
+        return None;
+    }
+    let seg = if let Some(e) = path.strip_prefix("embed/") { e } else { path };
+    let id: String = seg.split(['-', '/', '.', '?']).next()?.to_string();
+    if id.len() >= 5 && id.starts_with('v') && id.chars().all(|c| c.is_ascii_alphanumeric()) { Some(id) } else { None }
+}
+
+/// `start` dagi `{` dan boshlanuvchi JSON obyektini (qavslar muvozanati, qator ichidagi qavslarni hisobga olmay) kesib oladi.
+fn json_object_at(s: &str, start: usize) -> Option<&str> {
+    let b = s.as_bytes();
+    if *b.get(start)? != b'{' {
+        return None;
+    }
+    let (mut depth, mut in_str, mut esc) = (0i32, false, false);
+    for (i, &c) in b.iter().enumerate().skip(start) {
+        if in_str {
+            if esc {
+                esc = false;
+            } else if c == b'\\' {
+                esc = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return s.get(start..=i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Embed sahifasi matnidan video ma'lumoti (`p.f["<id>"]={...}`): sarlavha, davomiylik, balandlik -> havola.
+pub fn parse_rumble_embed(html: &str, id: &str) -> Option<Info> {
+    let key = format!("p.f[\"{id}\"]=");
+    let at = html.find(&key)? + key.len();
+    let v: Value = serde_json::from_str(json_object_at(html, at)?).ok()?;
+    let mut direct: Vec<(i64, String, u64)> = Vec::new();
+    if let Some(m) = v["ua"]["mp4"].as_object() {
+        for (k, f) in m {
+            if let (Ok(h), Some(u)) = (k.parse::<i64>(), f["url"].as_str()) {
+                direct.push((h, u.to_string(), f["meta"]["size"].as_u64().unwrap_or(0)));
+            }
+        }
+    }
+    if direct.is_empty() {
+        let u = v["u"]["mp4"]["url"].as_str()?;
+        direct.push((v["h"].as_i64().unwrap_or(0), u.to_string(), v["u"]["mp4"]["meta"]["size"].as_u64().unwrap_or(0)));
+    }
+    direct.sort_by(|a, b| b.0.cmp(&a.0));
+    let title = html.find("\"title\":\"").map(|i| &html[i + 9..]).and_then(|r| r.split('"').next()).unwrap_or("rumble").to_string();
+    let duration = html.find("\"duration\":").and_then(|i| html[i + 11..].split(|c: char| !c.is_ascii_digit()).next()?.parse::<i64>().ok()).unwrap_or(0);
+    Some(Info {
+        title,
+        duration,
+        w: v["w"].as_i64().unwrap_or(0),
+        h: v["h"].as_i64().unwrap_or(0),
+        opts: direct.iter().map(|(h, _, sz)| Opt { h: *h, size: Some(*sz).filter(|s| *s > 0) }).collect(),
+        audio_size: None,
+        direct: direct.into_iter().map(|(h, u, _)| (h, u)).collect(),
+    })
+}
+
+async fn rumble_probe(id: &str) -> Result<Info> {
+    let html = reqwest::Client::builder().user_agent(UA).timeout(std::time::Duration::from_secs(30)).build()?.get(format!("https://rumble.com/embed/{id}/")).send().await?.text().await?;
+    parse_rumble_embed(&html, id).ok_or_else(|| anyhow!("Rumble: video ma'lumoti topilmadi"))
+}
+
+async fn probe_ytdlp(cfg: &Cfg, url: &str) -> Result<Info> {
     let mut c = base(cfg);
     c.arg("-J").arg("--").arg(url).stdout(Stdio::piped()).stderr(Stdio::piped());
     let out = tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await.map_err(|_| anyhow!("yt-dlp javob bermadi (120 s)"))??;
@@ -113,10 +219,10 @@ pub async fn download_file(cfg: &Cfg, url: &str, fmt: &str, dir: &Path, mut prog
     std::fs::create_dir_all(dir)?;
     let mut c = base(cfg);
     c.arg("-f").arg(selector(fmt));
-    if fmt.parse::<i64>().is_ok() {
-        c.arg("--merge-output-format").arg("mp4");
-    } else {
+    if fmt == "a" {
         c.arg("-x").arg("--audio-format").arg("mp3");
+    } else {
+        c.arg("--merge-output-format").arg("mp4");
     }
     c.arg("-q").arg("--progress").arg("--newline").arg("--progress-template").arg("download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s");
     c.arg("-o").arg(dir.join("%(id)s.%(ext)s")).arg("--").arg(url);
@@ -327,6 +433,21 @@ mod tests {
         assert_eq!(i.opts[0].size, Some(82_000_000)); // video-only + audio
         assert_eq!(i.opts[1].size, Some(42_000_000)); // taxminiy hajm ham hisobga olinadi
         assert_eq!(i.audio_size, Some(2_000_000));
+    }
+
+    #[test]
+    fn rumble_ids_and_embed_parsing() {
+        assert_eq!(rumble_id("https://rumble.com/v74j7sy-duo-aura-999999.html"), Some("v74j7sy".into()));
+        assert_eq!(rumble_id("https://rumble.com/embed/v74j7sy/"), Some("v74j7sy".into()));
+        assert_eq!(rumble_id("https://youtube.com/v74j7sy"), None);
+        assert_eq!(rumble_id("https://rumble.com/user/x"), None);
+        let html = r#"<script>p.f["v74j7sy"]={"fps":29.97,"w":1280,"h":720,"u":{"mp4":{"url":"https:\/\/c.example\/a.gaa.mp4","meta":{"size":71227293,"w":1280,"h":720}}},"ua":{"mp4":{"360":{"url":"https:\/\/c.example\/a.baa.mp4","meta":{"bitrate":636,"size":21938969,"w":640,"h":360}},"720":{"url":"https:\/\/c.example\/a.gaa.mp4","meta":{"size":71227293,"w":1280,"h":720}}},"timeline":{"180":{"url":"x"}}},"x":"}{"};</script> {"title":"Salom","duration":275}"#;
+        let i = parse_rumble_embed(html, "v74j7sy").unwrap();
+        assert_eq!(i.title, "Salom");
+        assert_eq!(i.duration, 275);
+        assert_eq!(i.opts.iter().map(|o| o.h).collect::<Vec<_>>(), vec![720, 360]);
+        assert_eq!(i.direct[0], (720, "https://c.example/a.gaa.mp4".to_string()));
+        assert_eq!(i.opts[1].size, Some(21938969));
     }
 
     #[test]
