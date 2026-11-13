@@ -1,0 +1,21 @@
+[package]
+name = "ytbot"
+version = "0.1.0"
+edition = "2024"
+description = "UZ: yt-dlp Telegram boti (navbat libsql, MTProto orqali katta fayl yuklash). EN: yt-dlp Telegram bot (libsql queue, large uploads over MTProto)."
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "fs", "time", "sync", "net"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
+serde_json = "1"
+libsql = "0.10"
+grammers-client = "0.12"
+grammers-session = "0.12"
+anyhow = "1"
+axum = "0.8"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
