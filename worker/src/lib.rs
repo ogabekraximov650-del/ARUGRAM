@@ -15544,16 +15544,9 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                                 vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]).await?;
                             let ec = old["cols"].as_array().cloned().unwrap_or_default();
                             let er = old["rows"].as_array().cloned().unwrap_or_default();
-                            if !er.is_empty() {
-                                let row = row_to_obj(&ec, er[0].as_array().unwrap_or(&vec![]));
-                                b2_delete_epizod_files(&env, &row).await;
-                                // Kodlanishi kutilayotgan asl video ham kanaldan o'chadi.
-                                let ov = row["origin_video"].as_str().unwrap_or("");
-                                if ov.starts_with("orig_") {
-                                    tg_forget_file(&env, ov).await;
-                                }
-                            }
-                            let _ = turso_batch(&env, &[
+                            // AVVAL bazadan (qism darhol yo'qoladi), KEYIN fayllar. Ilgari fayllar avval bittalab o'chirilardi va katta qismda so'rov chegarasi
+                            // (50) oshib to'xtardi — qism bazada qolib ketardi ("barchasini o'chirdim, faqat 3 tasi o'chdi").
+                            let db = turso_batch(&env, &[
                                 ("DELETE FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]),
                                 ("DELETE FROM encode_jobs WHERE anime_id=? AND season_id=? AND epizod_id=?",
@@ -15567,6 +15560,18 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                                   WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(aid), TursoArg::int(sid)]),
                             ]).await;
+                            if let Err(e) = db {
+                                return err500(&format!("O'chirilmadi: {e}"));
+                            }
+                            if !er.is_empty() {
+                                let row = row_to_obj(&ec, er[0].as_array().unwrap_or(&vec![]));
+                                b2_delete_epizod_files(&env, &row).await;
+                                // Kodlanishi kutilayotgan asl video ham kanaldan o'chadi.
+                                let ov = row["origin_video"].as_str().unwrap_or("");
+                                if ov.starts_with("orig_") {
+                                    tg_forget_file(&env, ov).await;
+                                }
+                            }
                             return ok(json!({"success": true}));
                         }
                     }
@@ -15647,12 +15652,6 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                                 vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
                             let ec = eps["cols"].as_array().cloned().unwrap_or_default();
                             let er = eps["rows"].as_array().cloned().unwrap_or_default();
-                            for row in &er {
-                                b2_delete_epizod_files(&env, &row_to_obj(&ec, row.as_array().unwrap_or(&vec![]))).await;
-                            }
-                            // 2. epizod_db dan o'chirish
-                            turso_exec(&env, "DELETE FROM epizod_db WHERE anime_id=? AND season_id=?",
-                                vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
                             // 3. Bo'lim rasmini B2dan o'chirish
                             let old = turso_exec(&env, "SELECT photo_url FROM season_db WHERE anime_id=? AND season_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
@@ -15660,8 +15659,12 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                             if or_.is_empty() { return err404("Bo'lim topilmadi"); }
                             let oc = old["cols"].as_array().cloned().unwrap_or_default();
                             let op = row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]))["photo_url"].as_str().unwrap_or("").to_string();
-                            if !op.is_empty() { b2_delete(&env, &op).await; }
-                            // 4. season_db va unga bog'liq yozuvlar
+                            // AVVAL bazadan (bo'lim darhol yo'qoladi), KEYIN fayllar: fayllar bittalab o'chirilganda so'rov chegarasi (50) oshib to'xtasa ham
+                            // bo'lim bazada qolib ketmaydi. Fayllar tozalash cheklangan (qolganlari ombor/kanalda yetim qolishi mumkin).
+                            // epizod_db dan o'chirish
+                            turso_exec(&env, "DELETE FROM epizod_db WHERE anime_id=? AND season_id=?",
+                                vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
+                            // season_db va unga bog'liq yozuvlar
                             let _ = turso_batch(&env, &[
                                 ("DELETE FROM season_janr WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
@@ -15684,6 +15687,10 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                                 ("DELETE FROM season_db WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
                             ]).await;
+                            for row in er.iter().take(6) {
+                                b2_delete_epizod_files(&env, &row_to_obj(&ec, row.as_array().unwrap_or(&vec![]))).await;
+                            }
+                            if !op.is_empty() { b2_delete(&env, &op).await; }
                             return ok(json!({"success": true}));
                         }
                     }

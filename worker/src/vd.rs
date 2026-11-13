@@ -333,17 +333,17 @@ pub(crate) async fn forget(env: &Env, name: &str) {
     if let Some(bk) = bucket(env) {
         r2_delete_all(&bk, name).await;
     }
-    // Cloudflare keshidagi bo'laklar (oynalar): shu mintaqada darhol o'chadi; boshqa mintaqalardagi nusxalar hech kim so'ramasa o'zi ketadi.
-    let wname = format!("vd~{name}");
-    for n in 0..jint(&row, "chunks").clamp(0, 400) as u64 {
-        let _ = Cache::default().delete(&warm_window_url(&wname, n), false).await;
-        let _ = Cache::default().delete(&warm_marker_url(&wname, n), false).await;
-    }
+    // Cloudflare keshidagi bo'laklar (oynalar) BITTALAB o'chirilmaydi: har chaqiruv Cloudflare "subrequest" chegarasini (50) yeydi. Ular tombstone (`del_key`
+    // belgisi, pastda) bilan beriladigan bo'lmaydi va hech kim so'ramasa o'zi eskiradi.
     let channel = vd_channel(env);
     if channel != 0 {
-        for id in ids(row["msg_ids"].as_str().unwrap_or("")).into_iter().take(400) {
-            if let Ok(m) = id.parse::<i64>() {
-                let _ = tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": m})).await;
+        // Kanal xabarlari 100 tadan BITTA `deleteMessages` bilan (ilgari har bo'lak uchun alohida chaqiruv: katta qismda 50 chegarasi oshib, qism bazada qolib ketardi).
+        let all: Vec<i64> = ids(row["msg_ids"].as_str().unwrap_or("")).into_iter().take(400).filter_map(|id| id.parse::<i64>().ok()).collect();
+        for batch in all.chunks(100) {
+            if tg_api(env, "deleteMessages", json!({"chat_id": channel, "message_ids": batch})).await.is_err() {
+                for m in batch {
+                    let _ = tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": m})).await;
+                }
             }
         }
     }
