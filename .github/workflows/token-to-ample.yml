@@ -1,0 +1,32 @@
+# UZ: BIR MARTALIK. GitHub Secrets'dagi `ENCODE_TOKEN` Ample'ning yuklash manziliga yuboriladi (chatga/jurnalga chiqmaydi; GitHub uni maskalaydi).
+#     Server shu kalit bilan `session.enc` ni (Pyrogram sessiyasi) o'zi ochadi. Yuklash manzili 1 soat amal qiladi.
+# EN: ONE-OFF. Sends the `ENCODE_TOKEN` secret to an Ample upload URL (never printed; GitHub masks it) so the server can decrypt `session.enc` itself.
+name: ENCODE_TOKEN ni Ample'ga yuborish (bir martalik)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_url:
+        description: "Ample yuklash manzili (https://api.ample.computer/u/...)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Yuborish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          UPLOAD_URL: ${{ inputs.upload_url }}
+        run: |
+          set -euo pipefail
+          case "$UPLOAD_URL" in https://api.ample.computer/u/*) ;; *) echo "::error::Faqat Ample yuklash manzili qabul qilinadi"; exit 1;; esac
+          [ -n "$ENCODE_TOKEN" ] || { echo "::error::ENCODE_TOKEN secret bo'sh"; exit 1; }
+          F="$RUNNER_TEMP/encode_token"
+          printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]' > "$F"
+          echo "kalit uzunligi: $(stat -c%s "$F") bayt"
+          curl -fsS -T "$F" "$UPLOAD_URL" | head -c 200; echo
+          shred -u "$F"
