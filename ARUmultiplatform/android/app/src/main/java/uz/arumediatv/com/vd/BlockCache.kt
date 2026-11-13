@@ -23,7 +23,12 @@ object BlockCache {
     private const val PIN = ".pin"
     private val writes = AtomicInteger()
 
-    private fun key(): SecretKey {
+    @Volatile private var cachedKey: SecretKey? = null
+
+    /** Kalit tutqichi bir marta olinadi (har o'qishda Keystore'ga murojaat qilinmaydi: parallel o'qishlarda vaqtinchalik xatolar kamayadi). */
+    private fun key(): SecretKey = cachedKey ?: synchronized(this) { cachedKey ?: loadKey().also { cachedKey = it } }
+
+    private fun loadKey(): SecretKey {
         val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         if (!ks.containsAlias(ALIAS)) {
             KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
@@ -85,24 +90,35 @@ object BlockCache {
         try { root(ctx).listFiles()?.forEach { it.deleteRecursively() } } catch (_: Exception) {}
     }
 
-    /** Bo'lakni o'qib shifrini ochadi; yo'q yoki buzilgan (kalit yo'qolgan, teg mos emas) bo'lsa — null (buzilgan fayl o'chiriladi). */
+    /**
+     * Bo'lakni o'qib shifrini ochadi; yo'q bo'lsa — null.
+     * MUHIM: bo'lak FAQAT aniq buzilgan bo'lsa (GCM tegi mos emas, fayl qisqa) o'chiriladi. Vaqtinchalik xatoda (Keystore band, o'qish xatosi, uzilish)
+     * bo'lak TEGILMAYDI: ilgari har qanday xato bo'lakni o'chirardi — oflayn ko'rishda parallel o'qishlar paytida yuklab olingan fayllardan bo'laklar
+     * yo'qolib (100% -> 97-98%) video to'xtab qolardi, internet yo'q bo'lgani uchun qayta olib bo'lmasdi.
+     */
     fun read(ctx: Context, id: String, idx: Long, expectLen: Int): ByteArray? {
         val f = file(ctx, id, idx)
         if (!f.isFile) return null
-        return try {
-            val raw = f.readBytes()
-            if (raw.size < 12 + 16) throw IllegalStateException("qisqa")
-            val c = Cipher.getInstance("AES/GCM/NoPadding")
-            c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw, 0, 12))
-            c.updateAAD(aad(id, idx))
-            val plain = c.doFinal(raw, 12, raw.size - 12)
-            if (plain.size != expectLen) throw IllegalStateException("hajm")
-            f.setLastModified(System.currentTimeMillis())
-            plain
-        } catch (_: Exception) {
-            f.delete()
-            null
+        for (attempt in 0 until 3) {
+            try {
+                val raw = f.readBytes()
+                if (raw.size < 12 + 16) { f.delete(); return null } // chala yozilgan (haqiqatan buzilgan)
+                val c = Cipher.getInstance("AES/GCM/NoPadding")
+                c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw, 0, 12))
+                c.updateAAD(aad(id, idx))
+                val plain = c.doFinal(raw, 12, raw.size - 12)
+                if (plain.size != expectLen) return null // kutilgan hajm boshqa: o'chirmaymiz (ma'lumot noto'g'ri bo'lishi mumkin)
+                f.setLastModified(System.currentTimeMillis())
+                return plain
+            } catch (_: javax.crypto.AEADBadTagException) {
+                f.delete() // teg mos emas: bo'lak haqiqatan buzilgan (yoki kalit boshqa)
+                return null
+            } catch (_: Exception) {
+                cachedKey = null // vaqtinchalik xato: kalit tutqichi qayta olinadi, qisqa kutib qayta uriniladi
+                if (attempt < 2) try { Thread.sleep(60L * (attempt + 1)) } catch (_: InterruptedException) { return null }
+            }
         }
+        return null
     }
 
     /** Bo'lakni shifrlab yozadi (avval `.tmp`, so'ng nom almashtiriladi — yarim yozilgan bo'lak qolmaydi). Xato bo'lsa `false` (jim o'tadi). */
