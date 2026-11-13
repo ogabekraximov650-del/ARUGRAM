@@ -15,6 +15,8 @@ pub struct Cfg {
     pub ytdlp: String,
     pub cookies: Option<String>,
     pub owner_env: Option<i64>,
+    /// MTProto api_id (ixtiyoriy): Pyrogram sessiyasida yozilgan bo'lsa o'sha ishlatiladi.
+    pub api_id: Option<i32>,
     /// Ample'ning umumiy manzili (https://...ample.run). Berilsa bot WEBHOOK rejimida ishlaydi va `setWebhook` ni o'zi o'rnatadi; aks holda long polling.
     pub public_url: Option<String>,
     /// Webhook so'rovlarini tekshirish siri (manzilda va `X-Telegram-Bot-Api-Secret-Token` sarlavhasida).
@@ -31,6 +33,7 @@ async fn main() -> Result<()> {
         ytdlp: env("YTDLP").unwrap_or_else(|| "yt-dlp".into()),
         cookies: env("COOKIES"),
         owner_env: env("OWNER_ID").and_then(|v| v.parse().ok()),
+        api_id: env("API_ID").and_then(|v| v.parse().ok()),
         public_url: env("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string()),
         webhook_secret: env("WEBHOOK_SECRET").unwrap_or_default(),
         port: env("PORT").and_then(|v| v.parse().ok()).unwrap_or(8080),

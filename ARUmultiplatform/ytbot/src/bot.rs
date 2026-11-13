@@ -1,12 +1,20 @@
 // UZ: bot mantig'i: Bot API (webhook yoki long polling), navbat ishchisi, video ~45 MB li qismlarga bo'linib yuboriladi. EN: bot logic: Bot API, queue worker, video sent in ~45 MB parts.
 use crate::{db, dl, Cfg};
 use anyhow::{anyhow, Result};
+use grammers_client::message::InputMessage;
+use grammers_client::{media::Attribute, Client};
+use grammers_session::storages::SqliteSession;
+use grammers_session::types::PeerRef;
+use grammers_session::Session;
 use libsql::Connection;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 /// Foiz chizig'i: ▓▓▓▓░░░░░░ 40%
 fn bar(pct: f64) -> String {
@@ -116,18 +124,127 @@ impl Bot {
     }
 }
 
+/// Telegram AKKAUNT (MTProto): 50 MB dan katta fayllarni bitta fayl qilib (2 GB gacha) yuboradi. Sessiya Pyrogram'dan ko'chiriladi.
+pub struct Account {
+    client: Client,
+    me: i64,
+}
+
 pub struct App {
     cfg: Arc<Cfg>,
     db: Connection,
     bot: Bot,
+    acc: Option<Account>,
+    bot_username: String,
+    peer: Mutex<Option<PeerRef>>,
+}
+
+/// Pyrogram sessiyasi (`sessions` jadvali: dc_id, api_id, auth_key) -> grammers sessiyasi. Natija: (sessiya, api_id).
+async fn convert_pyrogram(pyro: &Path, dest: &Path, fallback_api: Option<i32>) -> Result<(Arc<SqliteSession>, i32)> {
+    let tmp = std::env::temp_dir().join(format!("pyro-{}.db", std::process::id()));
+    std::fs::copy(pyro, &tmp)?; // asl fayl o'zgarmasin
+    let (dc, api, key) = {
+        let db = libsql::Builder::new_local(&tmp).build().await?;
+        let c = db.connect()?;
+        let mut r = c.query("SELECT dc_id, api_id, auth_key FROM sessions LIMIT 1", ()).await?;
+        let row = r.next().await?.ok_or_else(|| anyhow!("Pyrogram sessiyasida yozuv yo'q"))?;
+        let dc: i64 = row.get(0)?;
+        let api: Option<i64> = row.get(1).ok();
+        let key: Vec<u8> = row.get(2)?;
+        (dc as i32, api.unwrap_or(0) as i32, key)
+    };
+    let _ = std::fs::remove_file(&tmp);
+    let key: [u8; 256] = key.try_into().map_err(|_| anyhow!("auth_key 256 bayt emas"))?;
+    let api = if api > 0 { api } else { fallback_api.ok_or_else(|| anyhow!("api_id yo'q (sessiyada ham, API_ID ham)"))? };
+    let session = Arc::new(SqliteSession::open(dest).await?);
+    let mut opt = session.dc_option(dc)?.ok_or_else(|| anyhow!("DC {dc} topilmadi"))?;
+    opt.auth_key = Some(key);
+    session.set_dc_option(&opt).await?;
+    session.set_home_dc_id(dc).await?;
+    Ok((session, api))
+}
+
+/// Akkauntni ishga tushiradi (sessiya bo'lsa). Muvaffaqiyatsiz bo'lsa `None` — bot Bot API bilan qismlab yuboradi.
+async fn init_account(cfg: &Cfg) -> Option<Account> {
+    let pyro = std::path::PathBuf::from(format!("{}/pyro.session", cfg.data_dir));
+    let dest = std::path::PathBuf::from(format!("{}/tg.sqlite", cfg.data_dir));
+    if !pyro.is_file() && !dest.is_file() {
+        eprintln!("akkaunt: sessiya yo'q — faqat Bot API");
+        return None;
+    }
+    let (session, api) = if dest.is_file() {
+        let api = cfg.api_id.or_else(|| std::fs::read_to_string(format!("{}/tg.api_id", cfg.data_dir)).ok().and_then(|v| v.trim().parse().ok()));
+        match (SqliteSession::open(&dest).await, api) {
+            (Ok(s), Some(a)) => (Arc::new(s), a),
+            _ => {
+                eprintln!("akkaunt: tg.sqlite ochilmadi yoki api_id yo'q");
+                return None;
+            }
+        }
+    } else {
+        match convert_pyrogram(&pyro, &dest, cfg.api_id).await {
+            Ok((s, a)) => {
+                let _ = std::fs::write(format!("{}/tg.api_id", cfg.data_dir), a.to_string());
+                eprintln!("akkaunt: Pyrogram sessiyasi ko'chirildi");
+                (s, a)
+            }
+            Err(e) => {
+                eprintln!("akkaunt: sessiyani ko'chirib bo'lmadi: {e}");
+                let _ = std::fs::remove_file(&dest);
+                return None;
+            }
+        }
+    };
+    let pool = grammers_client::SenderPool::new(Arc::clone(&session), api);
+    let client = Client::new(pool.handle);
+    tokio::spawn(pool.runner.run());
+    let mut updates = pool.updates;
+    tokio::spawn(async move { while updates.recv().await.is_some() {} });
+    match tokio::time::timeout(Duration::from_secs(30), client.is_authorized()).await {
+        Ok(Ok(true)) => {}
+        other => {
+            eprintln!("akkaunt: avtorizatsiya yo'q yoki ulanmadi: {other:?}");
+            return None;
+        }
+    }
+    match client.get_me().await {
+        Ok(me) => {
+            let id = me.id().bare_id().unwrap_or(0);
+            eprintln!("akkaunt: ulandi (id {id})");
+            Some(Account { client, me: id })
+        }
+        Err(e) => {
+            eprintln!("akkaunt: get_me xato: {e}");
+            None
+        }
+    }
+}
+
+/// O'qilgan baytlarni sanaydigan o'ramcha (yuklash foizi uchun).
+struct CountRead<R> {
+    inner: R,
+    n: Arc<AtomicU64>,
+}
+
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for CountRead<R> {
+    fn poll_read(mut self: Pin<&mut Self>, cx: &mut Context<'_>, buf: &mut tokio::io::ReadBuf<'_>) -> Poll<std::io::Result<()>> {
+        let before = buf.filled().len();
+        let r = Pin::new(&mut self.inner).poll_read(cx, buf);
+        if let Poll::Ready(Ok(())) = &r {
+            self.n.fetch_add((buf.filled().len() - before) as u64, Ordering::Relaxed);
+        }
+        r
+    }
 }
 
 pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
     let conn = db::open(&format!("{}/ytbot.db", cfg.data_dir)).await?;
     let bot = Bot::new(&cfg.bot_token);
     let me = bot.call("getMe", json!({})).await?;
-    eprintln!("bot: @{}", me["username"].as_str().unwrap_or(""));
-    let app = Arc::new(App { cfg, db: conn, bot });
+    let username = me["username"].as_str().unwrap_or("").to_string();
+    eprintln!("bot: @{username}");
+    let acc = init_account(&cfg).await;
+    let app = Arc::new(App { cfg, db: conn, bot, acc, bot_username: username, peer: Mutex::new(None) });
     let w = Arc::clone(&app);
     tokio::spawn(async move { worker(w).await });
 
@@ -209,7 +326,7 @@ async fn owner(app: &App) -> i64 {
     db::kv_get(&app.db, "owner").await.and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
-const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\nKatta video ~45 MB li qismlarga bo'lib yuboriladi (bot limiti 50 MB).\n\n/queue — navbat\n/cancel <raqam> — bekor qilish";
+const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\n50 MB dan katta video: akkaunt ulangan bo'lsa bitta fayl (2 GB gacha), aks holda ~45–50 MB li qismlarga bo'lib yuboriladi.\n\n/queue — navbat\n/cancel <raqam> — bekor qilish";
 
 async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
@@ -218,7 +335,15 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
     if chat == 0 || msg["chat"]["type"].as_str() != Some("private") {
         return Ok(());
     }
-    let mut own = owner(app).await;
+    let is_media = msg["video"].is_object() || msg["audio"].is_object() || msg["document"].is_object() || msg["animation"].is_object();
+    let own0 = owner(app).await;
+    // Akkaunt (egasidan boshqa bo'lsa) botga yuklagan katta faylni bot egasiga nusxalaydi (`copyMessage` — hajm chegarasiz).
+    if is_media && own0 != 0 && from != own0 && app.acc.as_ref().map(|a| a.me == from).unwrap_or(false) {
+        let mid = msg["message_id"].as_i64().unwrap_or(0);
+        let _ = app.bot.call("copyMessage", json!({"chat_id": own0, "from_chat_id": chat, "message_id": mid})).await?;
+        return Ok(());
+    }
+    let mut own = own0;
     if own == 0 && text.starts_with("/start") {
         db::kv_set(&app.db, "owner", &from.to_string()).await?;
         own = from;
@@ -226,6 +351,9 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
     if own == 0 || from != own {
         let _ = app.bot.send(chat, "Bu bot shaxsiy.", None).await;
         return Ok(());
+    }
+    if is_media {
+        return Ok(()); // egasining o'z yuborgan fayli (akkaunt orqali kelgan nusxa ham) — javob kerak emas
     }
     let cmd = text.split_whitespace().next().unwrap_or("");
     match cmd {
@@ -397,8 +525,25 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     let _ = edit_task.await;
     let path = r?;
 
-    // 2) VAQT bo'yicha ~45 MB li qismlarga bo'lish (kerak bo'lsa).
+    // 2a) 50 MB dan katta va akkaunt ulangan: butun faylni bitta qilib (2 GB gacha) akkaunt orqali yuborish; xato bo'lsa qismlab yuborishga o'tiladi.
     let size = std::fs::metadata(&path)?.len();
+    if let (Some(acc), true) = (app.acc.as_ref(), size > dl::PART_LIMIT && size < 2_000_000_000) {
+        match send_via_account(app, acc, job, &path, is_audio, w as i32, h as i32, &dir).await {
+            Ok(()) => {
+                let note = if acc.me == owner(app).await { "" } else { "\n(bot nusxalaydi)" };
+                app.bot.edit(job.chat_id, job.status_msg, &format!("✅ #{} tayyor: {title}\nBitta fayl ({}), akkaunt orqali yuborildi{note}", job.id, dl::human(size)), None).await;
+                return Ok(());
+            }
+            Err(e) => {
+                if db::job_state(&app.db, job.id).await == "cancelled" {
+                    return Err(e);
+                }
+                eprintln!("#{} akkaunt orqali yuborib bo'lmadi ({e}) — qismlab yuboriladi", job.id);
+            }
+        }
+    }
+
+    // 2b) VAQT bo'yicha ~45 MB li qismlarga bo'lish (kerak bo'lsa).
     app.bot.edit(job.chat_id, job.status_msg, &format!("✂️ #{} {} — qismlarga bo'linmoqda…", job.id, dl::human(size)), None).await;
     let split_pct = Arc::new(AtomicU32::new(0));
     let split_tick = {
@@ -484,4 +629,65 @@ pub async fn cli_sendtest(cfg: Arc<Cfg>, file: &str) -> Result<()> {
     ticker.abort();
     println!("natija: {:?}", r.as_ref().map(|_| "ok").map_err(|e| e.to_string()));
     r
+}
+
+
+async fn bot_peer(app: &App, acc: &Account) -> Result<PeerRef> {
+    let mut g = app.peer.lock().await;
+    if let Some(p) = g.clone() {
+        return Ok(p);
+    }
+    let p = acc.client.resolve_username(&app.bot_username).await?.ok_or_else(|| anyhow!("bot topilmadi: @{}", app.bot_username))?;
+    let r = p.to_ref().await.map_err(|e| anyhow!("{e}"))?.ok_or_else(|| anyhow!("bot manzili aniqlanmadi"))?;
+    *g = Some(r.clone());
+    Ok(r)
+}
+
+/// Faylni akkaunt orqali bot chatiga yuklaydi (thumbnail bilan, foiz ko'rsatiladi).
+async fn send_via_account(app: &Arc<App>, acc: &Account, job: &db::Job, path: &Path, audio: bool, w: i32, h: i32, dir: &Path) -> Result<()> {
+    let size = std::fs::metadata(path)?.len();
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or(if audio { "mp3" } else { "mp4" }).to_string();
+    let name = dl::safe_name(&job.title, &ext);
+    let dur = dl::probe_duration(path).await.round() as u64;
+    let thumb = if audio { None } else { dl::make_thumb(path, &dir.join("acc_thumb.jpg")).await };
+    let sent = Arc::new(AtomicU64::new(0));
+    let ticker = {
+        let (a2, sn, chat, mid, jid, t100) = (Arc::clone(app), Arc::clone(&sent), job.chat_id, job.status_msg, job.id, job.title.chars().take(100).collect::<String>());
+        tokio::spawn(async move {
+            let mut first = true;
+            loop {
+                tokio::time::sleep(Duration::from_millis(if first { 1200 } else { 3000 })).await;
+                first = false;
+                let s = sn.load(Ordering::Relaxed);
+                let pct = (s as f64 / size.max(1) as f64 * 100.0).min(99.0);
+                a2.bot.edit(chat, mid, &format!("📤 #{jid} akkaunt orqali yuborilmoqda\n{}  ({} / {})\n{t100}", bar(pct), dl::human(s), dl::human(size)), None).await;
+            }
+        })
+    };
+    let res: Result<()> = async {
+        let file = tokio::fs::File::open(path).await?;
+        let mut rd = CountRead { inner: file, n: Arc::clone(&sent) };
+        let up = tokio::select! {
+            r = acc.client.upload_stream(&mut rd, size as usize, name) => r.map_err(|e| anyhow!("yuklash: {e}"))?,
+            _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+        };
+        let mime = if audio { "audio/mpeg" } else if ext == "webm" { "video/webm" } else { "video/mp4" };
+        let mut m = InputMessage::new().text(job.title.chars().take(900).collect::<String>()).document(up).mime_type(mime);
+        if let Some(t) = &thumb {
+            if let Ok(tu) = acc.client.upload_file(t).await {
+                m = m.thumbnail(tu);
+            }
+        }
+        m = if audio {
+            m.attribute(Attribute::Audio { duration: Duration::from_secs(dur), title: None, performer: None })
+        } else {
+            m.attribute(Attribute::Video { round_message: false, supports_streaming: true, duration: Duration::from_secs(dur), w, h })
+        };
+        let to = bot_peer(app, acc).await?;
+        acc.client.send_message(to, m).await.map_err(|e| anyhow!("yuborish: {e}"))?;
+        Ok(())
+    }
+    .await;
+    ticker.abort();
+    res
 }
