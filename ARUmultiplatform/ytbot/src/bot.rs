@@ -87,20 +87,24 @@ pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
     let w = Arc::clone(&app);
     tokio::spawn(async move { worker(w).await });
 
+    // HTTP: sog'liq tekshiruvi (`/`) va webhook yo'li. Ample xizmatni shu orqali "tirik" deb biladi va so'rov kelganda uyg'otadi.
+    let router = axum::Router::new()
+        .route("/", axum::routing::get(|| async { "ok" }))
+        .route("/tg/{path_secret}", axum::routing::post(webhook))
+        .with_state(Arc::clone(&app));
+    let listener = tokio::net::TcpListener::bind(("0.0.0.0", app.cfg.port)).await?;
     if let Some(public) = app.cfg.public_url.clone() {
-        // ── WEBHOOK: Telegram yangilanishlarni Ample manziliga yuboradi (server so'rov kelganda uyg'onadi) ──
+        // ── WEBHOOK: Telegram yangilanishlarni Ample manziliga yuboradi ──
         let secret = app.cfg.webhook_secret.clone();
         let url = format!("{public}/tg/{secret}");
         app.bot.call("setWebhook", json!({"url": url, "secret_token": secret, "allowed_updates": ["message", "callback_query"], "max_connections": 4})).await?;
         eprintln!("webhook o'rnatildi: {public}/tg/***");
-        let router = axum::Router::new()
-            .route("/", axum::routing::get(|| async { "ok" }))
-            .route("/tg/{path_secret}", axum::routing::post(webhook))
-            .with_state(Arc::clone(&app));
-        let listener = tokio::net::TcpListener::bind(("0.0.0.0", app.cfg.port)).await?;
         axum::serve(listener, router).await?;
         return Ok(());
     }
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, router).await;
+    });
 
     // ── Zaxira: long polling (PUBLIC_URL berilmagan bo'lsa) ──
     let _ = app.bot.call("deleteWebhook", json!({})).await;
