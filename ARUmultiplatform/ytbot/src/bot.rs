@@ -4,8 +4,16 @@ use anyhow::{anyhow, Result};
 use libsql::Connection;
 use serde_json::{json, Value};
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+
+/// Foiz chizig'i: ▓▓▓▓░░░░░░ 40%
+fn bar(pct: f64) -> String {
+    let p = pct.clamp(0.0, 100.0);
+    let n = (p / 10.0).round() as usize;
+    format!("{}{} {:.0}%", "▓".repeat(n), "░".repeat(10 - n), p)
+}
 
 pub struct Bot {
     http: reqwest::Client,
@@ -49,16 +57,18 @@ impl Bot {
         let _ = self.call("editMessageText", b).await;
     }
 
-    /// Faylni (video yoki audio) yuboradi. 429 (`retry_after`) va tarmoq xatolarida 3 martagacha qayta uriniladi.
-    async fn send_file(&self, chat: i64, audio: bool, path: &Path, caption: &str, dur: u64, w: i64, h: i64, thumb: Option<&Path>) -> Result<()> {
-        let bytes = tokio::fs::read(path).await?;
+    /// Faylni (video yoki audio) yuboradi; yuborilgan baytlar `sent` ga yoziladi (foiz uchun). 429 (`retry_after`) va tarmoq xatolarida 3 martagacha qayta uriniladi.
+    async fn send_file(&self, chat: i64, audio: bool, path: &Path, caption: &str, dur: u64, w: i64, h: i64, thumb: Option<&Path>, sent: Arc<AtomicU64>) -> Result<()> {
+        use futures_util::StreamExt;
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or(if audio { "audio.mp3" } else { "video.mp4" }).to_string();
+        let len = tokio::fs::metadata(path).await?.len();
         let thumb_bytes = match thumb {
             Some(t) => tokio::fs::read(t).await.ok(),
             None => None,
         };
-        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or(if audio { "audio.mp3" } else { "video.mp4" }).to_string();
         let mut last = anyhow!("yuborilmadi");
         for attempt in 0..3 {
+            sent.store(0, Ordering::Relaxed);
             let (method, field, mime) = if audio { ("sendAudio", "audio", "audio/mpeg") } else { ("sendVideo", "video", "video/mp4") };
             let mut form = reqwest::multipart::Form::new().text("chat_id", chat.to_string()).text("caption", caption.chars().take(1000).collect::<String>());
             if !audio {
@@ -69,7 +79,15 @@ impl Bot {
             } else {
                 form = form.text("duration", dur.to_string());
             }
-            form = form.part(field, reqwest::multipart::Part::bytes(bytes.clone()).file_name(name.clone()).mime_str(mime)?);
+            let file = tokio::fs::File::open(path).await?;
+            let counter = Arc::clone(&sent);
+            let stream = tokio_util::io::ReaderStream::new(file).map(move |chunk| {
+                if let Ok(b) = &chunk {
+                    counter.fetch_add(b.len() as u64, Ordering::Relaxed);
+                }
+                chunk
+            });
+            form = form.part(field, reqwest::multipart::Part::stream_with_length(reqwest::Body::wrap_stream(stream), len).file_name(name.clone()).mime_str(mime)?);
             if let Some(tb) = &thumb_bytes {
                 form = form.part("thumbnail", reqwest::multipart::Part::bytes(tb.clone()).file_name("thumb.jpg").mime_str("image/jpeg")?);
             }
@@ -77,6 +95,7 @@ impl Bot {
                 Ok(resp) => {
                     let r: Value = resp.json().await.unwrap_or(json!({}));
                     if r["ok"].as_bool() == Some(true) {
+                        sent.store(len, Ordering::Relaxed);
                         return Ok(());
                     }
                     let wait = r["parameters"]["retry_after"].as_u64();
@@ -359,7 +378,8 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
                 last = std::time::Instant::now();
                 let mut it = p.split('|');
                 let (pc, sp, eta) = (it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string(), it.next().unwrap_or("").trim().to_string());
-                a2.bot.edit(chat, mid, &format!("⏬ #{jid} {t80}\n{pc}  {sp}  qoldi {eta}"), None).await;
+                let pct: f64 = pc.trim_end_matches('%').trim().parse().unwrap_or(0.0);
+                a2.bot.edit(chat, mid, &format!("⏬ #{jid} yuklab olinmoqda\n{}\n{sp} · qoldi {eta}\n{t80}", bar(pct)), None).await;
             }
         }
     });
@@ -380,10 +400,23 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     // 2) VAQT bo'yicha ~45 MB li qismlarga bo'lish (kerak bo'lsa).
     let size = std::fs::metadata(&path)?.len();
     app.bot.edit(job.chat_id, job.status_msg, &format!("✂️ #{} {} — qismlarga bo'linmoqda…", job.id, dl::human(size)), None).await;
-    let parts = tokio::select! {
-        r = dl::split(&path, &dir) => r?,
-        _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+    let split_pct = Arc::new(AtomicU32::new(0));
+    let split_tick = {
+        let (a2, sp, chat, mid, jid) = (Arc::clone(app), Arc::clone(&split_pct), job.chat_id, job.status_msg, job.id);
+        let sz = dl::human(size);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(4)).await;
+                a2.bot.edit(chat, mid, &format!("✂️ #{jid} qismlarga bo'linmoqda ({sz})\n{}", bar(sp.load(Ordering::Relaxed) as f64)), None).await;
+            }
+        })
     };
+    let parts = tokio::select! {
+        r = dl::split(&path, &dir, Arc::clone(&split_pct)) => r,
+        _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
+    };
+    split_tick.abort();
+    let parts = parts?;
     let n = parts.len();
 
     // 3) Qismlarni birin-ketin yuborish; yuborilgan qism darhol o'chiriladi (disk to'lmasin).
@@ -397,13 +430,54 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
         // Kichik rasm (thumbnail): faqat video uchun; yasalmasa Telegram o'zi tanlaydi.
         let thumb = if is_audio { None } else { dl::make_thumb(part, &dir.join(format!("thumb{i}.jpg"))).await };
         let caption = if n > 1 { format!("{} ({}/{})", job.title.chars().take(900).collect::<String>(), i + 1, n) } else { job.title.chars().take(900).collect::<String>() };
+        let sent = Arc::new(AtomicU64::new(0));
+        let up_tick = {
+            let (a2, sn, chat, mid, jid, t100) = (Arc::clone(app), Arc::clone(&sent), job.chat_id, job.status_msg, job.id, title.clone());
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(4)).await;
+                    let s = sn.load(Ordering::Relaxed);
+                    let pct = (s as f64 / psize.max(1) as f64 * 100.0).min(99.0);
+                    let overall = ((i as f64 + pct / 100.0) / n as f64) * 100.0;
+                    a2.bot.edit(chat, mid, &format!("📤 #{jid} qism {}/{} yuborilmoqda\n{}  ({} / {})\nUmumiy: {}\n{t100}", i + 1, n, bar(pct), dl::human(s), dl::human(psize), bar(overall)), None).await;
+                }
+            })
+        };
         let r = tokio::select! {
-            r = app.bot.send_file(job.chat_id, is_audio, part, &caption, dur, w, h, thumb.as_deref()) => r,
+            r = app.bot.send_file(job.chat_id, is_audio, part, &caption, dur, w, h, thumb.as_deref(), Arc::clone(&sent)) => r,
             _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
         };
+        up_tick.abort();
         r.map_err(|e| anyhow!("{}/{} qism yuborilmadi: {e}", i + 1, n))?;
         let _ = std::fs::remove_file(part);
     }
     app.bot.edit(job.chat_id, job.status_msg, &format!("✅ #{} tayyor: {title}{}", job.id, if n > 1 { format!("\n{n} qismda yuborildi") } else { String::new() }), None).await;
     Ok(())
+}
+
+/// Tashxis: `ytbot sendtest <fayl>` — faylni egasiga yuboradi (thumbnail va foiz hisobi bilan) va natijani chiqaradi.
+pub async fn cli_sendtest(cfg: Arc<Cfg>, file: &str) -> Result<()> {
+    let conn = db::open(&format!("{}/ytbot.db", cfg.data_dir)).await?;
+    let bot = Bot::new(&cfg.bot_token);
+    let own: i64 = db::kv_get(&conn, "owner").await.and_then(|v| v.parse().ok()).unwrap_or(0);
+    if own == 0 {
+        return Err(anyhow!("egasi topilmadi (botga /start yozilmagan)"));
+    }
+    let path = Path::new(file);
+    let thumb = dl::make_thumb(path, &std::env::temp_dir().join("ytbot-test-thumb.jpg")).await;
+    println!("thumbnail: {:?}", thumb.as_ref().map(|t| std::fs::metadata(t).map(|m| m.len()).unwrap_or(0)));
+    let dur = dl::probe_duration(path).await.round() as u64;
+    let sent = Arc::new(AtomicU64::new(0));
+    let total = std::fs::metadata(path)?.len();
+    let s2 = Arc::clone(&sent);
+    let ticker = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(700)).await;
+            println!("yuborilmoqda: {}", bar(s2.load(Ordering::Relaxed) as f64 / total.max(1) as f64 * 100.0));
+        }
+    });
+    let r = bot.send_file(own, false, path, "🧪 Sinov: foiz va thumbnail (o'chirib tashlashingiz mumkin)", dur, 640, 360, thumb.as_deref(), sent).await;
+    ticker.abort();
+    println!("natija: {:?}", r.as_ref().map(|_| "ok").map_err(|e| e.to_string()));
+    r
 }

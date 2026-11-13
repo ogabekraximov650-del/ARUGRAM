@@ -4,6 +4,8 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 
@@ -431,11 +433,13 @@ pub fn plan_cuts(pkts: &[Pkt], total: u64, target: u64) -> Result<Vec<f64>> {
 
 /// Faylni VAQT bo'yicha qismlarga bo'ladi (qayta kodlamasdan, kalit kadrlarda): har qism 45–50 MB atrofida. Qism chegaradan oshsa, maqsad kamaytirilib qayta uriniladi.
 /// Natija: video tartibidagi qism fayllari (asl fayl o'chiriladi).
-pub async fn split(path: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
+pub async fn split(path: &Path, dir: &Path, prog: Arc<AtomicU32>) -> Result<Vec<PathBuf>> {
     let size = std::fs::metadata(path)?.len();
     if size <= PART_LIMIT {
+        prog.store(100, Ordering::Relaxed);
         return Ok(vec![path.to_path_buf()]);
     }
+    let total_dur = probe_duration(path).await;
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("mp4").to_string();
     let audio_only = !matches!(ext.as_str(), "mp4" | "mkv" | "webm" | "mov");
     let mut pkts = packets(path, if audio_only { "a:0" } else { "v:0" }).await.unwrap_or_default();
@@ -470,11 +474,41 @@ pub async fn split(path: &Path, dir: &Path) -> Result<Vec<PathBuf>> {
         if ext == "mp4" {
             c.args(["-segment_format_options", "movflags=+faststart"]);
         }
-        c.arg(sub.join(format!("p%03d.{ext}"))).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(true);
-        let out = c.output().await?;
-        if !out.status.success() {
-            return Err(anyhow!("ffmpeg: {}", String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("xato")));
+        // Foiz: ffmpeg `-progress pipe:1` (out_time_us) / umumiy davomiylik.
+        prog.store(0, Ordering::Relaxed);
+        c.args(["-progress", "pipe:1", "-nostats"]);
+        c.arg(sub.join(format!("p%03d.{ext}"))).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+        let mut child = c.spawn()?;
+        let so = child.stdout.take();
+        let se = child.stderr.take();
+        let err_task = tokio::spawn(async move {
+            let mut last = String::new();
+            if let Some(se) = se {
+                let mut lines = BufReader::new(se).lines();
+                while let Ok(Some(l)) = lines.next_line().await {
+                    if !l.trim().is_empty() {
+                        last = l;
+                    }
+                }
+            }
+            last
+        });
+        if let Some(so) = so {
+            let mut lines = BufReader::new(so).lines();
+            while let Ok(Some(l)) = lines.next_line().await {
+                if let Some(us) = l.strip_prefix("out_time_us=").and_then(|v| v.trim().parse::<f64>().ok()) {
+                    if total_dur > 0.0 {
+                        prog.store(((us / 1_000_000.0 / total_dur) * 100.0).clamp(0.0, 99.0) as u32, Ordering::Relaxed);
+                    }
+                }
+            }
         }
+        let status = child.wait().await?;
+        let ff_err = err_task.await.unwrap_or_default();
+        if !status.success() {
+            return Err(anyhow!("ffmpeg: {}", ff_err));
+        }
+        prog.store(100, Ordering::Relaxed);
         let mut parts: Vec<PathBuf> = std::fs::read_dir(&sub)?.flatten().map(|e| e.path()).filter(|p| p.is_file()).collect();
         parts.sort();
         if parts.is_empty() {
@@ -621,7 +655,7 @@ mod tests {
         assert!(st.success());
         let before = std::fs::metadata(&src).unwrap().len();
         assert!(before > 100_000_000, "sinov videosi kichik: {before}");
-        let parts = split(&src, &dir).await.unwrap();
+        let parts = split(&src, &dir, Arc::new(AtomicU32::new(0))).await.unwrap();
         assert!(parts.len() >= 3, "qismlar soni {}", parts.len());
         let sizes: Vec<u64> = parts.iter().map(|p| std::fs::metadata(p).unwrap().len()).collect();
         for (i, sz) in sizes.iter().enumerate() {

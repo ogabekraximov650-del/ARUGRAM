@@ -48,6 +48,9 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if std::env::args().nth(1).as_deref() == Some("sendtest") {
+        return bot::cli_sendtest(cfg, &std::env::args().nth(2).unwrap_or_default()).await;
+    }
     eprintln!("ytbot ishga tushdi");
     bot::run(cfg).await
 }
