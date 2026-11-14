@@ -52,6 +52,17 @@ async fn main() -> Result<()> {
         }
         return Ok(());
     }
+    // Tashxis: `ytbot memtest <url> <sifat>` — RAM orqali (diskka yozilmasdan) birlashtirilgan oqimni sinaydi.
+    if std::env::args().nth(1).as_deref() == Some("memtest") {
+        let url = std::env::args().nth(2).unwrap_or_default();
+        let fmt = std::env::args().nth(3).unwrap_or_else(|| "720".into());
+        let got = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        match dl::merge_to_memory(&cfg, &url, &fmt, dl::MEM_LIMIT as usize, got).await {
+            Ok(b) => println!("OK: {} bayt RAM'da", b.len()),
+            Err(e) => println!("XATO: {e}"),
+        }
+        return Ok(());
+    }
     if std::env::args().nth(1).as_deref() == Some("sendtest") {
         return bot::cli_sendtest(cfg, &std::env::args().nth(2).unwrap_or_default()).await;
     }

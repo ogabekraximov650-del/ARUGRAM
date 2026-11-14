@@ -512,6 +512,9 @@ async fn handle_url(app: &Arc<App>, chat: i64, url: &str) -> Result<()> {
             }
         } else if let Some((id, sz, _)) = &o.stream {
             stream.insert(o.h.to_string(), json!({"kind": "yt", "id": id, "size": sz}));
+        } else if let Some(sz) = o.size.filter(|s| *s <= dl::MEM_LIMIT) {
+            // Video+audio alohida bo'lsa va natija kichik bo'lsa: RAM orqali birlashtirib oqim (diskka yozilmaydi).
+            stream.insert(o.h.to_string(), json!({"kind": "mem", "size": sz}));
         }
     }
     let meta = json!({"w": info.w, "h": info.h, "dur": info.duration, "direct": direct, "stream": stream, "sizes": sizes});
@@ -662,7 +665,7 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     if let (Some(acc), false) = (app.acc.as_ref(), is_audio) {
         if let Some(sm) = meta["stream"][&job.fmt].as_object() {
             let ssize = sm.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-            if ssize > dl::PART_LIMIT && ssize < 2_000_000_000 {
+            if ssize < 2_000_000_000 {
                 match stream_via_account(app, acc, job, sm, ssize, w as i32, h as i32, meta["dur"].as_u64().unwrap_or(0)).await {
                     Ok(()) => {
                         let note = if acc.me == owner(app).await { "" } else { "\n(bot nusxalaydi)" };
@@ -735,6 +738,27 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
                 eprintln!("#{} akkaunt orqali yuborib bo'lmadi ({e}) — qismlab yuboriladi", job.id);
             }
         }
+    }
+
+    // 2c) 2 GB dan katta: moov (paketlar jadvali) bo'yicha qaysi daqiqa necha baytga to'g'ri kelishi aniqlanadi va ~1,9 GB li qismlarga bo'linib, har biri akkaunt orqali yuboriladi.
+    if let (Some(acc), true) = (app.acc.as_ref(), size >= 2_000_000_000) {
+        app.bot.edit(job.chat_id, job.status_msg, &format!("✂️ #{} {} — 2 GB dan katta: moov jadvali bo'yicha vaqt bo'yicha qismlanmoqda…", job.id, dl::human(size)), None).await;
+        let pct = Arc::new(AtomicU32::new(0));
+        let big = tokio::select! {
+            r = dl::split_with(&path, &dir, Arc::clone(&pct), dl::ACC_LIMIT, dl::ACC_TARGET) => r?,
+            _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+        };
+        let n = big.len();
+        for (i, part) in big.iter().enumerate() {
+            if db::job_state(&app.db, job.id).await == "cancelled" {
+                return Err(anyhow!("bekor qilindi"));
+            }
+            app.bot.edit(job.chat_id, job.status_msg, &format!("📤 #{} qism {}/{} akkaunt orqali yuborilmoqda…\n{title}", job.id, i + 1, n), None).await;
+            send_via_account(app, acc, job, part, is_audio, w as i32, h as i32, &dir).await.map_err(|e| anyhow!("{}/{} qism yuborilmadi: {e}", i + 1, n))?;
+            let _ = std::fs::remove_file(part);
+        }
+        app.bot.edit(job.chat_id, job.status_msg, &format!("✅ #{} tayyor: {title}\n{n} qismda (har biri < 2 GB), akkaunt orqali yuborildi", job.id), None).await;
+        return Ok(());
     }
 
     // 2b) VAQT bo'yicha ~45 MB li qismlarga bo'lish (kerak bo'lsa).
@@ -929,6 +953,20 @@ async fn stream_via_account(app: &Arc<App>, acc: &Account, job: &db::Job, src: &
                 };
                 let _ = child.kill().await;
                 r?
+            }
+            Some("mem") => {
+                let fmt = job.fmt.clone();
+                let bytes = tokio::select! {
+                    r = dl::merge_to_memory(&app.cfg, &job.url, &fmt, dl::MEM_LIMIT as usize, Arc::clone(&sent)) => r?,
+                    _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+                };
+                let len = bytes.len();
+                sent.store(0, Ordering::Relaxed);
+                let mut rd = CountRead { inner: std::io::Cursor::new(bytes), n: Arc::clone(&sent) };
+                tokio::select! {
+                    r = acc.client.upload_stream(&mut rd, len, name) => r.map_err(|e| anyhow!("oqim yuklash: {e}"))?,
+                    _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+                }
             }
             _ => return Err(anyhow!("noma'lum oqim manbasi")),
         };

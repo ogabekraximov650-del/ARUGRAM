@@ -410,6 +410,54 @@ pub fn spawn_stream(cfg: &Cfg, url: &str, format_id: &str) -> Result<tokio::proc
     Ok(c.spawn()?)
 }
 
+/// UZ: RAM orqali oqim chegarasi: video+audio birlashtirilgan natija shu hajmdan kichik bo'lsa diskka yozilmaydi (RAM'da yig'iladi). EN: merged results below this size are assembled in RAM, never touching the disk.
+pub const MEM_LIMIT: u64 = 80_000_000;
+
+/// UZ: video va audio manzillarini yt-dlp'dan olib (`-g`), ffmpeg bilan nusxalab (qayta kodlamasdan) fragmentli MP4 qiladi va RAM'ga yig'adi. Diskka hech narsa yozilmaydi.
+/// EN: gets the video/audio URLs from yt-dlp (`-g`), remuxes them with ffmpeg (no re-encode) into fragmented MP4 and collects it in RAM. Nothing is written to disk.
+pub async fn merge_to_memory(cfg: &Cfg, url: &str, fmt: &str, limit: usize, got: Arc<std::sync::atomic::AtomicU64>) -> Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut c = base(cfg);
+    c.arg("-S").arg("vcodec:h264,acodec:aac").arg("-f").arg(selector(fmt)).arg("-g").arg("--").arg(url);
+    c.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let o = tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await.map_err(|_| anyhow!("yt-dlp -g vaqti tugadi"))??;
+    let urls: Vec<String> = String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_string()).filter(|l| l.starts_with("http")).collect();
+    if urls.is_empty() || urls.len() > 2 {
+        return Err(anyhow!("oqim manzillari olinmadi: {}", String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("")));
+    }
+    let mut f = Command::new("ffmpeg");
+    f.args(["-v", "error", "-user_agent", UA]);
+    for u in &urls {
+        f.arg("-i").arg(u);
+    }
+    if urls.len() == 2 {
+        f.args(["-map", "0:v:0", "-map", "1:a:0"]);
+    }
+    f.args(["-c", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]);
+    f.stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+    let mut child = f.spawn()?;
+    let mut out = child.stdout.take().ok_or_else(|| anyhow!("ffmpeg stdout yo'q"))?;
+    let mut buf: Vec<u8> = Vec::new();
+    let mut chunk = vec![0u8; 256 * 1024];
+    loop {
+        let n = out.read(&mut chunk).await?;
+        if n == 0 {
+            break;
+        }
+        if buf.len() + n > limit {
+            let _ = child.kill().await;
+            return Err(anyhow!("oqim RAM chegarasidan oshdi"));
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        got.store(buf.len() as u64, Ordering::Relaxed);
+    }
+    let st = child.wait().await?;
+    if !st.success() || buf.len() < 1000 {
+        return Err(anyhow!("ffmpeg oqimi tugamadi"));
+    }
+    Ok(buf)
+}
+
 /// Papka joylashgan diskdagi bo'sh joy (bayt); bilinmasa `None`.
 pub fn free_bytes(dir: &Path) -> Option<u64> {
     let _ = std::fs::create_dir_all(dir);
@@ -423,6 +471,9 @@ pub fn free_bytes(dir: &Path) -> Option<u64> {
 pub const PART_LIMIT: u64 = 49_900_000;
 /// Bo'lishda maqsad: qismlar 45–50 MB oralig'ida chiqishi uchun chegaraga yaqin (kesish kalit kadrda bo'lgani uchun odatda 45–48,5 MB).
 pub const PART_TARGET: u64 = 48_500_000;
+/// UZ: Akkaunt orqali yuboriladigan qism chegarasi (Telegram 2 GB) va maqsad — 2 GB dan katta video moov jadvali bo'yicha shunday qismlarga bo'linadi. EN: per-part limit/target for the account (2 GB) upload of videos larger than 2 GB.
+pub const ACC_LIMIT: u64 = 1_990_000_000;
+pub const ACC_TARGET: u64 = 1_900_000_000;
 
 /// Fayl hajmi va davomiyligidan har qism necha soniya bo'lishi kerak (kamida 5 s).
 pub fn seg_secs(size: u64, duration: f64, target: u64) -> u64 {
@@ -513,10 +564,10 @@ pub fn plan_cuts(pkts: &[Pkt], total: u64, target: u64) -> Result<Vec<f64>> {
                     cuts.push(ct);
                     acc -= a;
                     if acc > target {
-                        return Err(anyhow!("kalit kadrlar juda siyrak: bitta guruh 50 MB dan katta"));
+                        return Err(anyhow!("kalit kadrlar juda siyrak: bitta guruh qism chegarasidan katta"));
                     }
                 }
-                None => return Err(anyhow!("kalit kadrlar juda siyrak: bitta guruh 50 MB dan katta")),
+                None => return Err(anyhow!("kalit kadrlar juda siyrak: bitta guruh qism chegarasidan katta")),
             }
         }
     }
@@ -526,8 +577,14 @@ pub fn plan_cuts(pkts: &[Pkt], total: u64, target: u64) -> Result<Vec<f64>> {
 /// Faylni VAQT bo'yicha qismlarga bo'ladi (qayta kodlamasdan, kalit kadrlarda): har qism 45–50 MB atrofida. Qism chegaradan oshsa, maqsad kamaytirilib qayta uriniladi.
 /// Natija: video tartibidagi qism fayllari (asl fayl o'chiriladi).
 pub async fn split(path: &Path, dir: &Path, prog: Arc<AtomicU32>) -> Result<Vec<PathBuf>> {
+    split_with(path, dir, prog, PART_LIMIT, PART_TARGET).await
+}
+
+/// UZ: `split` ning umumiy ko'rinishi: qism chegarasi (`limit`) va maqsadi (`target0`) beriladi. Kesish vaqtlari konteyner indeksidan (MP4'da moov: har paketning vaqti va hajmi) olinadi — fayl o'qilmaydi.
+/// EN: general `split`: caller gives the per-part `limit`/`target0`. Cut times come from the container index (moov in MP4: each packet's time and size), so the file body isn't read.
+pub async fn split_with(path: &Path, dir: &Path, prog: Arc<AtomicU32>, limit: u64, target0: u64) -> Result<Vec<PathBuf>> {
     let size = std::fs::metadata(path)?.len();
-    if size <= PART_LIMIT {
+    if size <= limit {
         prog.store(100, Ordering::Relaxed);
         return Ok(vec![path.to_path_buf()]);
     }
@@ -538,7 +595,7 @@ pub async fn split(path: &Path, dir: &Path, prog: Arc<AtomicU32>) -> Result<Vec<
     if pkts.is_empty() {
         pkts = packets(path, "a:0").await.unwrap_or_default();
     }
-    let mut target = PART_TARGET;
+    let mut target = target0;
     let mut last_err = anyhow!("bo'lib bo'lmadi");
     for attempt in 0..4 {
         let sub = dir.join(format!("s{attempt}"));
@@ -607,7 +664,7 @@ pub async fn split(path: &Path, dir: &Path, prog: Arc<AtomicU32>) -> Result<Vec<
             return Err(anyhow!("ffmpeg qism yaratmadi"));
         }
         let biggest = parts.iter().filter_map(|p| std::fs::metadata(p).ok()).map(|m| m.len()).max().unwrap_or(0);
-        if biggest <= PART_LIMIT {
+        if biggest <= limit {
             let _ = std::fs::remove_file(path); // asl fayl endi kerak emas — disk to'lib qolmasin
             return Ok(parts);
         }
@@ -702,6 +759,22 @@ mod tests {
         assert_eq!(progress_line(" 45.3%| Unknown B/s|Unknown").is_some(), true);
         assert_eq!(progress_line("WARNING: [generic] Falling back"), None);
         assert_eq!(progress_line("[download] Destination: x.mp4"), None);
+    }
+
+    #[test]
+    fn plan_cuts_for_2gb_parts() {
+        // 3 soat, har soniyada 1 paket (2 MB), har 2 soniyada kalit kadr: jami ~21 GB -> ~1,9 GB li qismlar.
+        let pkts: Vec<Pkt> = (0..10_800).map(|i| (i as f64, 2_000_000u64, i % 2 == 0)).collect();
+        let total = 10_800u64 * 2_000_000 + 50_000_000;
+        let cuts = plan_cuts(&pkts, total, ACC_TARGET).unwrap();
+        assert!(cuts.len() >= 10 && cuts.len() <= 12, "{} ta kesish", cuts.len());
+        let f = total as f64 / (10_800.0 * 2_000_000.0);
+        let mut prev = 0.0;
+        for t in cuts.iter().chain(std::iter::once(&10_800.0)) {
+            let bytes = (t - prev) * 2_000_000.0 * f;
+            assert!(bytes <= ACC_LIMIT as f64, "qism {bytes} chegaradan katta");
+            prev = *t;
+        }
     }
 
     #[test]
