@@ -413,49 +413,99 @@ pub fn spawn_stream(cfg: &Cfg, url: &str, format_id: &str) -> Result<tokio::proc
 /// UZ: RAM orqali oqim chegarasi: video+audio birlashtirilgan natija shu hajmdan kichik bo'lsa diskka yozilmaydi (RAM'da yig'iladi). EN: merged results below this size are assembled in RAM, never touching the disk.
 pub const MEM_LIMIT: u64 = 80_000_000;
 
-/// UZ: video va audio manzillarini yt-dlp'dan olib (`-g`), ffmpeg bilan nusxalab (qayta kodlamasdan) fragmentli MP4 qiladi va RAM'ga yig'adi. Diskka hech narsa yozilmaydi.
-/// EN: gets the video/audio URLs from yt-dlp (`-g`), remuxes them with ffmpeg (no re-encode) into fragmented MP4 and collects it in RAM. Nothing is written to disk.
+/// UZ: tanlangan sifat uchun format id'lari (`137+140` yoki `18`) — `yt-dlp --print format_id`. EN: format ids for the chosen quality.
+async fn format_ids(cfg: &Cfg, url: &str, fmt: &str) -> Result<Vec<String>> {
+    let mut c = base(cfg);
+    c.arg("-S").arg("vcodec:h264,acodec:aac").arg("-f").arg(selector(fmt)).arg("--print").arg("format_id").arg("--").arg(url);
+    c.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let o = tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await.map_err(|_| anyhow!("yt-dlp vaqti tugadi"))??;
+    let t = String::from_utf8_lossy(&o.stdout).lines().last().unwrap_or("").trim().to_string();
+    let ids: Vec<String> = t.split('+').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect();
+    if ids.is_empty() || ids.len() > 2 {
+        return Err(anyhow!("format aniqlanmadi: {}", String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("")));
+    }
+    Ok(ids)
+}
+
+/// UZ: Tanlangan sifatni DISKKA YOZMASDAN RAM'ga yig'adi. Bitta format bo'lsa — yt-dlp stdout'i to'g'ridan-to'g'ri; video+audio alohida bo'lsa — ikkita yt-dlp nomli quvur (FIFO, ma'lumot diskka tushmaydi) orqali ffmpeg'ga beriladi, ffmpeg qayta kodlamasdan fragmentli MP4 qiladi.
+/// EN: Collects the chosen quality in RAM with NO disk writes. A single format comes straight from yt-dlp's stdout; separate video+audio go through two named pipes (FIFOs, no data on disk) into ffmpeg, which remuxes without re-encoding into fragmented MP4.
 pub async fn merge_to_memory(cfg: &Cfg, url: &str, fmt: &str, limit: usize, got: Arc<std::sync::atomic::AtomicU64>) -> Result<Vec<u8>> {
     use tokio::io::AsyncReadExt;
-    let mut c = base(cfg);
-    c.arg("-S").arg("vcodec:h264,acodec:aac").arg("-f").arg(selector(fmt)).arg("-g").arg("--").arg(url);
-    c.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let o = tokio::time::timeout(std::time::Duration::from_secs(120), c.output()).await.map_err(|_| anyhow!("yt-dlp -g vaqti tugadi"))??;
-    let urls: Vec<String> = String::from_utf8_lossy(&o.stdout).lines().map(|l| l.trim().to_string()).filter(|l| l.starts_with("http")).collect();
-    if urls.is_empty() || urls.len() > 2 {
-        return Err(anyhow!("oqim manzillari olinmadi: {}", String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("")));
-    }
-    let mut f = Command::new("ffmpeg");
-    f.args(["-v", "error", "-user_agent", UA]);
-    for u in &urls {
-        f.arg("-i").arg(u);
-    }
-    if urls.len() == 2 {
-        f.args(["-map", "0:v:0", "-map", "1:a:0"]);
-    }
-    f.args(["-c", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]);
-    f.stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
-    let mut child = f.spawn()?;
-    let mut out = child.stdout.take().ok_or_else(|| anyhow!("ffmpeg stdout yo'q"))?;
-    let mut buf: Vec<u8> = Vec::new();
-    let mut chunk = vec![0u8; 256 * 1024];
-    loop {
-        let n = out.read(&mut chunk).await?;
-        if n == 0 {
-            break;
+    let ids = format_ids(cfg, url, fmt).await?;
+    let mut cleanup: Vec<PathBuf> = Vec::new();
+    let mut children: Vec<tokio::process::Child> = Vec::new();
+    let res: Result<Vec<u8>> = async {
+        let mut reader: Box<dyn tokio::io::AsyncRead + Unpin + Send> = if ids.len() == 1 {
+            let mut c = base(cfg);
+            c.arg("-f").arg(&ids[0]).arg("-q").arg("-o").arg("-").arg("--").arg(url);
+            c.stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+            let mut ch = c.spawn()?;
+            let out = ch.stdout.take().ok_or_else(|| anyhow!("stdout yo'q"))?;
+            children.push(ch);
+            Box::new(out)
+        } else {
+            let dir = std::env::temp_dir().join(format!("ytfifo-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)));
+            std::fs::create_dir_all(&dir)?;
+            cleanup.push(dir.clone());
+            let mut fifos = Vec::new();
+            for n in ["v", "a"] {
+                let f = dir.join(n);
+                let ok = std::process::Command::new("mkfifo").arg(&f).status().map(|s| s.success()).unwrap_or(false);
+                if !ok {
+                    return Err(anyhow!("mkfifo ishlamadi"));
+                }
+                fifos.push(f);
+            }
+            let mut f = Command::new("ffmpeg");
+            f.args(["-v", "error", "-i"]).arg(&fifos[0]).arg("-i").arg(&fifos[1]).args(["-map", "0:v:0", "-map", "1:a:0", "-c", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]);
+            f.stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+            let mut ff = f.spawn()?;
+            let out = ff.stdout.take().ok_or_else(|| anyhow!("ffmpeg stdout yo'q"))?;
+            children.push(ff);
+            // Har bir quvurni alohida oqimda ochamiz: ochish ffmpeg ikkala kirishni ochguncha kutadi.
+            for (i, id) in ids.iter().enumerate() {
+                let (path, id, cfg_c, url_c) = (fifos[i].clone(), id.clone(), (cfg.ytdlp.clone(), cfg.cookies.clone(), cfg.data_dir.clone()), url.to_string());
+                tokio::task::spawn_blocking(move || {
+                    if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&path) {
+                        let mut c = std::process::Command::new(&cfg_c.0);
+                        c.arg("--no-playlist").arg("--no-warnings").arg("--no-colors");
+                        let ck = cfg_c.1.clone().or_else(|| Some(format!("{}/cookies.txt", cfg_c.2)).filter(|p| Path::new(p).is_file()));
+                        if let Some(ck) = ck {
+                            c.arg("--cookies").arg(ck);
+                        }
+                        c.arg("-f").arg(&id).arg("-q").arg("-o").arg("-").arg("--").arg(&url_c).stdout(Stdio::from(file)).stderr(Stdio::null());
+                        let _ = c.status();
+                    }
+                });
+            }
+            Box::new(out)
+        };
+        let mut buf: Vec<u8> = Vec::new();
+        let mut chunk = vec![0u8; 256 * 1024];
+        loop {
+            let n = tokio::time::timeout(std::time::Duration::from_secs(120), reader.read(&mut chunk)).await.map_err(|_| anyhow!("oqim 120 soniya jim qoldi"))??;
+            if n == 0 {
+                break;
+            }
+            if buf.len() + n > limit {
+                return Err(anyhow!("oqim RAM chegarasidan oshdi"));
+            }
+            buf.extend_from_slice(&chunk[..n]);
+            got.store(buf.len() as u64, Ordering::Relaxed);
         }
-        if buf.len() + n > limit {
-            let _ = child.kill().await;
-            return Err(anyhow!("oqim RAM chegarasidan oshdi"));
+        if buf.len() < 1000 {
+            return Err(anyhow!("oqim bo'sh chiqdi"));
         }
-        buf.extend_from_slice(&chunk[..n]);
-        got.store(buf.len() as u64, Ordering::Relaxed);
+        Ok(buf)
     }
-    let st = child.wait().await?;
-    if !st.success() || buf.len() < 1000 {
-        return Err(anyhow!("ffmpeg oqimi tugamadi"));
+    .await;
+    for c in children.iter_mut() {
+        let _ = c.kill().await;
     }
-    Ok(buf)
+    for d in cleanup {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    res
 }
 
 /// Papka joylashgan diskdagi bo'sh joy (bayt); bilinmasa `None`.
