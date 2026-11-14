@@ -15,6 +15,7 @@ on:
       - 'tool/encode/gh_token.enc'
       - 'tool/encode/gh_repo.txt'
       - 'tool/encode/setup_repo.py'
+      - 'tool/ytjob/ytjob.workflow.yml'
       - 'tool/encode/avtoencode_q.workflow.yml'
       - 'tool/encode/avtoencode.workflow.yml'
       - '.github/workflows/setup-autoencode.yml'

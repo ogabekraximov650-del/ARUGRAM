@@ -139,6 +139,8 @@ def main():
     # "Yangi sessiya" (kodlash botidagi tugma) — ALOHIDA workflow `session.yml`.
     files[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
     files["tool/session/session.py"] = HERE.parent / "session" / "session.py"
+    # Yuklash boti (ytbot) ishchisi — `ytjob.yml` (Ample `workflow_dispatch` bilan ishga tushiradi, kalit ENCODE_TOKEN bilan shifrlangan keladi).
+    files[".github/workflows/ytjob.yml"] = HERE.parent / "ytjob" / "ytjob.workflow.yml"
     # R2 -> Telegram yuklovchi (`upload.yml`).
     files[".github/workflows/upload.yml"] = HERE.parent / "upload" / "upload.workflow.yml"
     files["tool/upload/upload.py"] = HERE.parent / "upload" / "upload.py"

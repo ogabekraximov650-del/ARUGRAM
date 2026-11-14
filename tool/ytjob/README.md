@@ -20,5 +20,5 @@ EN: `ytbot` on Ample manages the queue, logs and the chat message; heavy work ru
   EN: The worker fetches `ytbot ajob` from Ample (`/bin`), gets job data and cookies through `/ajob`, `/ack` (never stored on GitHub) and posts its log to `/prog` every second.
 - UZ: Ample chat xabarini kamida 3 soniyada bir yangilaydi (Telegram cheklovi).
   EN: Ample edits the chat message at most once per 3 seconds (Telegram limits).
-- UZ: Ish tugagach kalit o'chiriladi. Repo YOPIQ bo'lishi kerak: workflow kirishlari (kalit) ishga tushirish sahifasida ko'rinadi.
-  EN: The key is wiped when the job ends. The repo must be PRIVATE: workflow inputs (the key) are visible on the run page.
+- UZ: Ish tugagach kalit o'chiriladi. Kalit workflow kirishiga SHIFRLANGAN (`ENCODE_TOKEN` bilan) beriladi, shuning uchun repo ochiq bo'lsa ham u ko'rinmaydi. Lekin ochiq repoda Actions loglari (yuklanayotgan havolalar) hammaga ko'rinadi.
+  EN: The key is wiped when the job ends. The key is passed ENCRYPTED (with `ENCODE_TOKEN`), so a public repo does not reveal it; but in a public repo the Actions logs (URLs being downloaded) are visible to everyone.

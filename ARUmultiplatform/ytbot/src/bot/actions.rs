@@ -53,9 +53,29 @@ fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && !a.is_empty() && a.bytes().zip(b.bytes()).fold(0u8, |d, (x, y)| d | (x ^ y)) == 0
 }
 
-/// UZ: `workflow_dispatch` so'rovining tanasi. EN: body of the `workflow_dispatch` request.
-pub fn dispatch_body(job: i64, cb: &str, tok: &str) -> Value {
-    json!({"ref": "main", "inputs": {"job": job.to_string(), "cb": cb, "tok": tok}})
+/// UZ: `workflow_dispatch` so'rovining tanasi. `etok` — ishga xos kalitning SHIFRLANGAN ko'rinishi (repo ochiq bo'lsa ham kirishlar sirni oshkor qilmasin). EN: body of the `workflow_dispatch` request; `etok` is the per-job key ENCRYPTED so a public repo's inputs reveal nothing.
+pub fn dispatch_body(job: i64, cb: &str, etok: &str) -> Value {
+    json!({"ref": "main", "inputs": {"job": job.to_string(), "cb": cb, "etok": etok}})
+}
+
+/// UZ: kalitni `encode_token` bilan shifrlaydi (openssl AES-256-CBC, PBKDF2 200000, base64 bir qator). Workflow shuni `secrets.ENCODE_TOKEN` bilan ochadi.
+/// EN: encrypts the key with `encode_token` (openssl AES-256-CBC, PBKDF2 200000, single-line base64); the workflow decrypts it with `secrets.ENCODE_TOKEN`.
+async fn encrypt_tok(cfg: &Cfg, tok: &str) -> Result<String> {
+    use tokio::io::AsyncWriteExt;
+    let key = std::fs::read_to_string(format!("{}/encode_token", cfg.data_dir))?.trim().to_string();
+    let mut c = tokio::process::Command::new("openssl")
+        .args(["enc", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-salt", "-a", "-A", "-pass", "env:K"])
+        .env("K", key)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    c.stdin.take().ok_or_else(|| anyhow!("openssl stdin yo'q"))?.write_all(tok.as_bytes()).await?;
+    let o = c.wait_with_output().await?;
+    let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    if !o.status.success() || t.is_empty() {
+        return Err(anyhow!("kalitni shifrlab bo'lmadi"));
+    }
+    Ok(t)
 }
 
 async fn dispatch(cfg: &Cfg, job: i64, tok: &str) -> Result<()> {
@@ -68,7 +88,7 @@ async fn dispatch(cfg: &Cfg, job: i64, tok: &str) -> Result<()> {
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .header("User-Agent", "ytbot")
-        .json(&dispatch_body(job, cb, tok))
+        .json(&dispatch_body(job, cb, &encrypt_tok(cfg, tok).await?))
         .send()
         .await?;
     if r.status().as_u16() != 204 {
@@ -216,7 +236,7 @@ mod tests {
         let b = dispatch_body(7, "https://x.ample.run", "abc");
         assert_eq!(b["ref"], "main");
         assert_eq!(b["inputs"]["job"], "7");
-        assert_eq!(b["inputs"]["tok"], "abc");
+        assert_eq!(b["inputs"]["etok"], "abc");
         assert!(same("abc", "abc") && !same("abc", "abd") && !same("", "") && !same("ab", "abc"));
         let t = new_tok();
         assert_eq!(t.len(), 32);
@@ -251,6 +271,15 @@ mod tests {
         let cfg = Cfg { bot_token: "x".into(), data_dir: dir.to_string_lossy().to_string(), ytdlp: "yt-dlp".into(), cookies: None, owner_env: None, api_id: None, public_url: Some("https://x".into()), webhook_secret: String::new(), port: 0, gh_repo: Some("o/r".into()) };
         assert!(configured(&cfg));
         assert_eq!(token(&cfg).await.unwrap(), "ghp_TEST_TOKEN");
+        // ishga xos kalit: shifrlanadi va workflow'dagi kabi ochiladi
+        let e = encrypt_tok(&cfg, "job-kalit-xyz").await.unwrap();
+        assert!(!e.contains("job-kalit") && !e.contains('\n'));
+        let d = std::process::Command::new("openssl").args(["enc", "-d", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-a", "-A", "-pass", "pass:kalit-123"]).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).spawn().unwrap();
+        use std::io::Write;
+        d.stdin.as_ref().unwrap();
+        let mut d = d;
+        d.stdin.take().unwrap().write_all(e.as_bytes()).unwrap();
+        assert_eq!(String::from_utf8_lossy(&d.wait_with_output().unwrap().stdout).trim(), "job-kalit-xyz");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
