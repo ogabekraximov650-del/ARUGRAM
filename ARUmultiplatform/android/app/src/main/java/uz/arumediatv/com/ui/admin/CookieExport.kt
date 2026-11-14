@@ -57,9 +57,9 @@ object CookieExport {
         val sb = StringBuilder("# Netscape HTTP Cookie File\n# ARUMEDIATV: YouTube cookie\n\n")
         for ((domain, name, value) in cookies) {
             if (!seen.add("$domain|$name")) continue
-            // __Host- cookie'lari domen bilan bog'lanmaydi (subdomainsiz), qolganlari ".domen".
-            val sub = if (name.startsWith("__Host-")) "FALSE" else "TRUE"
-            sb.append("$domain\t$sub\t/\tTRUE\t$expiry\t$name\t$value\n")
+            // __Host- cookie'lari faqat o'sha xostga tegishli: domen nuqtasiz va subdomen FALSE (yt-dlp: nuqta bor <=> TRUE bo'lishi shart).
+            val host = name.startsWith("__Host-")
+            sb.append("${if (host) domain.trimStart('.') else domain}\t${if (host) "FALSE" else "TRUE"}\t/\tTRUE\t$expiry\t$name\t$value\n")
         }
         return sb.toString()
     }

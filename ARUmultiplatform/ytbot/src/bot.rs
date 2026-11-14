@@ -462,7 +462,7 @@ async fn save_cookies(app: &Arc<App>, chat: i64, mid: i64, file_id: &str, size: 
         }
         Some((n, auth)) => {
             let dst = format!("{}/cookies.txt", app.cfg.data_dir);
-            std::fs::write(&dst, txt)?;
+            std::fs::write(&dst, dl::normalize_cookies(&txt))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;

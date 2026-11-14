@@ -131,6 +131,27 @@ pub fn cookie_file(cfg: &Cfg) -> Option<String> {
     Path::new(&p).is_file().then_some(p)
 }
 
+/// UZ: "domen nuqta bilan boshlansa — subdomen TRUE" qoidasini tuzatadi (yt-dlp aks holda butun faylni rad etadi, masalan `__Host-` cookie'lari). EN: fixes the domain/include-subdomains flag mismatch that makes yt-dlp reject the whole file.
+pub fn normalize_cookies(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 16);
+    for l in text.lines() {
+        let body = l.strip_prefix("#HttpOnly_").unwrap_or(l);
+        let mut f: Vec<&str> = body.split('\t').collect();
+        if body.starts_with('#') || f.len() < 7 {
+            out.push_str(l);
+        } else {
+            let want = if f[0].starts_with('.') { "TRUE" } else { "FALSE" };
+            f[1] = want;
+            if body.len() != l.len() {
+                out.push_str("#HttpOnly_");
+            }
+            out.push_str(&f.join("\t"));
+        }
+        out.push('\n');
+    }
+    out
+}
+
 /// UZ: Netscape cookies matnini tekshiradi: (cookie soni, kirish cookie'lari bormi). EN: validates Netscape text: (count, has auth cookies).
 pub fn check_cookies(text: &str) -> Option<(usize, bool)> {
     let mut n = 0;
@@ -687,6 +708,8 @@ mod tests {
         assert_eq!(check_cookies(ok), Some((2, true)));
         assert_eq!(check_cookies(".youtube.com\tTRUE\t/\tTRUE\t1\tPREF\tx\n"), Some((1, false)));
         assert_eq!(check_cookies("hello world"), None);
+        let bad = ".google.com\tFALSE\t/\tTRUE\t1\t__Host-GAPS\tv\nwww.x.com\tTRUE\t/\tTRUE\t1\ta\tb\n# c\n";
+        assert_eq!(normalize_cookies(bad), ".google.com\tTRUE\t/\tTRUE\t1\t__Host-GAPS\tv\nwww.x.com\tFALSE\t/\tTRUE\t1\ta\tb\n# c\n");
         assert_eq!(check_cookies("# only comments\n"), None);
     }
 

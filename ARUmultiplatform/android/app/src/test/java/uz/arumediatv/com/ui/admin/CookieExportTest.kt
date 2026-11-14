@@ -20,7 +20,7 @@ class CookieExportTest {
         val lines = txt.lines().filter { it.isNotBlank() && !it.startsWith("#") }
         assertEquals(2, lines.size)
         assertEquals(".youtube.com\tTRUE\t/\tTRUE\t${1000 + 365L * 24 * 3600}\tSID\t1", lines[0])
-        assertTrue(lines[1].startsWith(".google.com\tFALSE\t/\tTRUE\t"))
+        assertTrue(lines[1].startsWith("google.com\tFALSE\t/\tTRUE\t"))
         assertTrue(txt.startsWith("# Netscape HTTP Cookie File"))
     }
 
