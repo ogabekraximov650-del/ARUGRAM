@@ -1,4 +1,7 @@
 // UZ: bot mantig'i: Bot API (webhook yoki long polling), navbat ishchisi, video ~45 MB li qismlarga bo'linib yuboriladi. EN: bot logic: Bot API, queue worker, video sent in ~45 MB parts.
+mod actions;
+mod ajob;
+pub use ajob::ajob_main;
 use crate::{db, dl, pages, Cfg};
 use anyhow::{anyhow, Result};
 use grammers_client::message::InputMessage;
@@ -17,7 +20,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 
 /// Foiz chizig'i: ▓▓▓▓░░░░░░ 40%
-fn bar(pct: f64) -> String {
+pub(crate) fn bar(pct: f64) -> String {
     let p = pct.clamp(0.0, 100.0);
     let n = (p / 10.0).round() as usize;
     format!("{}{} {:.0}%", "▓".repeat(n), "░".repeat(10 - n), p)
@@ -296,6 +299,10 @@ pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
     let router = axum::Router::new()
         .route("/", axum::routing::get(|| async { "ok" }))
         .route("/tg/{path_secret}", axum::routing::post(webhook))
+        .route("/prog/{job}", axum::routing::post(actions::ajob_prog))
+        .route("/ajob/{job}", axum::routing::get(actions::ajob_info))
+        .route("/ack/{job}", axum::routing::get(actions::ajob_cookies))
+        .route("/bin", axum::routing::get(actions::ajob_bin))
         .with_state(Arc::clone(&app));
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", app.cfg.port)).await?;
     if let Some(public) = app.cfg.public_url.clone() {
@@ -423,6 +430,11 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
                 },
                 None => "🍪 Cookie yo'q. cookies.txt faylini shu chatga hujjat qilib yuboring.".to_string(),
             };
+            app.bot.send(chat, &t, None).await?;
+            return Ok(());
+        }
+        "/actions" => {
+            let t = if actions::configured(&app.cfg) { format!("☁️ GitHub Actions ulangan: {}\nKatta (>400 MB) yoki diskka sig'maydigan ishlar shu yerda bajariladi.", app.cfg.gh_repo.clone().unwrap_or_default()) } else { "☁️ GitHub Actions ulanmagan.".to_string() };
             app.bot.send(chat, &t, None).await?;
             return Ok(());
         }
@@ -683,6 +695,14 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
         }
     }
 
+    // GitHub Actions ulangan bo'lsa: katta (>400 MB) yoki diskka sig'maydigan ish ishchiga topshiriladi (disk/RAM chegarasi yo'q).
+    if actions::configured(&app.cfg) {
+        let est = meta["sizes"][&job.fmt].as_u64();
+        let free = dl::free_bytes(Path::new(&app.cfg.data_dir));
+        if est.map_or(false, |s| s > 400_000_000) || matches!((est, free), (Some(n), Some(f)) if n * 2 + 150_000_000 > f) {
+            return actions::run_actions(app, job).await;
+        }
+    }
     // Disk yetarlimi? (video+audio birlashtirilsa ~2 barobar joy kerak). Yetmasa foydalanuvchiga aniq xabar.
     if let (Some(need), Some(free)) = (meta["sizes"][&job.fmt].as_u64(), dl::free_bytes(Path::new(&app.cfg.data_dir))) {
         if need * 2 + 150_000_000 > free {

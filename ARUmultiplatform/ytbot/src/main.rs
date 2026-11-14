@@ -23,10 +23,16 @@ pub struct Cfg {
     /// Webhook so'rovlarini tekshirish siri (manzilda va `X-Telegram-Bot-Api-Secret-Token` sarlavhasida).
     pub webhook_secret: String,
     pub port: u16,
+    /// GitHub Actions ishchi repo (`egasi/repo`); berilsa og'ir ishlar shu yerga topshiriladi (token shifrlangan `gh.enc` faylda).
+    pub gh_repo: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Actions ishchisi: `ytbot ajob` (CB, JOB, TOK muhit o'zgaruvchilari bilan) — BOT_TOKEN kerak emas, Ample beradi.
+    if std::env::args().nth(1).as_deref() == Some("ajob") {
+        return bot::ajob_main().await;
+    }
     let env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     let cfg = Arc::new(Cfg {
         bot_token: env("BOT_TOKEN").ok_or_else(|| anyhow::anyhow!("BOT_TOKEN yo'q"))?,
@@ -38,6 +44,7 @@ async fn main() -> Result<()> {
         public_url: env("PUBLIC_URL").map(|u| u.trim_end_matches('/').to_string()),
         webhook_secret: env("WEBHOOK_SECRET").unwrap_or_default(),
         port: env("PORT").and_then(|v| v.parse().ok()).unwrap_or(8080),
+        gh_repo: env("GH_REPO"),
     });
     if cfg.public_url.is_some() && cfg.webhook_secret.len() < 16 {
         return Err(anyhow::anyhow!("WEBHOOK_SECRET kamida 16 belgi bo'lishi kerak (harf, raqam, _ va -)"));

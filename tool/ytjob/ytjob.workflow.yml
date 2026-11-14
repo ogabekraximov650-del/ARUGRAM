@@ -1,0 +1,39 @@
+# UZ: Ikkinchi GitHub akkauntdagi (YOPIQ) repoga `.github/workflows/ytjob.yml` sifatida qo'yiladi. Ample (`ytbot`) shu workflow'ni `workflow_dispatch` bilan ishga tushiradi.
+# EN: Put this into the (PRIVATE) repo of the second GitHub account as `.github/workflows/ytjob.yml`. Ample (`ytbot`) triggers it with `workflow_dispatch`.
+name: ytjob
+run-name: "ytjob #${{ inputs.job }}"
+on:
+  workflow_dispatch:
+    inputs:
+      job:
+        description: "Ish raqami / Job id"
+        required: true
+      cb:
+        description: "Ample manzili / Ample base URL"
+        required: true
+      tok:
+        description: "Shu ishga xos bir martalik kalit / One-time per-job key"
+        required: true
+permissions: {}
+jobs:
+  run:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - name: Kalitni yashirish
+        run: echo "::add-mask::${{ inputs.tok }}"
+      - name: Asboblar (ffmpeg, yt-dlp)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o yt-dlp
+          chmod +x yt-dlp && sudo mv yt-dlp /usr/local/bin/
+          mkdir -p ~/.config/yt-dlp && echo "--js-runtimes node" > ~/.config/yt-dlp/config
+      - name: Ish (yuklash, bo'lish, yuborish; log har soniyada Ample'ga)
+        env:
+          CB: ${{ inputs.cb }}
+          JOB: ${{ inputs.job }}
+          TOK: ${{ inputs.tok }}
+        run: |
+          curl -fsSL -H "Authorization: Bearer $TOK" "$CB/bin?job=$JOB" -o ytbot
+          chmod +x ytbot
+          ./ytbot ajob
