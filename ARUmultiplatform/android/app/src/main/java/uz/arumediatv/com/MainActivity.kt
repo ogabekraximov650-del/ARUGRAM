@@ -79,6 +79,7 @@ import uz.arumediatv.com.ui.admin.AdminChannelAddScreen
 import uz.arumediatv.com.ui.admin.AdminPacksScreen
 import uz.arumediatv.com.ui.admin.AdminStatsScreen
 import uz.arumediatv.com.ui.admin.AdminAppScreen
+import uz.arumediatv.com.ui.admin.AdminCookieScreen
 import uz.arumediatv.com.ui.admin.AdminEncodeScreen
 import uz.arumediatv.com.ui.admin.AdminAnimeScreen
 import uz.arumediatv.com.ui.admin.AdminAnimeEditScreen
@@ -150,6 +151,7 @@ private sealed interface Page {
     data object AdminPacks : Page
     data object AdminStats : Page
     data object AdminApp : Page
+    data object AdminCookie : Page
     data object AdminAnime : Page
     data object AdminEncode : Page
     data class AdminAnimeEdit(val anime: org.json.JSONObject?) : Page
@@ -333,6 +335,7 @@ private fun AruApp() {
                             AdminSection.PACKS -> push(Page.AdminPacks)
                             AdminSection.STATS -> push(Page.AdminStats)
                             AdminSection.APP -> push(Page.AdminApp)
+                            AdminSection.COOKIE -> push(Page.AdminCookie)
                             AdminSection.ANIME -> push(Page.AdminAnime)
                             AdminSection.ENCODE -> push(Page.AdminEncode)
                             else -> android.widget.Toast.makeText(ctx, "${s.title}: keyingi qadamda", android.widget.Toast.LENGTH_SHORT).show()
@@ -346,6 +349,7 @@ private fun AruApp() {
                     Page.AdminPacks -> AdminPacksScreen(onBack = ::pop)
                     Page.AdminStats -> AdminStatsScreen(onBack = ::pop)
                     Page.AdminApp -> AdminAppScreen(onBack = ::pop)
+                    Page.AdminCookie -> AdminCookieScreen(onBack = ::pop)
                     Page.AdminEncode -> AdminEncodeScreen(onBack = ::pop)
                     Page.AdminAnime -> AdminAnimeScreen(onBack = ::pop, onOpenAnime = { a -> push(Page.AdminSeasons(a)) }, onEdit = { a -> push(Page.AdminAnimeEdit(a)) })
                     is Page.AdminAnimeEdit -> AdminAnimeEditScreen(page.anime, onBack = ::pop, onDone = ::pop)

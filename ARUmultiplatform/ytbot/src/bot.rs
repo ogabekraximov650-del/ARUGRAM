@@ -370,7 +370,7 @@ async fn owner(app: &App) -> i64 {
     db::kv_get(&app.db, "owner").await.and_then(|v| v.parse().ok()).unwrap_or(0)
 }
 
-const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\n50 MB dan katta video: akkaunt ulangan bo'lsa bitta fayl (2 GB gacha), aks holda ~45–50 MB li qismlarga bo'lib yuboriladi.\n\n/queue — navbat\n/cancel <raqam> — bekor qilish";
+const HELP: &str = "Havolani yuboring (YouTube, Instagram, TikTok, X va boshqalar) — sifatni tanlaysiz, video navbat bilan yuklanadi.\n\n50 MB dan katta video: akkaunt ulangan bo'lsa bitta fayl (2 GB gacha), aks holda ~45–50 MB li qismlarga bo'lib yuboriladi.\n\n/queue — navbat\n/cancel <raqam> — bekor qilish\n\nYouTube \"bot emasligingizni tasdiqlang\" desa: cookies.txt faylini shu chatga hujjat qilib yuboring (ilovadagi Admin → YouTube cookie yoki brauzer kengaytmasi).\n/cookies — cookie holati, /cookies_del — o'chirish";
 
 async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
     let chat = msg["chat"]["id"].as_i64().unwrap_or(0);
@@ -396,6 +396,10 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
         let _ = app.bot.send(chat, "Bu bot shaxsiy.", None).await;
         return Ok(());
     }
+    // Egasi cookies.txt yuborsa — saqlanadi va yt-dlp shundan foydalanadi.
+    if let Some(d) = msg["document"].as_object().filter(|_| msg["document"]["file_name"].as_str().map(|n| n.to_ascii_lowercase().ends_with(".txt")).unwrap_or(false)) {
+        return save_cookies(app, chat, msg["message_id"].as_i64().unwrap_or(0), d.get("file_id").and_then(|v| v.as_str()).unwrap_or(""), d.get("file_size").and_then(|v| v.as_u64()).unwrap_or(0)).await;
+    }
     if is_media {
         return Ok(()); // egasining o'z yuborgan fayli (akkaunt orqali kelgan nusxa ham) — javob kerak emas
     }
@@ -411,6 +415,22 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
             app.bot.send(chat, &t, None).await?;
             return Ok(());
         }
+        "/cookies" => {
+            let t = match dl::cookie_file(&app.cfg).and_then(|p| std::fs::read_to_string(p).ok()) {
+                Some(txt) => match dl::check_cookies(&txt) {
+                    Some((n, auth)) => format!("🍪 Cookie bor: {n} ta{}", if auth { " (akkauntga kirilgan)" } else { " (kirish cookie'lari YO'Q)" }),
+                    None => "🍪 Fayl bor, lekin format noto'g'ri.".to_string(),
+                },
+                None => "🍪 Cookie yo'q. cookies.txt faylini shu chatga hujjat qilib yuboring.".to_string(),
+            };
+            app.bot.send(chat, &t, None).await?;
+            return Ok(());
+        }
+        "/cookies_del" => {
+            let _ = std::fs::remove_file(format!("{}/cookies.txt", app.cfg.data_dir));
+            app.bot.send(chat, "🍪 Cookie o'chirildi.", None).await?;
+            return Ok(());
+        }
         "/cancel" => {
             let id: i64 = text.split_whitespace().nth(1).and_then(|v| v.trim_start_matches('#').parse().ok()).unwrap_or(0);
             let ok = id > 0 && db::job_cancel(&app.db, id).await;
@@ -423,6 +443,36 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
         return handle_url(app, chat, url).await;
     }
     app.bot.send(chat, HELP, None).await?;
+    Ok(())
+}
+
+/// UZ: Egasi yuborgan cookies.txt ni yuklab, tekshirib, `{DATA_DIR}/cookies.txt` ga saqlaydi. EN: downloads, validates and stores the cookies.txt sent by the owner.
+async fn save_cookies(app: &Arc<App>, chat: i64, mid: i64, file_id: &str, size: u64) -> Result<()> {
+    if size > 2_000_000 {
+        app.bot.send(chat, "❌ Fayl juda katta (cookies.txt 2 MB dan kichik bo'ladi).", None).await?;
+        return Ok(());
+    }
+    let info = app.bot.call("getFile", json!({"file_id": file_id})).await?;
+    let path = info["file_path"].as_str().unwrap_or("");
+    let url = format!("https://api.telegram.org/file/bot{}/{path}", app.cfg.bot_token);
+    let txt = app.bot.http.get(url).send().await?.text().await?;
+    match dl::check_cookies(&txt) {
+        None => {
+            app.bot.send(chat, "❌ Bu cookies.txt (Netscape) formatiga o'xshamaydi. Kengaytma yoki ilovadan olingan faylni yuboring.", None).await?;
+        }
+        Some((n, auth)) => {
+            let dst = format!("{}/cookies.txt", app.cfg.data_dir);
+            std::fs::write(&dst, txt)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o600));
+            }
+            app.bot.send(chat, &format!("🍪 Cookie saqlandi: {n} ta{}. Endi YouTube havolasini yuboring.", if auth { "" } else { "\n⚠️ Kirish cookie'lari topilmadi — akkauntga kirilmagan bo'lishi mumkin." }), None).await?;
+        }
+    }
+    // Xavfsizlik: cookie fayli chatda qolmasin.
+    let _ = app.bot.call("deleteMessage", json!({"chat_id": chat, "message_id": mid})).await;
     Ok(())
 }
 

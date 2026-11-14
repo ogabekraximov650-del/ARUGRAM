@@ -122,10 +122,40 @@ pub fn safe_name(title: &str, ext: &str) -> String {
     format!("{}.{ext}", if t.is_empty() { "video" } else { &t })
 }
 
+/// UZ: cookies fayli: `COOKIES` muhit o'zgaruvchisi yoki botga yuborilgan `{DATA_DIR}/cookies.txt`. EN: cookies file from env or the one uploaded to the bot.
+pub fn cookie_file(cfg: &Cfg) -> Option<String> {
+    if let Some(c) = &cfg.cookies {
+        return Some(c.clone());
+    }
+    let p = format!("{}/cookies.txt", cfg.data_dir);
+    Path::new(&p).is_file().then_some(p)
+}
+
+/// UZ: Netscape cookies matnini tekshiradi: (cookie soni, kirish cookie'lari bormi). EN: validates Netscape text: (count, has auth cookies).
+pub fn check_cookies(text: &str) -> Option<(usize, bool)> {
+    let mut n = 0;
+    let mut auth = false;
+    for l in text.lines() {
+        let l = l.trim_start_matches("#HttpOnly_");
+        if l.starts_with('#') || l.trim().is_empty() {
+            continue;
+        }
+        let f: Vec<&str> = l.split('\t').collect();
+        if f.len() < 7 {
+            return None;
+        }
+        n += 1;
+        if ["SAPISID", "__Secure-3PAPISID", "SID", "__Secure-3PSID", "LOGIN_INFO"].contains(&f[5]) {
+            auth = true;
+        }
+    }
+    (n > 0).then_some((n, auth))
+}
+
 fn base(cfg: &Cfg) -> Command {
     let mut c = Command::new(&cfg.ytdlp);
     c.arg("--no-playlist").arg("--no-warnings").arg("--no-colors").arg("--no-part");
-    if let Some(ck) = &cfg.cookies {
+    if let Some(ck) = cookie_file(cfg) {
         c.arg("--cookies").arg(ck);
     }
     c.kill_on_drop(true);
@@ -649,6 +679,15 @@ mod tests {
         assert_eq!(progress_line(" 45.3%| Unknown B/s|Unknown").is_some(), true);
         assert_eq!(progress_line("WARNING: [generic] Falling back"), None);
         assert_eq!(progress_line("[download] Destination: x.mp4"), None);
+    }
+
+    #[test]
+    fn cookies_check() {
+        let ok = "# Netscape HTTP Cookie File\n\n.youtube.com\tTRUE\t/\tTRUE\t1900000000\tSAPISID\tx\n#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tPREF\ty\n";
+        assert_eq!(check_cookies(ok), Some((2, true)));
+        assert_eq!(check_cookies(".youtube.com\tTRUE\t/\tTRUE\t1\tPREF\tx\n"), Some((1, false)));
+        assert_eq!(check_cookies("hello world"), None);
+        assert_eq!(check_cookies("# only comments\n"), None);
     }
 
     #[test]
