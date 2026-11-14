@@ -6080,27 +6080,10 @@ thread_local! {
 }
 
 async fn visible_episode_counts(env: &Env) -> Option<std::collections::HashMap<(i64, i64), i64>> {
-    let now = now_ms();
-    if let Some(v) = VISIBLE_EPS_CACHE.with(|c| {
-        c.borrow().as_ref().filter(|(at, _)| now - *at < FREE_SEASONS_TTL_MS).map(|(_, v)| v.clone())
-    }) {
-        return Some(v);
-    }
-    let parse = |v: &Value| -> std::collections::HashMap<(i64, i64), i64> {
-        v.as_array().map(|a| a.iter()
-            .filter_map(|p| Some(((p.get(0)?.as_i64()?, p.get(1)?.as_i64()?), p.get(2)?.as_i64()?)))
-            .collect())
-            .unwrap_or_default()
-    };
-    if let Ok(req) = Request::new(VISIBLE_EPS_EDGE_URL, Method::Get) {
-        if let Ok(Some(mut hit)) = Cache::default().get(&req, false).await {
-            if let Ok(v) = hit.json::<Value>().await {
-                let m = parse(&v);
-                VISIBLE_EPS_CACHE.with(|c| *c.borrow_mut() = Some((now, m.clone())));
-                return Some(m);
-            }
-        }
-    }
+    // TOPILGAN XATO (poster ustida o'chirilgan qismlar soni qolib ketardi): bu hisob vaqt bo'yicha (2-10 daqiqa) keshlanardi. Qism o'chirilganda
+    // o'zgarish belgisi darhol yangilanadi, ilova ro'yxatni shu zahoti qayta so'raydi va JAVOB TANASI yangi belgi ostida ESKI hisob bilan
+    // keshlanib qolardi (o'chirgandan keyingi `free_seasons_forget` esa kechikardi). Endi hisob keshlanmaydi: javob tanasi o'zi belgi
+    // bo'yicha keshlanadi (jadval o'zgarmaguncha Turso'ga bormaydi), o'zgarganda esa hisob DOIM yangi o'qiladi.
     let res = turso_exec(env,
         "SELECT anime_id, season_id, COUNT(*) AS n FROM epizod_db
           WHERE COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
@@ -6109,19 +6092,10 @@ async fn visible_episode_counts(env: &Env) -> Option<std::collections::HashMap<(
           GROUP BY anime_id, season_id",
         vec![]).await.ok()?;
     let cols = res["cols"].as_array().cloned().unwrap_or_default();
-    let list: Vec<Value> = res["rows"].as_array().cloned().unwrap_or_default().iter()
+    Some(res["rows"].as_array().cloned().unwrap_or_default().iter()
         .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
-        .map(|o| json!([jint(&o, "anime_id"), jint(&o, "season_id"), jint(&o, "n")]))
-        .collect();
-    let m = parse(&json!(list));
-    VISIBLE_EPS_CACHE.with(|c| *c.borrow_mut() = Some((now, m.clone())));
-    if let Ok(mut resp) = Response::from_json(&json!(list)) {
-        let _ = resp.headers_mut().set("Cache-Control", &format!("public, max-age={FREE_SEASONS_EDGE_SECS}"));
-        if let Ok(req) = Request::new(VISIBLE_EPS_EDGE_URL, Method::Get) {
-            let _ = Cache::default().put(&req, resp).await;
-        }
-    }
-    Some(m)
+        .map(|o| ((jint(&o, "anime_id"), jint(&o, "season_id")), jint(&o, "n")))
+        .collect())
 }
 
 /// Bo'lim obyektlaridagi `epizod_count` ni ko'rinadigan qismlar soniga almashtiradi.
@@ -14713,7 +14687,9 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             // (foydalanuvchi talabi). DO'ga yetib bormagan belgilar keyingi
             // murojaatda qayta yuboriladi (`MARK_PENDING`).
             let bucket = if reliable { String::new() } else { format!("-b{}", now_ms() / 600_000) };
-            let etag = format!("W/\"{mark}-{who}{bucket}\"");
+            // `LIST_V` — ro'yxat mantiqi o'zgarganda oshiriladi: eski (xato) keshlangan javoblar va ilovadagi ETag'lar bir zumda yaroqsiz bo'ladi.
+            const LIST_V: &str = "v2";
+            let etag = format!("W/\"{mark}-{who}{bucket}-{LIST_V}\"");
             let sent = req.headers().get("If-None-Match").ok().flatten().unwrap_or_default();
             if !sent.is_empty() && sent.split(',').any(|t| t.trim() == etag) {
                 saved("etag", 1);
@@ -14735,7 +14711,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 .map(|u| (u.host_str().map(String::from).unwrap_or_default(), u.query().map(String::from).unwrap_or_default()))
                 .unwrap_or_default();
             let wkey = if shared { "pub".to_string() } else { who.clone() };
-            let ckey = format!("https://fulutter-chunk-cache.internal/list/{host}{path}?q={query}&w={wkey}&m={mark}{bucket}");
+            let ckey = format!("https://fulutter-chunk-cache.internal/list/{host}{path}?q={query}&w={wkey}&m={mark}{bucket}&v={LIST_V}");
             if cacheable {
                 if let Ok(creq) = Request::new(&ckey, Method::Get) {
                     if let Ok(Some(mut hit)) = Cache::default().get(&creq, false).await {
