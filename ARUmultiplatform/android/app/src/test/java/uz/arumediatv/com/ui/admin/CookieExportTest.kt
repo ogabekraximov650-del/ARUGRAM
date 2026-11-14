@@ -26,7 +26,24 @@ class CookieExportTest {
 
     @Test
     fun kirishBelgisi() {
-        assertTrue(CookieExport.signedIn(listOf(Triple(".youtube.com", "LOGIN_INFO", "x"))))
+        assertTrue(CookieExport.signedIn(listOf(Triple(".instagram.com", "sessionid", "x"))))
         assertFalse(CookieExport.signedIn(listOf(Triple(".youtube.com", "PREF", "x"))))
+    }
+
+    @Test
+    fun chromeKabiKiritish() {
+        assertEquals("https://www.instagram.com/accounts/login/", CookieExport.resolveInput("https://www.instagram.com/accounts/login/"))
+        assertEquals("https://instagram.com", CookieExport.resolveInput("instagram.com"))
+        assertEquals("https://www.google.com/search?q=instagram+kirish", CookieExport.resolveInput("instagram kirish"))
+        assertEquals("https://www.google.com/search?q=youtube", CookieExport.resolveInput("youtube"))
+        assertEquals("https://www.google.com", CookieExport.resolveInput("  "))
+    }
+
+    @Test
+    fun domenlar() {
+        assertEquals("instagram.com", CookieExport.baseDomain("www.instagram.com"))
+        assertEquals("bbc.co.uk", CookieExport.baseDomain("m.bbc.co.uk"))
+        assertEquals(listOf("youtube.com", "google.com"), CookieExport.relatedDomains("m.youtube.com"))
+        assertEquals(listOf("instagram.com"), CookieExport.relatedDomains("www.instagram.com"))
     }
 }

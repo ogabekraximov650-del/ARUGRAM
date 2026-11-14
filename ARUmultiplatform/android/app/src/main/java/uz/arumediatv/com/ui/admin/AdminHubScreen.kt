@@ -72,7 +72,7 @@ enum class AdminSection(val title: String, val hint: String, val icon: ImageVect
     STATS("Umumiy statistika", "Kontent, foydalanuvchilar, ko'rishlar, trafik", AruIcons.Insights),
     ENCODE("Kodlash navbati", "Kodlanayotgan va navbatdagi qismlar, log", AruIcons.Movie),
     APP("Ilova va xavfsizlik", "Eng past versiya, ulanish kaliti", AruIcons.Security),
-    COOKIE("Cookie (YouTube, Instagram)", "Brauzerda kirib cookies.txt olish (yuklash boti uchun)", AruIcons.Security),
+    COOKIE("Brauzer", "Istalgan saytni nom yoki havola bilan oching, kiring va cookies.txt oling (yuklash boti uchun)", AruIcons.Security),
 }
 
 /** Admin paneli (faqat admin build'da va server admin deb belgilagan hisobda). */
