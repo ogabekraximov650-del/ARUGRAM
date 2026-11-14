@@ -15563,6 +15563,8 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                             if let Err(e) = db {
                                 return err500(&format!("O'chirilmadi: {e}"));
                             }
+                            // Bo'lim kartasidagi "N ta qism" hisobi 10 daqiqa keshda turardi: o'chirilgan qismlar poster ustida qolib ketardi.
+                            free_seasons_forget().await;
                             if !er.is_empty() {
                                 let row = row_to_obj(&ec, er[0].as_array().unwrap_or(&vec![]));
                                 b2_delete_epizod_files(&env, &row).await;
@@ -15664,6 +15666,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                             // epizod_db dan o'chirish
                             turso_exec(&env, "DELETE FROM epizod_db WHERE anime_id=? AND season_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
+                            free_seasons_forget().await;
                             // season_db va unga bog'liq yozuvlar
                             let _ = turso_batch(&env, &[
                                 ("DELETE FROM season_janr WHERE anime_id=? AND season_id=?",
@@ -15747,6 +15750,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                         let er = eps["rows"].as_array().cloned().unwrap_or_default();
                         for row in &er { b2_delete_epizod_files(&env, &row_to_obj(&ec, row.as_array().unwrap_or(&vec![]))).await; }
                         turso_exec(&env, "DELETE FROM epizod_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
+                        free_seasons_forget().await;
                         // 2. Barcha bo'lim rasmlarini B2dan o'chirish
                         let ss = turso_exec(&env, "SELECT photo_url FROM season_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
                         let sc = ss["cols"].as_array().cloned().unwrap_or_default();
