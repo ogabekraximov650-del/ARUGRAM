@@ -360,7 +360,9 @@ pub async fn download_file(cfg: &Cfg, url: &str, fmt: &str, dir: &Path, mut prog
     if fmt == "a" {
         c.arg("-x").arg("--audio-format").arg("mp3");
     } else {
-        c.arg("--merge-output-format").arg("mp4");
+        // UZ: H.264 + AAC afzal ko'riladi: YouTube'ning AV1/Opus (mp4 ichida) telefonlarda buzilib (chiziq-chiziq) ko'rinardi. Bo'lmasa — mavjud eng yaxshisi.
+        // EN: prefer H.264 + AAC: YouTube's AV1/Opus inside mp4 plays glitched on many phones; falls back to whatever exists.
+        c.arg("-S").arg("vcodec:h264,acodec:aac").arg("--merge-output-format").arg("mp4");
     }
     c.arg("-q").arg("--progress").arg("--newline").arg("--progress-template").arg("download:%(progress._percent_str)s|%(progress._speed_str)s|%(progress._eta_str)s");
     c.arg("-o").arg(dir.join("%(id)s.%(ext)s")).arg("--").arg(url);
