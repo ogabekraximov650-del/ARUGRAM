@@ -521,9 +521,9 @@ pub fn free_bytes(dir: &Path) -> Option<u64> {
 pub const PART_LIMIT: u64 = 49_900_000;
 /// Bo'lishda maqsad: qismlar 45–50 MB oralig'ida chiqishi uchun chegaraga yaqin (kesish kalit kadrda bo'lgani uchun odatda 45–48,5 MB).
 pub const PART_TARGET: u64 = 48_500_000;
-/// UZ: Akkaunt orqali yuboriladigan qism chegarasi (Telegram 2 GB) va maqsad — 2 GB dan katta video moov jadvali bo'yicha shunday qismlarga bo'linadi. EN: per-part limit/target for the account (2 GB) upload of videos larger than 2 GB.
-pub const ACC_LIMIT: u64 = 1_990_000_000;
-pub const ACC_TARGET: u64 = 1_900_000_000;
+/// UZ: Akkaunt orqali yuboriladigan qism chegarasi (Telegram 2 GB = 2 097 152 000 bayt) va maqsad. Video imkon qadar KATTA qismlarga bo'linadi (har qism ~2 GB, oxirgisi qoldiq): 5 GB -> 2 + 2 + 1 GB. EN: per-part limit/target for the account (2 GB) upload of videos larger than 2 GB.
+pub const ACC_LIMIT: u64 = 2_090_000_000;
+pub const ACC_TARGET: u64 = 2_060_000_000;
 
 /// Fayl hajmi va davomiyligidan har qism necha soniya bo'lishi kerak (kamida 5 s).
 pub fn seg_secs(size: u64, duration: f64, target: u64) -> u64 {
@@ -647,7 +647,7 @@ pub async fn split_with(path: &Path, dir: &Path, prog: Arc<AtomicU32>, limit: u6
     }
     let mut target = target0;
     let mut last_err = anyhow!("bo'lib bo'lmadi");
-    for attempt in 0..4 {
+    for attempt in 0..if limit > 1_000_000_000 { 8 } else { 4 } {
         let sub = dir.join(format!("s{attempt}"));
         let _ = std::fs::remove_dir_all(&sub);
         std::fs::create_dir_all(&sub)?;
@@ -720,7 +720,8 @@ pub async fn split_with(path: &Path, dir: &Path, prog: Arc<AtomicU32>, limit: u6
         }
         last_err = anyhow!("qism {} dan katta chiqdi (kalit kadrlar siyrak)", human(biggest));
         let _ = std::fs::remove_dir_all(&sub);
-        target = target * 92 / 100; // maqsad kamaytirilib qayta uriniladi
+        // Maqsad kamaytirilib qayta uriniladi: kichik qismlar uchun 8%, ~2 GB li qismlar uchun faqat 1% (qism 2 GB dan ancha kichik bo'lib ketmasin).
+        target = if limit > 1_000_000_000 { target * 99 / 100 } else { target * 92 / 100 };
     }
     Err(last_err)
 }
@@ -825,6 +826,27 @@ mod tests {
             assert!(bytes <= ACC_LIMIT as f64, "qism {bytes} chegaradan katta");
             prev = *t;
         }
+    }
+
+    #[test]
+    fn five_gb_is_two_two_one() {
+        // 5 GB, 1500 s, har soniyada 1 paket (~3,3 MB), har 2 soniyada kalit kadr.
+        let n = 1500usize;
+        let per = 3_333_333u64;
+        let pkts: Vec<Pkt> = (0..n).map(|i| (i as f64, per, i % 2 == 0)).collect();
+        let total = per * n as u64;
+        let cuts = plan_cuts(&pkts, total, ACC_TARGET).unwrap();
+        assert_eq!(cuts.len(), 2, "5 GB -> 3 qism bo'lishi kerak: {cuts:?}");
+        let mut prev = 0.0;
+        let mut sizes = vec![];
+        for t in cuts.iter().chain(std::iter::once(&(n as f64))) {
+            sizes.push(((t - prev) * per as f64) as u64);
+            prev = *t;
+        }
+        // VAQT bo'yicha kesish: qismlar 2 GB ga juda yaqin (2,0-2,09 GB), oxirgisi qoldiq (~0,9 GB).
+        assert!(sizes[0] > 2_000_000_000 && sizes[0] <= ACC_LIMIT, "{sizes:?}");
+        assert!(sizes[1] > 2_000_000_000 && sizes[1] <= ACC_LIMIT, "{sizes:?}");
+        assert!(sizes[2] > 800_000_000 && sizes[2] < 1_000_000_000, "{sizes:?}");
     }
 
     #[test]

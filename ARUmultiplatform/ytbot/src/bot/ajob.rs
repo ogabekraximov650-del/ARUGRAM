@@ -61,7 +61,7 @@ async fn run(http: &reqwest::Client, cb: &str, job: &str, tok: &str, info: &Valu
         std::fs::write(&p, t)?;
         cookies = Some(p);
     }
-    let cfg = Cfg { bot_token: info["bot_token"].as_str().unwrap_or("").to_string(), data_dir: data_dir.clone(), ytdlp: "yt-dlp".into(), cookies, owner_env: None, api_id: None, public_url: None, webhook_secret: String::new(), port: 0, gh_repo: None };
+    let cfg = Cfg { bot_token: info["bot_token"].as_str().unwrap_or("").to_string(), data_dir: data_dir.clone(), ytdlp: "yt-dlp".into(), cookies, owner_env: None, api_id: std::env::var("API_ID").ok().and_then(|v| v.trim().parse().ok()), public_url: None, webhook_secret: String::new(), port: 0, gh_repo: None };
     let t80: String = title.chars().take(80).collect();
 
     // 1) Yuklash. To'g'ridan-to'g'ri havolalar bo'lsa (masalan Rumble) — shu fayl havolasi.
@@ -86,6 +86,42 @@ async fn run(http: &reqwest::Client, cb: &str, job: &str, tok: &str, info: &Valu
     p1.abort();
     let path = path?;
     let size = std::fs::metadata(&path)?.len();
+
+    // 2*) Akkaunt (MTProto) bor bo'lsa: butun fayl (<= ~2 GB) yoki ~2 GB li eng katta qismlar (5 GB -> 2 + 2 + 1) akkaunt orqali bot chatiga yuboriladi; Ample ularni egasiga nusxalaydi.
+    if size > dl::PART_LIMIT && std::path::Path::new(&format!("{data_dir}/pyro.session")).is_file() {
+        if let Some(acc) = init_account(&cfg).await {
+            let uname = info["bot_username"].as_str().unwrap_or("").to_string();
+            let peer = acc.client.resolve_username(&uname).await.ok().flatten().ok_or_else(|| anyhow!("bot topilmadi: @{uname}"))?;
+            let peer = peer.to_ref().await.map_err(|e| anyhow!("{e}"))?.ok_or_else(|| anyhow!("bot manzili aniqlanmadi"))?;
+            let pct0 = Arc::new(AtomicU32::new(0));
+            let big = if size <= dl::ACC_LIMIT {
+                vec![path.clone()]
+            } else {
+                let (pc, t, sz) = (Arc::clone(&pct0), t80.clone(), dl::human(size));
+                let pp = poster(http.clone(), cb.to_string(), job.to_string(), tok.to_string(), move || format!("✂️ Actions: moov bo'yicha ~2 GB li qismlarga bo'linmoqda ({sz})\n{}\n{t}", bar(pc.load(Ordering::Relaxed) as f64)));
+                let r = dl::split_with(&path, &dir, Arc::clone(&pct0), dl::ACC_LIMIT, dl::ACC_TARGET).await;
+                pp.abort();
+                r?
+            };
+            let n = big.len();
+            for (i, part) in big.iter().enumerate() {
+                let psize = std::fs::metadata(part)?.len();
+                let sent = Arc::new(AtomicU64::new(0));
+                let (s2, t4) = (Arc::clone(&sent), t80.clone());
+                let pp = poster(http.clone(), cb.to_string(), job.to_string(), tok.to_string(), move || {
+                    let s = s2.load(Ordering::Relaxed);
+                    let pc = (s as f64 / psize.max(1) as f64 * 100.0).min(99.0);
+                    let overall = ((i as f64 + pc / 100.0) / n as f64) * 100.0;
+                    format!("📤 Actions: qism {}/{} akkaunt orqali yuborilmoqda\n{}  ({} / {})\nUmumiy: {}\n{t4}", i + 1, n, bar(pc), dl::human(s), dl::human(psize), bar(overall))
+                });
+                let r = acc_send(&acc, peer.clone(), &title, part, is_audio, w as i32, h as i32, &dir, Arc::clone(&sent)).await;
+                pp.abort();
+                r.map_err(|e| anyhow!("{}/{} qism yuborilmadi: {e}", i + 1, n))?;
+                let _ = std::fs::remove_file(part);
+            }
+            return Ok(format!("✅ #{job} tayyor: {t80}\n{}", if n > 1 { format!("{n} qismda (har biri ~2 GB gacha), Actions + akkaunt orqali yuborildi") } else { format!("Bitta fayl ({}), Actions + akkaunt orqali yuborildi", dl::human(size)) }));
+        }
+    }
 
     // 2) Vaqt bo'yicha ~45 MB li qismlar (kalit kadrlarda, qayta kodlamasdan).
     let pct = Arc::new(AtomicU32::new(0));
@@ -117,4 +153,26 @@ async fn run(http: &reqwest::Client, cb: &str, job: &str, tok: &str, info: &Valu
         let _ = std::fs::remove_file(part);
     }
     Ok(format!("✅ #{job} tayyor: {}\n{}", t80, if n > 1 { format!("{n} qismda yuborildi (Actions)") } else { "Actions orqali yuborildi".to_string() }))
+}
+
+/// UZ: faylni akkaunt orqali bot chatiga yuklaydi (thumbnail va foiz bilan). EN: uploads the file to the bot chat through the account (with thumbnail and progress).
+async fn acc_send(acc: &Account, to: PeerRef, title: &str, path: &Path, audio: bool, w: i32, h: i32, dir: &Path, sent: Arc<AtomicU64>) -> Result<()> {
+    let size = std::fs::metadata(path)?.len();
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or(if audio { "mp3" } else { "mp4" }).to_string();
+    let name = dl::safe_name(title, &ext);
+    let dur = dl::probe_duration(path).await.round() as u64;
+    let thumb = if audio { None } else { dl::make_thumb(path, &dir.join("acc_thumb.jpg")).await };
+    let file = tokio::fs::File::open(path).await?;
+    let mut rd = CountRead { inner: file, n: sent };
+    let up = acc.client.upload_stream(&mut rd, size as usize, name).await.map_err(|e| anyhow!("yuklash: {e}"))?;
+    let mime = if audio { "audio/mpeg" } else if ext == "webm" { "video/webm" } else { "video/mp4" };
+    let mut m = InputMessage::new().text(title.chars().take(900).collect::<String>()).document(up).mime_type(mime);
+    if let Some(t) = &thumb {
+        if let Ok(tu) = acc.client.upload_file(t).await {
+            m = m.thumbnail(tu);
+        }
+    }
+    m = if audio { m.attribute(Attribute::Audio { duration: Duration::from_secs(dur), title: None, performer: None }) } else { m.attribute(Attribute::Video { round_message: false, supports_streaming: true, duration: Duration::from_secs(dur), w, h }) };
+    acc.client.send_message(to, m).await.map_err(|e| anyhow!("yuborish: {e}"))?;
+    Ok(())
 }

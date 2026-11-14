@@ -677,7 +677,7 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     if let (Some(acc), false) = (app.acc.as_ref(), is_audio) {
         if let Some(sm) = meta["stream"][&job.fmt].as_object() {
             let ssize = sm.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
-            if ssize < 2_000_000_000 {
+            if ssize < dl::ACC_LIMIT {
                 match stream_via_account(app, acc, job, sm, ssize, w as i32, h as i32, meta["dur"].as_u64().unwrap_or(0)).await {
                     Ok(()) => {
                         let note = if acc.me == owner(app).await { "" } else { "\n(bot nusxalaydi)" };
@@ -744,7 +744,7 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
 
     // 2a) 50 MB dan katta va akkaunt ulangan: butun faylni bitta qilib (2 GB gacha) akkaunt orqali yuborish; xato bo'lsa qismlab yuborishga o'tiladi.
     let size = std::fs::metadata(&path)?.len();
-    if let (Some(acc), true) = (app.acc.as_ref(), size > dl::PART_LIMIT && size < 2_000_000_000) {
+    if let (Some(acc), true) = (app.acc.as_ref(), size > dl::PART_LIMIT && size <= dl::ACC_LIMIT) {
         match send_via_account(app, acc, job, &path, is_audio, w as i32, h as i32, &dir).await {
             Ok(()) => {
                 let note = if acc.me == owner(app).await { "" } else { "\n(bot nusxalaydi)" };
@@ -761,8 +761,8 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     }
 
     // 2c) 2 GB dan katta: moov (paketlar jadvali) bo'yicha qaysi daqiqa necha baytga to'g'ri kelishi aniqlanadi va ~1,9 GB li qismlarga bo'linib, har biri akkaunt orqali yuboriladi.
-    if let (Some(acc), true) = (app.acc.as_ref(), size >= 2_000_000_000) {
-        app.bot.edit(job.chat_id, job.status_msg, &format!("✂️ #{} {} — 2 GB dan katta: moov jadvali bo'yicha vaqt bo'yicha qismlanmoqda…", job.id, dl::human(size)), None).await;
+    if let (Some(acc), true) = (app.acc.as_ref(), size > dl::ACC_LIMIT) {
+        app.bot.edit(job.chat_id, job.status_msg, &format!("✂️ #{} {} — 2 GB dan katta: moov jadvali bo'yicha eng katta qismlarga (~2 GB) bo'linmoqda…", job.id, dl::human(size)), None).await;
         let pct = Arc::new(AtomicU32::new(0));
         let big = tokio::select! {
             r = dl::split_with(&path, &dir, Arc::clone(&pct), dl::ACC_LIMIT, dl::ACC_TARGET) => r?,

@@ -157,7 +157,7 @@ pub async fn ajob_info(State(app): State<Arc<App>>, AxPath(job): AxPath<i64>, q:
     let Some(j) = db::job_get(&app.db, job).await else { return StatusCode::NOT_FOUND.into_response() };
     let meta: Value = serde_json::from_str(&j.meta).unwrap_or(json!({}));
     let has_cookies = dl::cookie_file(&app.cfg).is_some();
-    axum::Json(json!({"chat_id": j.chat_id, "title": j.title, "url": j.url, "fmt": j.fmt, "meta": meta, "bot_token": app.cfg.bot_token, "cookies": has_cookies})).into_response()
+    axum::Json(json!({"chat_id": j.chat_id, "title": j.title, "url": j.url, "fmt": j.fmt, "meta": meta, "bot_token": app.cfg.bot_token, "bot_username": app.bot_username, "cookies": has_cookies})).into_response()
 }
 
 /// GET /ack/{job}?tok= — cookies.txt (GitHub'ga saqlanmaydi, faqat ish davomida olinadi).

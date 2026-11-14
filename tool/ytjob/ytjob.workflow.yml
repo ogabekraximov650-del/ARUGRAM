@@ -20,6 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 350
     steps:
+      - uses: actions/checkout@v7
       - name: Asboblar (ffmpeg, yt-dlp)
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
@@ -32,7 +33,13 @@ jobs:
           JOB: ${{ inputs.job }}
           ETOK: ${{ inputs.etok }}
           K: ${{ secrets.ENCODE_TOKEN }}
+          API_ID: ${{ secrets.TG_API_ID }}
         run: |
+          # Telegram akkaunt sessiyasi (shifrlangan session.enc) — 2 GB gacha fayl yuborish uchun; bo'lmasa Bot API (45 MB qismlar).
+          mkdir -p adata
+          if [ -f tool/encode/session.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out adata/pyro.session || rm -f adata/pyro.session
+          fi
           # Kalit shifrlangan keladi (repo ochiq bo'lsa ham ko'rinmaydi): ENCODE_TOKEN bilan ochamiz va logda yashiramiz.
           TOK=$(printf '%s' "$ETOK" | openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -a -A -pass env:K)
           echo "::add-mask::$TOK"
