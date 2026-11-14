@@ -247,7 +247,7 @@ fn pct(s: &str) -> String {
 }
 
 /// Matnni `curl` bilan oladi (Cloudflare uni oddiy brauzerdek qabul qiladi); bo'lmasa o'zimizning HTTP mijoz.
-async fn fetch_text(url: &str) -> Result<String> {
+pub async fn fetch_text(url: &str) -> Result<String> {
     if let Ok(o) = Command::new("curl").args(["-sL", "-m", "30", "-A", UA]).arg(url).output().await {
         if o.status.success() && !o.stdout.is_empty() {
             return Ok(String::from_utf8_lossy(&o.stdout).to_string());

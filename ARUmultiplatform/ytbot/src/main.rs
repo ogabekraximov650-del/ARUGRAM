@@ -5,6 +5,7 @@
 mod bot;
 mod db;
 mod dl;
+mod pages;
 
 use anyhow::Result;
 use std::sync::Arc;

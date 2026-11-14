@@ -1,5 +1,5 @@
 // UZ: bot mantig'i: Bot API (webhook yoki long polling), navbat ishchisi, video ~45 MB li qismlarga bo'linib yuboriladi. EN: bot logic: Bot API, queue worker, video sent in ~45 MB parts.
-use crate::{db, dl, Cfg};
+use crate::{db, dl, pages, Cfg};
 use anyhow::{anyhow, Result};
 use grammers_client::message::InputMessage;
 use grammers_client::{media::Attribute, Client};
@@ -111,6 +111,48 @@ impl Bot {
                     match wait {
                         Some(s) if attempt < 2 => tokio::time::sleep(Duration::from_secs(s.min(120) + 1)).await,
                         _ if attempt < 2 && !last.to_string().contains("too big") => tokio::time::sleep(Duration::from_secs(3)).await,
+                        _ => break,
+                    }
+                }
+                Err(e) => {
+                    last = anyhow!("tarmoq: {e}");
+                    tokio::time::sleep(Duration::from_secs(3 * (attempt as u64 + 1))).await;
+                }
+            }
+        }
+        Err(last)
+    }
+    /// UZ: Hujjat (PDF) yuboradi; yuborilgan baytlar `sent` ga yoziladi. EN: sends a document (PDF), progress in `sent`.
+    async fn send_document(&self, chat: i64, path: &Path, caption: &str, sent: Arc<AtomicU64>) -> Result<()> {
+        use futures_util::StreamExt;
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("fayl.pdf").to_string();
+        let len = tokio::fs::metadata(path).await?.len();
+        let mut last = anyhow!("yuborilmadi");
+        for attempt in 0..3 {
+            sent.store(0, Ordering::Relaxed);
+            let file = tokio::fs::File::open(path).await?;
+            let counter = Arc::clone(&sent);
+            let stream = tokio_util::io::ReaderStream::new(file).map(move |chunk| {
+                if let Ok(b) = &chunk {
+                    counter.fetch_add(b.len() as u64, Ordering::Relaxed);
+                }
+                chunk
+            });
+            let form = reqwest::multipart::Form::new()
+                .text("chat_id", chat.to_string())
+                .text("caption", caption.chars().take(1000).collect::<String>())
+                .part("document", reqwest::multipart::Part::stream_with_length(reqwest::Body::wrap_stream(stream), len).file_name(name.clone()).mime_str("application/pdf")?);
+            match self.up.post(format!("{}/sendDocument", self.base)).multipart(form).send().await {
+                Ok(resp) => {
+                    let r: Value = resp.json().await.unwrap_or(json!({}));
+                    if r["ok"].as_bool() == Some(true) {
+                        sent.store(len, Ordering::Relaxed);
+                        return Ok(());
+                    }
+                    last = anyhow!("{}", r["description"].as_str().unwrap_or("Bot API xatosi"));
+                    match r["parameters"]["retry_after"].as_u64() {
+                        Some(s) if attempt < 2 => tokio::time::sleep(Duration::from_secs(s.min(120) + 1)).await,
+                        _ if attempt < 2 => tokio::time::sleep(Duration::from_secs(3)).await,
                         _ => break,
                     }
                 }
@@ -243,6 +285,8 @@ pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
     let me = bot.call("getMe", json!({})).await?;
     let username = me["username"].as_str().unwrap_or("").to_string();
     eprintln!("bot: @{username}");
+    // UZ: oldingi ishdan qolgan vaqtinchalik fayllar diskni to'ldirmasin. EN: drop leftovers of interrupted jobs.
+    let _ = std::fs::remove_dir_all(format!("{}/tmp", cfg.data_dir));
     let acc = init_account(&cfg).await;
     let app = Arc::new(App { cfg, db: conn, bot, acc, bot_username: username, peer: Mutex::new(None) });
     let w = Arc::clone(&app);
@@ -387,6 +431,19 @@ async fn handle_url(app: &Arc<App>, chat: i64, url: &str) -> Result<()> {
     let info = match dl::probe(&app.cfg, url).await {
         Ok(i) => i,
         Err(e) => {
+            // UZ: video topilmadi — sahifadagi rasmlarni PDF qilishni taklif qilamiz (YouTube/Rumble xatolari bundan mustasno).
+            // EN: no video found — offer to turn the page images into a PDF (except YouTube/Rumble errors).
+            let host = url.split('/').nth(2).unwrap_or("").to_ascii_lowercase();
+            let video_site = ["youtube.com", "youtu.be", "rumble.com"].iter().any(|h| host.ends_with(h));
+            if !video_site {
+                if let Ok((title, imgs)) = pages::find_images(url).await {
+                    let meta = json!({"imgs": imgs, "referer": url});
+                    let id = db::job_new(&app.db, chat, url, &title, &meta.to_string()).await?;
+                    let kb = json!({"inline_keyboard": [[{"text": format!("📄 PDF qilish ({} rasm)", imgs.len()), "callback_data": format!("q:{id}:pdf")}, {"text": "✖️ Bekor", "callback_data": format!("x:{id}")}]]});
+                    app.bot.edit(chat, st, &format!("🖼 {}\n\nVideo topilmadi, lekin sahifada {} ta rasm bor. PDF qilaymi?", title.chars().take(200).collect::<String>(), imgs.len()), Some(kb)).await;
+                    return Ok(());
+                }
+            }
             app.bot.edit(chat, st, &format!("❌ {e}"), None).await;
             return Ok(());
         }
@@ -502,8 +559,52 @@ async fn cancelled(app: &App, id: i64) {
     }
 }
 
+/// UZ: Sahifa rasmlarini yuklab PDF qiladi va yuboradi. EN: downloads the page images, builds PDF(s) and sends them.
+async fn run_pdf(app: &Arc<App>, job: &db::Job, meta: &Value) -> Result<()> {
+    let urls: Vec<String> = meta["imgs"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
+    let referer = meta["referer"].as_str().unwrap_or(&job.url).to_string();
+    let title: String = job.title.chars().take(100).collect();
+    let dir = std::path::PathBuf::from(format!("{}/tmp/{}", app.cfg.data_dir, job.id));
+    let name = dl::safe_name(&job.title, "pdf");
+    let name = name.trim_end_matches(".pdf").to_string();
+    let last = std::sync::Mutex::new(std::time::Instant::now() - Duration::from_secs(10));
+    let (a2, chat, mid, jid, t80) = (Arc::clone(app), job.chat_id, job.status_msg, job.id, job.title.chars().take(80).collect::<String>());
+    let files = tokio::select! {
+        r = pages::build_pdfs(&urls, &referer, &dir, &name, |i, n| {
+            let mut l = last.lock().unwrap();
+            if l.elapsed() >= Duration::from_secs(3) {
+                *l = std::time::Instant::now();
+                let (a3, t) = (Arc::clone(&a2), format!("🖼 #{jid} rasmlar yuklanmoqda: {i}/{n}\n{}\n{t80}", bar(i as f64 / n.max(1) as f64 * 100.0)));
+                tokio::spawn(async move { a3.bot.edit(chat, mid, &t, None).await; });
+            }
+        }) => r?,
+        _ = cancelled(app, job.id) => return Err(anyhow!("bekor qilindi")),
+    };
+    let n = files.len();
+    for (i, f) in files.iter().enumerate() {
+        if db::job_state(&app.db, job.id).await == "cancelled" {
+            return Err(anyhow!("bekor qilindi"));
+        }
+        let size = std::fs::metadata(f)?.len();
+        app.bot.edit(job.chat_id, job.status_msg, &format!("📤 #{} PDF {}/{} yuborilmoqda ({})…\n{title}", job.id, i + 1, n, dl::human(size)), None).await;
+        let caption = if n > 1 { format!("{} ({}/{})", job.title.chars().take(900).collect::<String>(), i + 1, n) } else { job.title.chars().take(900).collect::<String>() };
+        let sent = Arc::new(AtomicU64::new(0));
+        let r = tokio::select! {
+            r = app.bot.send_document(job.chat_id, f, &caption, Arc::clone(&sent)) => r,
+            _ = cancelled(app, job.id) => Err(anyhow!("bekor qilindi")),
+        };
+        r.map_err(|e| anyhow!("{}/{} PDF yuborilmadi: {e}", i + 1, n))?;
+        let _ = std::fs::remove_file(f);
+    }
+    app.bot.edit(job.chat_id, job.status_msg, &format!("✅ #{} tayyor: {title}{}", job.id, if n > 1 { format!("\n{n} ta PDF yuborildi") } else { String::new() }), None).await;
+    Ok(())
+}
+
 async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     let meta: Value = serde_json::from_str(&job.meta).unwrap_or(json!({}));
+    if job.fmt == "pdf" {
+        return run_pdf(app, job, &meta).await;
+    }
     let (w, h) = (meta["w"].as_i64().unwrap_or(0), meta["h"].as_i64().unwrap_or(0));
     let is_audio = job.fmt == "a";
     let title: String = job.title.chars().take(100).collect();
