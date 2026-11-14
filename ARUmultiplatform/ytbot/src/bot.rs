@@ -474,13 +474,15 @@ async fn save_cookies(app: &Arc<App>, chat: i64, mid: i64, file_id: &str, size: 
         }
         Some((n, auth)) => {
             let dst = format!("{}/cookies.txt", app.cfg.data_dir);
-            std::fs::write(&dst, dl::normalize_cookies(&txt))?;
+            // Yangi fayl mavjudiga QO'SHILADI (YouTube va Instagram birga); bir xil cookie bo'lsa yangisi ustun.
+            let old = std::fs::read_to_string(&dst).unwrap_or_default();
+            std::fs::write(&dst, dl::normalize_cookies(&dl::merge_cookies(&old, &txt)))?;
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 let _ = std::fs::set_permissions(&dst, std::fs::Permissions::from_mode(0o600));
             }
-            app.bot.send(chat, &format!("🍪 Cookie saqlandi: {n} ta{}. Endi YouTube havolasini yuboring.", if auth { "" } else { "\n⚠️ Kirish cookie'lari topilmadi — akkauntga kirilmagan bo'lishi mumkin." }), None).await?;
+            app.bot.send(chat, &format!("🍪 Cookie saqlandi (yangi fayl: {n} ta cookie{}). Endi havolani yuboring.", if auth { "" } else { "\n⚠️ Kirish cookie'lari topilmadi — akkauntga kirilmagan bo'lishi mumkin." }), None).await?;
         }
     }
     // Xavfsizlik: cookie fayli chatda qolmasin.

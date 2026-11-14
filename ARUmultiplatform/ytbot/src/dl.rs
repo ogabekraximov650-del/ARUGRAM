@@ -152,6 +152,32 @@ pub fn normalize_cookies(text: &str) -> String {
     out
 }
 
+/// UZ: ikki cookies faylini birlashtiradi (YouTube + Instagram bitta faylda): bir xil (domen, nom) bo'lsa YANGISI ustun. EN: merges two cookie files (YouTube + Instagram in one); the NEW entry wins for the same (domain, name).
+pub fn merge_cookies(old: &str, new: &str) -> String {
+    let mut order: Vec<String> = Vec::new();
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for txt in [old, new] {
+        for l in txt.lines() {
+            let body = l.strip_prefix("#HttpOnly_").unwrap_or(l);
+            let f: Vec<&str> = body.split('\t').collect();
+            if body.starts_with('#') || f.len() < 7 {
+                continue;
+            }
+            let key = format!("{}|{}", f[0], f[5]);
+            if !map.contains_key(&key) {
+                order.push(key.clone());
+            }
+            map.insert(key, l.to_string());
+        }
+    }
+    let mut out = String::from("# Netscape HTTP Cookie File\n\n");
+    for k in order {
+        out.push_str(&map[&k]);
+        out.push('\n');
+    }
+    out
+}
+
 /// UZ: Netscape cookies matnini tekshiradi: (cookie soni, kirish cookie'lari bormi). EN: validates Netscape text: (count, has auth cookies).
 pub fn check_cookies(text: &str) -> Option<(usize, bool)> {
     let mut n = 0;
@@ -166,7 +192,7 @@ pub fn check_cookies(text: &str) -> Option<(usize, bool)> {
             return None;
         }
         n += 1;
-        if ["SAPISID", "__Secure-3PAPISID", "SID", "__Secure-3PSID", "LOGIN_INFO"].contains(&f[5]) {
+        if ["SAPISID", "__Secure-3PAPISID", "SID", "__Secure-3PSID", "LOGIN_INFO", "sessionid", "ds_user_id"].contains(&f[5]) {
             auth = true;
         }
     }
@@ -810,6 +836,15 @@ mod tests {
         assert_eq!(progress_line(" 45.3%| Unknown B/s|Unknown").is_some(), true);
         assert_eq!(progress_line("WARNING: [generic] Falling back"), None);
         assert_eq!(progress_line("[download] Destination: x.mp4"), None);
+    }
+
+    #[test]
+    fn merge_cookies_keeps_both_sites() {
+        let yt = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1\tSID\told\n";
+        let ig = "# Netscape HTTP Cookie File\n.instagram.com\tTRUE\t/\tTRUE\t1\tsessionid\tabc\n.youtube.com\tTRUE\t/\tTRUE\t1\tSID\tnew\n";
+        let m = merge_cookies(yt, ig);
+        assert!(m.contains("sessionid\tabc") && m.contains("SID\tnew") && !m.contains("SID\told"));
+        assert_eq!(check_cookies(&m), Some((2, true)));
     }
 
     #[test]

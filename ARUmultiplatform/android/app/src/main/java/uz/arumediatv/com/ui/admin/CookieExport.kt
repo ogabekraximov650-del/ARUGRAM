@@ -41,7 +41,7 @@ import java.io.File
  */
 object CookieExport {
     /** UZ: Kirish belgisi bo'ladigan cookie'lar (hech biri bo'lmasa — akkauntga kirilmagan). EN: auth cookies; none present means not signed in. */
-    val AUTH_NAMES = setOf("SAPISID", "__Secure-3PAPISID", "SID", "__Secure-3PSID", "LOGIN_INFO")
+    val AUTH_NAMES = setOf("SAPISID", "__Secure-3PAPISID", "SID", "__Secure-3PSID", "LOGIN_INFO", "sessionid", "ds_user_id")
 
     /** `("a=b; c=d")` ni (nom, qiymat) juftlariga ajratadi. */
     fun parse(header: String?): List<Pair<String, String>> =
@@ -66,30 +66,37 @@ object CookieExport {
 
     fun signedIn(cookies: List<Triple<String, String, String>>): Boolean = cookies.any { it.second in AUTH_NAMES }
 
-    private val SOURCES = listOf(
-        "https://www.youtube.com" to ".youtube.com",
-        "https://youtube.com" to ".youtube.com",
-        "https://accounts.google.com" to ".google.com",
-        "https://www.google.com" to ".google.com",
-        "https://google.com" to ".google.com",
-    )
+    /** UZ: Qaysi sayt uchun cookie olinadi (kirish sahifasi va cookie manbalari). EN: which site the cookies are for. */
+    enum class Site(val label: String, val start: String, val sources: List<Pair<String, String>>) {
+        YOUTUBE(
+            "YouTube", "https://accounts.google.com/ServiceLogin?service=youtube&hl=en&continue=https%3A%2F%2Fwww.youtube.com%2F",
+            listOf(
+                "https://www.youtube.com" to ".youtube.com", "https://youtube.com" to ".youtube.com",
+                "https://accounts.google.com" to ".google.com", "https://www.google.com" to ".google.com", "https://google.com" to ".google.com",
+            ),
+        ),
+        INSTAGRAM(
+            "Instagram", "https://www.instagram.com/accounts/login/",
+            listOf("https://www.instagram.com" to ".instagram.com", "https://instagram.com" to ".instagram.com"),
+        ),
+    }
 
-    fun collect(): List<Triple<String, String, String>> {
+    fun collect(site: Site = Site.YOUTUBE): List<Triple<String, String, String>> {
         val cm = CookieManager.getInstance()
         cm.flush()
-        return SOURCES.flatMap { (url, domain) -> parse(cm.getCookie(url)).map { (n, v) -> Triple(domain, n, v) } }
+        return site.sources.flatMap { (url, domain) -> parse(cm.getCookie(url)).map { (n, v) -> Triple(domain, n, v) } }
     }
 
     /** Chrome (Android) ko'rinishidagi User-Agent: "; wv" belgisiz, Google kirishni kamroq bloklaydi. */
     const val UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36"
-    const val START = "https://accounts.google.com/ServiceLogin?service=youtube&hl=en&continue=https%3A%2F%2Fwww.youtube.com%2F"
 }
 
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun AdminCookieScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
-    var msg by remember { mutableStateOf("Alohida YouTube akkaunt bilan kiring (asosiy akkauntingiz bilan EMAS), so'ng pastdagi tugmani bosing.") }
+    var site by remember { mutableStateOf(CookieExport.Site.YOUTUBE) }
+    var msg by remember { mutableStateOf("Alohida akkaunt bilan kiring (asosiy akkauntingiz bilan EMAS), so'ng pastdagi tugmani bosing.") }
     // Har safar toza sessiya: eski cookie'lar aralashmasin; chiqqanda ham tozalanadi (serverda sessiya o'chmaydi, fayl yaroqli qoladi).
     val web = remember {
         CookieManager.getInstance().removeAllCookies(null)
@@ -101,7 +108,7 @@ fun AdminCookieScreen(onBack: () -> Unit) {
             CookieManager.getInstance().setAcceptCookie(true)
             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
             webViewClient = WebViewClient()
-            loadUrl(CookieExport.START)
+            loadUrl(CookieExport.Site.YOUTUBE.start)
         }
     }
     DisposableEffect(Unit) {
@@ -110,17 +117,35 @@ fun AdminCookieScreen(onBack: () -> Unit) {
             CookieManager.getInstance().removeAllCookies(null)
         }
     }
-    OverlayScaffold("YouTube cookie", onBack) {
+    OverlayScaffold("Cookie olish", onBack) {
         Column(Modifier.fillMaxSize()) {
+            androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                CookieExport.Site.entries.forEach { st ->
+                    val on = st == site
+                    Box(
+                        Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (on) AruColors.Accent2 else AruColors.CardAlt)
+                            .clickable {
+                                if (!on) {
+                                    // Boshqa saytga o'tishda toza sessiya: cookie'lar aralashmasin.
+                                    CookieManager.getInstance().removeAllCookies(null)
+                                    site = st
+                                    web.loadUrl(st.start)
+                                    msg = "${st.label}: alohida akkaunt bilan kiring, so'ng pastdagi tugmani bosing."
+                                }
+                            }.padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(st.label, color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
+                }
+            }
             Box(Modifier.weight(1f).fillMaxWidth()) { AndroidView(factory = { web }, modifier = Modifier.fillMaxSize()) }
             Text(msg, color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
             val shape = RoundedCornerShape(16.dp)
             Box(
                 Modifier.padding(start = 16.dp, end = 16.dp, bottom = 16.dp).fillMaxWidth().clip(shape).background(AruColors.Accent2)
                     .clickable {
-                        val cookies = CookieExport.collect()
+                        val cookies = CookieExport.collect(site)
                         if (!CookieExport.signedIn(cookies)) {
-                            msg = "Akkauntga kirilmagan ko'rinadi (kirish cookie'lari yo'q). Avval YouTube'ga kiring."
+                            msg = "Akkauntga kirilmagan ko'rinadi (kirish cookie'lari yo'q). Avval ${site.label}'ga kiring."
                             return@clickable
                         }
                         try {
