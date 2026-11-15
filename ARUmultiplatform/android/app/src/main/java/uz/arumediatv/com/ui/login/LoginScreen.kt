@@ -117,7 +117,8 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
     }
 
     suspend fun finish() {
-        if (auth.isLoggedIn) {
+        // Hisob bor, lekin Telegram ulanmagan (Google bilan kirgan) — pastda Telegram'ni shu hisobga ULASH ketadi.
+        if (auth.isLoggedIn && (auth.user.value?.telegramId ?: 0L) != 0L) {
             onDone()
             return
         }
@@ -147,6 +148,12 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
                     return
                 }
                 LoginStatus.EXPIRED -> break
+                LoginStatus.CONFLICT -> {
+                    busy = false
+                    step = Step.PHONE
+                    error = auth.banMessage.ifEmpty { "Bu Telegram akkaunt boshqa hisobga tegishli" }
+                    return
+                }
                 LoginStatus.BANNED -> {
                     busy = false
                     step = Step.PHONE

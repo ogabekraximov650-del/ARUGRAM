@@ -7421,6 +7421,7 @@ Sabab: jurnal bo'lagi (`db_1_v1`) har yozuvdan keyin butun fayl bo'lib (≤1 MiB
 
 ## Google bilan kirish (2026-11)
 
-- Worker: `POST /api/auth/google` (`id_token` -> `google_sub` bo'yicha FAQAT ulangan hisob topiladi, yangi hisob yaratilmaydi; ulanmagan bo'lsa 404), `POST /api/auth/google/link` (mavjud hisobga ulash). Token `oauth2.googleapis.com/tokeninfo` bilan tekshiriladi: `aud` = Web Client ID, `iss`, `exp`, `email_verified`. `users_db.google_sub`, `email` (migratsiya `mig_users_google`). Google hisob admin bo'lmaydi (admin — Telegram ID bo'yicha).
+- Worker: `POST /api/auth/google` (`id_token` -> `google_sub` bo'yicha topiladi yoki yangi hisob yaratiladi), `POST /api/auth/google/link` (mavjud hisobga ulash). Token `oauth2.googleapis.com/tokeninfo` bilan tekshiriladi: `aud` = Web Client ID, `iss`, `exp`, `email_verified`. `users_db.google_sub`, `email` (migratsiya `mig_users_google`). Google hisob admin bo'lmaydi (admin — Telegram ID bo'yicha).
 - Android: `data/GoogleSignIn.kt` (Credential Manager), `AuthService.loginWithGoogle`, LoginScreen'da "Google bilan kirish". Google Cloud'da Android Client ID (paket + SHA-1) bo'lishi shart. Web client secret ishlatilmaydi va saqlanmaydi.
 - Ulash (B variant): Profil -> "Google accountni ulash" (`linkGoogle`), keyin ikkala usul bilan kirish mumkin.
+- Ikki tomonlama ulash: Telegram bilan kirgan -> Profil "Google accountni ulash"; Google bilan kirgan -> Profil "Telegram accountni ulash" (`/api/auth/telegram/start` sessiya bilan `login_tokens.link_user_id` yozadi, bot webhook `users_db.telegram_id` ni shu hisobga qo'yadi; Telegram boshqa hisobga tegishli bo'lsa `conflict`). Ikki alohida hisobni birlashtirish YO'Q.

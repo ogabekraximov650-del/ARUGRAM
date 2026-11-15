@@ -77,7 +77,7 @@ data class AppUser(
 
 data class LoginRequest(val token: String, val deepLink: String, val expiresIn: Int)
 
-enum class LoginStatus { PENDING, OK, EXPIRED, ERROR, BANNED }
+enum class LoginStatus { PENDING, OK, EXPIRED, ERROR, BANNED, CONFLICT }
 
 data class DeviceSession(val id: Long, val device: String, val platform: String, val lastSeen: String, val current: Boolean, val appVersion: String = "", val createdAt: Long = 0, val lastSeenAt: Long = 0)
 
@@ -177,7 +177,8 @@ class AuthService(
     }
 
     suspend fun start(): LoginRequest? = withContext(Dispatchers.IO) {
-        val r = http.callJson("$base/api/auth/telegram/start", "POST", deviceInfo())
+        // Sessiya bor bo'lsa (Google bilan kirgan) — Telegram shu hisobga ulanadi.
+        val r = http.callJson("$base/api/auth/telegram/start", "POST", deviceInfo(), sessionToken)
         val j = r.json ?: return@withContext null
         if (!r.ok) return@withContext null
         val token = j.optString("token")
@@ -203,6 +204,10 @@ class AuthService(
                 }
             }
             "expired" -> LoginStatus.EXPIRED
+            "conflict" -> {
+                banMessage = j.optString("message")
+                LoginStatus.CONFLICT
+            }
             "banned" -> {
                 banMessage = j.optString("message")
                 LoginStatus.BANNED
