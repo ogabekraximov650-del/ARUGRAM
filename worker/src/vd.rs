@@ -358,7 +358,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/selftest" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/move_channel" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/selftest" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
