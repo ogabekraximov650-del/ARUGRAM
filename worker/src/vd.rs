@@ -1838,16 +1838,21 @@ async fn move_channel(env: &Env, from: i64, to: i64, limit: i64) -> Value {
     let mut pending = 0i64;
     let mut errors: Vec<String> = Vec::new();
     let mut budget = limit;
+    // Cloudflare 50 so'rov chegarasi: belgilar BIR so'rovda o'qiladi; Telegram "retry after" bersa shu chaqiruv to'xtaydi.
+    let done_keys: std::collections::HashSet<String> = turso_exec(env, "SELECT cfg_key FROM app_config WHERE cfg_key LIKE ?", vec![TursoArg::text(&format!("chmv:{to}:%"))]).await
+        .map(|r| rows_of(&r).iter().filter_map(|x| x["cfg_key"].as_str().map(String::from)).collect()).unwrap_or_default();
+    let mut retry_after = 0i64;
+    let wait_of = |e: &str| -> i64 { e.split("retry after ").nth(1).and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse().ok()).unwrap_or(0) };
     for (table, idc, msgc) in MOVE_GROUPS {
         let sel = format!("SELECT rowid AS rid, {idc} AS ids, {msgc} AS msgs FROM {table} WHERE COALESCE({idc},'')<>'' AND COALESCE({msgc},'')<>''");
         let Ok(res) = turso_exec(env, &sel, vec![]).await else { continue };
         for row in rows_of(&res) {
             let (rid, old_ids, old_msgs) = (jint(&row, "rid"), row["ids"].as_str().unwrap_or("").to_string(), row["msgs"].as_str().unwrap_or("").to_string());
             let key = format!("chmv:{to}:{table}:{idc}:{rid}");
-            if config_get(env, &key).await.is_some() {
+            if done_keys.contains(&key) {
                 continue;
             }
-            if budget <= 0 {
+            if budget <= 0 || retry_after > 0 {
                 pending += 1;
                 continue;
             }
@@ -1862,7 +1867,9 @@ async fn move_channel(env: &Env, from: i64, to: i64, limit: i64) -> Value {
                         new_msgs.push(m["message_id"].as_i64().unwrap_or(0).to_string());
                     }
                     other => {
-                        errors.push(format!("{table}#{rid}: {}", other.err().map(|e| e.to_string()).unwrap_or_else(|| "javobda file_id yo'q".into())));
+                        let em = other.err().map(|e| e.to_string()).unwrap_or_else(|| "javobda file_id yo'q".into());
+                        retry_after = retry_after.max(wait_of(&em));
+                        errors.push(format!("{table}#{rid}: {em}"));
                         failed = true;
                         break;
                     }
@@ -1873,9 +1880,12 @@ async fn move_channel(env: &Env, from: i64, to: i64, limit: i64) -> Value {
                 continue;
             }
             let upd = format!("UPDATE {table} SET {idc}=?, {msgc}=? WHERE rowid=? AND {msgc}=?");
-            let ok_upd = turso_exec(env, &upd, vec![TursoArg::text(&new_ids.join(",")), TursoArg::text(&new_msgs.join(",")), TursoArg::int(rid), TursoArg::text(&old_msgs)]).await.is_ok();
+            // Yangilash va belgi BIR so'rovda (batch): yarim holat qolmaydi.
+            let ok_upd = turso_batch(env, &[
+                (upd.as_str(), vec![TursoArg::text(&new_ids.join(",")), TursoArg::text(&new_msgs.join(",")), TursoArg::int(rid), TursoArg::text(&old_msgs)]),
+                ("INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, '1')", vec![TursoArg::text(&key)]),
+            ]).await.is_ok();
             if ok_upd {
-                config_put(env, &key, "1").await;
                 moved += 1;
             } else {
                 errors.push(format!("{table}#{rid}: bazani yangilab bo'lmadi"));
@@ -1888,10 +1898,10 @@ async fn move_channel(env: &Env, from: i64, to: i64, limit: i64) -> Value {
         for row in rows_of(&res) {
             let (name, mid) = (row["file_name"].as_str().unwrap_or("").to_string(), jint(&row, "msg_id"));
             let key = format!("chmv:{to}:tg_files:{name}");
-            if config_get(env, &key).await.is_some() {
+            if done_keys.contains(&key) {
                 continue;
             }
-            if budget <= 0 {
+            if budget <= 0 || retry_after > 0 {
                 pending += 1;
                 continue;
             }
@@ -1899,8 +1909,10 @@ async fn move_channel(env: &Env, from: i64, to: i64, limit: i64) -> Value {
             match tg_api(env, "copyMessage", json!({"chat_id": to, "from_chat_id": from, "message_id": mid, "disable_notification": true})).await {
                 Ok(m) if m["message_id"].as_i64().unwrap_or(0) > 0 => {
                     let nm = m["message_id"].as_i64().unwrap_or(0);
-                    if turso_exec(env, "UPDATE tg_files SET msg_id=? WHERE file_name=? AND msg_id=?", vec![TursoArg::int(nm), TursoArg::text(&name), TursoArg::int(mid)]).await.is_ok() {
-                        config_put(env, &key, "1").await;
+                    if turso_batch(env, &[
+                        ("UPDATE tg_files SET msg_id=? WHERE file_name=? AND msg_id=?", vec![TursoArg::int(nm), TursoArg::text(&name), TursoArg::int(mid)]),
+                        ("INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES (?, '1')", vec![TursoArg::text(&key)]),
+                    ]).await.is_ok() {
                         moved += 1;
                     } else {
                         errors.push(format!("tg_files {name}: bazani yangilab bo'lmadi"));
@@ -1908,12 +1920,14 @@ async fn move_channel(env: &Env, from: i64, to: i64, limit: i64) -> Value {
                     }
                 }
                 other => {
-                    errors.push(format!("tg_files {name}: {}", other.err().map(|e| e.to_string()).unwrap_or_else(|| "nusxa olinmadi".into())));
+                    let em = other.err().map(|e| e.to_string()).unwrap_or_else(|| "nusxa olinmadi".into());
+                    retry_after = retry_after.max(wait_of(&em));
+                    errors.push(format!("tg_files {name}: {em}"));
                     pending += 1;
                 }
             }
         }
     }
-    errors.truncate(6);
-    json!({"ok": true, "moved": moved, "remaining": pending, "errors": errors})
+    errors.truncate(4);
+    json!({"ok": true, "moved": moved, "remaining": pending, "retry_after": retry_after, "errors": errors})
 }

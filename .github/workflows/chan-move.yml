@@ -19,7 +19,7 @@ concurrency:
 jobs:
   move:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     environment: secret
     env:
       ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
@@ -33,14 +33,19 @@ jobs:
           echo "Kanal: $FROM -> $TO"
           TOKEN=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
           echo "Tashxis /api/vd/channel:"; curl -sS -m 60 -X POST "$API_BASE/api/vd/channel" -H "X-Encode-Token: $TOKEN" -H 'Content-Type: application/json' -H 'User-Agent: arumediatv-chan-move' -d '{}' | head -c 900; echo
-          for i in $(seq 1 60); do
+          NOPROG=0
+          for i in $(seq 1 120); do
             R=$(curl -sS -m 120 -X POST "$API_BASE/api/vd/move_channel" -H "X-Encode-Token: $TOKEN" -H 'Content-Type: application/json' -H 'User-Agent: arumediatv-chan-move' -d "{\"from\":$FROM,\"to\":$TO,\"limit\":8}" || echo '{}')
             echo "$i: $R" | head -c 700; echo
             OK=$(printf '%s' "$R" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(1 if d.get("ok") else 0)' 2>/dev/null || echo 0)
             if [ "$OK" != "1" ]; then echo "::error::Ko'chirish to'xtadi: javob yuqorida (bot yangi kanalda admin bo'lishi kerak)"; exit 1; fi
             REM=$(printf '%s' "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("remaining",0))')
             MOV=$(printf '%s' "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("moved",0))')
+            WAIT=$(printf '%s' "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("retry_after",0))')
             if [ "$REM" = "0" ]; then echo "Tayyor: hammasi ko'chdi."; exit 0; fi
-            if [ "$MOV" = "0" ]; then echo "::error::Qolgan $REM ta qator ko'chmadi (xatolar yuqorida)"; exit 1; fi
+            # Telegram kanalga ~20 xabar/daqiqa: har chaqiruvdan keyin kutiladi; "retry after" bo'lsa shuncha.
+            if [ "$WAIT" -gt 0 ] 2>/dev/null; then sleep $((WAIT + 2)); NOPROG=0
+            elif [ "$MOV" = "0" ]; then NOPROG=$((NOPROG + 1)); if [ "$NOPROG" -ge 3 ]; then echo "::error::Qolgan $REM ta qator ko'chmadi (xatolar yuqorida)"; exit 1; fi; sleep 10
+            else NOPROG=0; sleep 20; fi
           done
           echo "::error::Takrorlashlar tugadi"; exit 1
