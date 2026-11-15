@@ -4455,6 +4455,8 @@ fn user_public(origin: &str, u: &Value) -> Value {
         // shunchaki ekranni yashiradi — haqiqiy to'siq har bir
         // so'rovda serverda (`is_admin`).
         "is_admin": is_admin(u),
+        // Google akkaunt ulanganmi (profilda "Google accountni ulash" tugmasi shunga qarab ko'rinadi).
+        "google_linked": !u["google_sub"].as_str().unwrap_or("").is_empty(),
         // Ism/username to'ldirilganmi. Yangi hisobga nom
         // AVTOMATIK berilgani uchun bu endi doim 1 — maydon
         // eski ilova versiyalari bilan moslik uchun qoldirilgan.

@@ -31,6 +31,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExitToApp
@@ -154,6 +155,16 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
             Divider2()
             if (u == null) {
                 Tile(Icons.AutoMirrored.Filled.Send, "Telegram orqali kirish", onClick = onBotLogin)
+                Divider2()
+            }
+            if (u != null && !u.googleLinked) {
+                Tile(Icons.Filled.AccountCircle, "Google accountni ulash", onClick = {
+                    scope.launch {
+                        val r = uz.arumediatv.com.data.GoogleSignIn.idToken(ctx)
+                        val err = r.second ?: auth.linkGoogle(r.first.orEmpty())
+                        if (err == null) toast("Google akkaunt ulandi") else if (err.isNotEmpty()) toast(err)
+                    }
+                })
                 Divider2()
             }
             if (!tgState.authorized) {

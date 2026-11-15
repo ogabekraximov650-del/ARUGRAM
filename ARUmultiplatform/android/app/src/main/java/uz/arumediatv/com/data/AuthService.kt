@@ -25,6 +25,7 @@ data class AppUser(
     val hiddenStats: List<String> = emptyList(),
     /** Bepul bo'limlar uchun kanallarga avtomatik obuna ruxsati. */
     val chanConsent: Boolean = false,
+    val googleLinked: Boolean = false,
 ) {
     fun isHidden(key: String): Boolean = key in hiddenStats
 
@@ -54,7 +55,7 @@ data class AppUser(
         .put("id", id).put("telegram_id", telegramId).put("username", username)
         .put("first_name", firstName).put("last_name", lastName).put("photo_url", photoUrl)
         .put("balance", balance).put("profile_done", profileDone).put("is_admin", isAdmin)
-        .put("hidden_stats", JSONArray(hiddenStats)).put("chan_consent", chanConsent)
+        .put("hidden_stats", JSONArray(hiddenStats)).put("chan_consent", chanConsent).put("google_linked", googleLinked)
 
     companion object {
         fun fromJson(j: JSONObject) = AppUser(
@@ -69,6 +70,7 @@ data class AppUser(
             isAdmin = j.optBoolean("is_admin", false),
             hiddenStats = j.optJSONArray("hidden_stats")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
             chanConsent = j.optBoolean("chan_consent", false),
+            googleLinked = j.optBoolean("google_linked", false),
         )
     }
 }
@@ -223,6 +225,16 @@ class AuthService(
         val u = j.optJSONObject("user")
         if (!r.ok || session.isEmpty() || u == null) return@withContext j.optString("error").ifEmpty { "Google orqali kirib bo'lmadi" }
         save(session, AppUser.fromJson(u))
+        null
+    }
+
+    /** Joriy hisobga Google akkauntni ulaydi. `null` — ulandi; aks holda xato matni. */
+    suspend fun linkGoogle(idToken: String): String? = withContext(Dispatchers.IO) {
+        val s = sessionToken ?: return@withContext "Avval hisobga kiring"
+        val r = http.callJson("$base/api/auth/google/link", "POST", JSONObject().put("id_token", idToken), s)
+        if (r.code == 0) return@withContext "Tarmoq xatosi — qaytadan urinib ko'ring"
+        if (!r.ok) return@withContext r.json?.optString("error")?.takeIf { it.isNotEmpty() } ?: "Ulab bo'lmadi (${r.code})"
+        _user.value?.let { save(s, it.copy(googleLinked = true)) }
         null
     }
 
