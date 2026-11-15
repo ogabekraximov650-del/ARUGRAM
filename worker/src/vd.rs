@@ -38,7 +38,7 @@ const PARTS: &str = "vd/c/";
 
 static SCHEMA_OK: AtomicBool = AtomicBool::new(false);
 
-/// Bo'laklar saqlanadigan kanal: `VD_CHANNEL_ID` (deploy `ci/VD_CHANNEL_ID` dan qo'yadi), bo'lmasa umumiy `TG_CHANNEL_ID`.
+/// (2026-11-15: kanal -1004314108992 ga almashtirildi.) Bo'laklar saqlanadigan kanal: `VD_CHANNEL_ID` (deploy `ci/VD_CHANNEL_ID` dan qo'yadi), bo'lmasa umumiy `TG_CHANNEL_ID`.
 pub(crate) fn vd_channel(env: &Env) -> i64 {
     tg_secret(env, "VD_CHANNEL_ID").trim().parse::<i64>().ok().filter(|c| *c != 0).unwrap_or_else(|| tg_channel_id(env))
 }
