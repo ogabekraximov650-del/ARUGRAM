@@ -1607,9 +1607,7 @@ async fn init_db(env: &Env) -> bool {
         let a = turso_exec(env, "ALTER TABLE users_db ADD COLUMN google_sub TEXT DEFAULT ''", vec![]).await.is_ok();
         let b = turso_exec(env, "ALTER TABLE users_db ADD COLUMN email TEXT DEFAULT ''", vec![]).await.is_ok();
         let c = turso_exec(env, "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_gsub ON users_db(google_sub) WHERE google_sub <> ''", vec![]).await.is_ok();
-        // Telegram'ni Google hisobiga ulash: kirish tokeni qaysi hisobga ulash uchun ochilgani.
-        let d = turso_exec(env, "ALTER TABLE login_tokens ADD COLUMN link_user_id INTEGER DEFAULT 0", vec![]).await.is_ok();
-        if a && b && c && d { config_put(env, "mig_users_google", "1").await; }
+        if a && b && c { config_put(env, "mig_users_google", "1").await; }
     }
     // Anime -> tarjimon (2026-11): 0 — tarjimonsiz.
     if ok && config_get(env, "mig_anime_translator").await.is_none() {
@@ -4454,8 +4452,6 @@ fn user_public(origin: &str, u: &Value) -> Value {
         // shunchaki ekranni yashiradi — haqiqiy to'siq har bir
         // so'rovda serverda (`is_admin`).
         "is_admin": is_admin(u),
-        // Google akkaunt ulanganmi (profilda "Google accountni ulash" tugmasi shunga qarab ko'rinadi).
-        "google_linked": !u["google_sub"].as_str().unwrap_or("").is_empty(),
         // Ism/username to'ldirilganmi. Yangi hisobga nom
         // AVTOMATIK berilgani uchun bu endi doim 1 — maydon
         // eski ilova versiyalari bilan moslik uchun qoldirilgan.
@@ -5137,25 +5133,6 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
 
     let from = msg["from"].clone();
-    // ── TELEGRAM'NI MAVJUD (Google) HISOBGA ULASH ──
-    let link_uid = login["link_user_id"].as_i64().unwrap_or(0);
-    if link_uid > 0 {
-        let tg_id = from["id"].as_i64().unwrap_or(0);
-        let r = turso_exec(env, "UPDATE users_db SET telegram_id=? WHERE id=? AND telegram_id IS NULL AND NOT EXISTS (SELECT 1 FROM users_db WHERE telegram_id=?) RETURNING *",
-            vec![TursoArg::int(tg_id), TursoArg::int(link_uid), TursoArg::int(tg_id)]).await;
-        let linked = match r { Ok(r) => first_row(&r), Err(_) => None };
-        let Some(user) = linked else {
-            let _ = turso_exec(env, "UPDATE login_tokens SET status='conflict' WHERE token=?", vec![TursoArg::text(&arg)]).await;
-            tg_send(env, chat_id, "\u{274C} Bu Telegram akkaunt boshqa hisobga tegishli (yoki hisobingizda Telegram allaqachon ulangan). Ulab bo'lmadi.").await;
-            return ok(json!({"ok": true}));
-        };
-        if create_session(env, &user, &login, &arg).await.is_err() {
-            tg_send(env, chat_id, MSG_TRY_LATER).await;
-            return ok(json!({"ok": true}));
-        }
-        tg_send(env, chat_id, "\u{2705} Telegram hisobingizga ulandi. Ilovaga qayting.").await;
-        return ok(json!({"ok": true}));
-    }
     let Ok(user) = upsert_user(env, &from).await else {
         tg_send(env, chat_id, MSG_TRY_LATER).await;
         return ok(json!({"ok": true}));
@@ -10298,11 +10275,6 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             // qo'lda hech narsa qilish shart emas.
             ensure_webhook(env, origin).await;
 
-            // Sessiya bilan kelsa — bu Telegram'ni SHU hisobga ULASH (Google bilan kirgan odam uchun).
-            let link_uid = match session_user(env, &bearer(&req)).await? {
-                Some(me) => me["id"].as_i64().unwrap_or(0),
-                None => 0,
-            };
             let mut req = req;
             let b: Value = req.json().await.unwrap_or(json!({}));
             let now = now_ms();
@@ -10314,8 +10286,8 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             let token = random_hex(16);
             turso_exec(env,
                 "INSERT INTO login_tokens (token,status,user_id,session_token,
-                 device,platform,app_version,created_at,expires_at,link_user_id)
-                 VALUES (?,'pending',0,'',?,?,?,?,?,?)",
+                 device,platform,app_version,created_at,expires_at)
+                 VALUES (?,'pending',0,'',?,?,?,?,?)",
                 vec![
                     TursoArg::text(&token),
                     TursoArg::text(b["device"].as_str().unwrap_or("")),
@@ -10323,7 +10295,6 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                     TursoArg::text(b["app_version"].as_str().unwrap_or("")),
                     TursoArg::int(now),
                     TursoArg::int(now + LOGIN_TOKEN_TTL_MS),
-                    TursoArg::int(link_uid),
                 ]).await?;
 
             let bot = bot_username(env).await;
@@ -10353,10 +10324,6 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
                 let _ = turso_exec(env, "DELETE FROM login_tokens WHERE token=?",
                     vec![TursoArg::text(&token)]).await;
                 return ok_nostore(json!({"status": "expired"}));
-            }
-            if row["status"].as_str().unwrap_or("") == "conflict" {
-                let _ = turso_exec(env, "DELETE FROM login_tokens WHERE token=?", vec![TursoArg::text(&token)]).await;
-                return ok_nostore(json!({"status": "conflict", "message": "Bu Telegram akkaunt boshqa hisobga tegishli — ulab bo'lmaydi"}));
             }
             // ── BLOKLANGAN HISOB ──────────────────────────────
             // Bot kirishni rad etgan (`handle_tg_webhook`). Ilova
@@ -10409,32 +10376,6 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             }
             let session = create_session(env, &user, &b, "").await?;
             ok_nostore(json!({"status": "ok", "session": session, "user": user_public(origin, &user)}))
-        }
-
-        // ── GOOGLE'NI MAVJUD (Telegram) HISOBGA ULASH: sessiya + `{id_token}` ──
-        (Method::Post, "/api/auth/google/link") => {
-            let Some(me) = session_user(env, &bearer(&req)).await? else {
-                return json_resp(&json!({"error": "unauthorized"}), 401);
-            };
-            let mut req = req;
-            let b: Value = req.json().await.unwrap_or(json!({}));
-            let (sub, email) = match google_verify(b["id_token"].as_str().unwrap_or("")).await {
-                Ok(v) => v,
-                Err(e) => return json_resp(&json!({"error": e}), 401),
-            };
-            let mine = me["id"].as_i64().unwrap_or(0);
-            let taken = turso_exec(env, "SELECT id FROM users_db WHERE google_sub=?", vec![TursoArg::text(&sub)]).await?;
-            if let Some(o) = first_row(&taken) {
-                if o["id"].as_i64().unwrap_or(0) != mine {
-                    return json_resp(&json!({"error": "Bu Google akkaunt boshqa hisobga ulangan"}), 409);
-                }
-            }
-            let r = turso_exec(env, "UPDATE users_db SET google_sub=?, email=? WHERE id=? AND (google_sub IS NULL OR google_sub='' OR google_sub=?)",
-                vec![TursoArg::text(&sub), TursoArg::text(&email), TursoArg::int(mine), TursoArg::text(&sub)]).await?;
-            if jint(&r, "affected_row_count") == 0 {
-                return json_resp(&json!({"error": "Hisobda boshqa Google akkaunt ulangan"}), 409);
-            }
-            ok_nostore(json!({"status": "ok"}))
         }
 
         // ── 2-QADAM: Telegram START tugmasi bosildi ─────────────
