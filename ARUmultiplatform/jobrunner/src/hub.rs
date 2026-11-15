@@ -70,15 +70,22 @@ impl Hub {
         }
     }
 
+    /// UZ: ko'rilmagan kalit qiymati: jadval belgilari uchun ishga tushish vaqti (hub qayta ishga tushsa keshlar eskirgan hisoblansin);
+    /// `vddel_` ("fayl o'chirilgan") belgilari uchun 0 — aks holda har bir fayl "o'chirilgan" bo'lib ko'rinardi.
+    /// EN: value of an unseen key: boot time for table marks; 0 for `vddel_` tombstones (otherwise every file would look deleted).
+    fn base(&self, k: &str) -> i64 {
+        if k.starts_with("vddel_") { 0 } else { self.boot }
+    }
+
     fn value(&self, m: &HashMap<String, i64>, k: &str) -> i64 {
-        m.get(k).copied().unwrap_or(self.boot)
+        m.get(k).copied().unwrap_or_else(|| self.base(k))
     }
 
     /// UZ: `bump` kalitlarini `at` ga ko'taradi (kamaymaydi) va `get` kalitlari qiymatini qaytaradi. EN: raises `bump` keys to `at` (never lowers) and returns `get` values.
     pub fn marks(&self, bump: &[String], at: i64, get: &[String]) -> Value {
         let mut m = self.marks.lock().unwrap_or_else(|e| e.into_inner());
         for k in bump {
-            let e = m.entry(k.clone()).or_insert(self.boot);
+            let e = m.entry(k.clone()).or_insert_with(|| self.base(k));
             if at > *e {
                 *e = at;
             }
@@ -148,6 +155,15 @@ mod tests {
         h.marks(&["t:a".into()], boot + 500, &[]);
         h.marks(&["t:a".into()], boot + 100, &[]);
         assert_eq!(h.marks(&[], 0, &["t:a".into()])["v"]["t:a"], boot + 500);
+    }
+
+    #[test]
+    fn unseen_tombstone_is_zero() {
+        let h = hub();
+        assert_eq!(h.marks(&[], 0, &["vddel_a.jpg".into()])["v"]["vddel_a.jpg"], 0);
+        h.marks(&["vddel_a.jpg".into()], h.boot + 10, &[]);
+        assert_eq!(h.marks(&[], 0, &["vddel_a.jpg".into()])["v"]["vddel_a.jpg"], h.boot + 10);
+        assert_eq!(h.marks(&[], 0, &["vddel_b.jpg".into()])["v"]["vddel_b.jpg"], 0);
     }
 
     #[tokio::test]
