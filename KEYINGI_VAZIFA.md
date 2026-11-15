@@ -7411,3 +7411,10 @@ Sabab: jurnal bo'lagi (`db_1_v1`) har yozuvdan keyin butun fayl bo'lib (≤1 MiB
 - **Ample ish yurituvchisi:** `ARUmultiplatform/jobrunner` (Rust, `axum`) alohida ilova (`https://r9ze65uvu96x.ample.run`, `ci/JOBS_URL`). Worker `POST /kick {token}` bilan uyg'otadi; u worker'ning `POST /api/vd/jobstep` (ENCODE_TOKEN) ini ish tugaguncha (`idle`) takror chaqiradi. Har qism `JOB_BATCH` (3) fayl — Cloudflare 50 so'rov chegarasiga sig'adi; xatoda kutib qayta uriniladi, 403 da to'xtaydi. Token faqat xotirada. Worker cron'i har daqiqada tugamagan ish bo'lsa qayta uyg'otadi (`jobs_cron`); `JOBS_URL` bo'lmasa cron'ning o'zi bir qismni bajaradi.
 - **Ilovaga habar:** ish tugagach `async_jobs` o'zgarish belgisi yangilanadi (`LIVE_CONTENT` ga kiritilgan) — ulangan ilovalar jonli yangilanish orqali ro'yxatni yangilaydi.
 - **Kengaytirish:** boshqa og'ir amallar ham shu navbatga ko'chiriladi (`kind` ustuni; hozir faqat `cleanup`).
+
+## O'zgarish belgilari markazi Ample'ga ko'chdi; Durable Object — zaxira (2026-11-15)
+
+- **Sabab (foydalanuvchi):** Durable Object'da limit bor, Ample'da yo'q.
+- **Qanday:** `ARUmultiplatform/jobrunner/src/hub.rs` — jadval belgilari (`t:<jadval>`, `del_...`, `wh_<id>`) xotirada; `POST /marks` (`bump` + `get`, `MarkHub` bilan bir xil shakl), `POST /wait` (long-poll, <= 25 s), `POST /setkey` (kalit BIR MARTA). Ko'rilmagan kalit = boot vaqti (qayta ishga tushganda eski ilova bir marta yangilanadi, o'zgarish o'tkazib yuborilmaydi). Kalit: `sha256("markhub|" + ENCODE_TOKEN)`; worker birinchi 401 da `/setkey` bilan o'zi o'rnatadi (`hub_post`). Manzil `JOBS_URL` (`ci/JOBS_URL`) — ish yurituvchi bilan bir ilova.
+- **Worker (`lib.rs`):** `mark_hub_call` — asosiy yo'l (4 s kutish); javob bermasa 30 soniyaga zaxira: eski DO yo'li, so'ng kesh. Ample qaytgach unga yetib bormagan belgilar yuboriladi (`HUB_PENDING`); DO'ga zaxira davrida so'ralgan kalitlar bir marta "hozir" qilib qo'yiladi (`DO_SEEDED`). `live_wait` — Ample'da BITTA long-poll (`hub_wait`), javob bermasa eski aylanish.
+- **DO olib tashlanmadi:** bir necha kun kuzatilgach `MarkHub` va `wrangler.toml` bog'lanishi olib tashlanadi.

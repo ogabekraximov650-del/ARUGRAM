@@ -298,10 +298,119 @@ fn mark_do_disable(until: i64) {
     MARK_DO_OFF.with(|c| c.set(until));
 }
 
+// ── O'ZGARISH BELGILARI MARKAZI: Ample (`jobrunner` ichidagi `hub`) — ASOSIY; Durable Object — ZAXIRA ──
+//
+// TALAB (foydalanuvchi): Durable Object'da limit bor, Ample'da yo'q. Belgilar (`bump`/`get`) va jonli yangilanish (`live_wait`, long-poll) avval Ample'dan
+// (`JOBS_URL`) olinadi; u javob bermasa 30 soniyaga zaxira — eski DO yo'li (so'ng kesh). Ample qaytgach unga yetib bormagan belgilar yuboriladi,
+// DO'ga esa zaxira davrida ko'rilgan kalitlar BIR MARTA "hozir" deb qo'yiladi (eski qiymatlar ilovani aldab qo'ymasin).
+thread_local! {
+    static HUB_OFF: std::cell::Cell<i64> = const { std::cell::Cell::new(0) };
+    static HUB_PENDING: std::cell::RefCell<std::collections::HashMap<String, i64>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    static DO_SEEDED: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
+}
+
+fn hub_url(env: &Env) -> Option<String> {
+    let u = tg_secret(env, "JOBS_URL");
+    let u = u.trim().trim_end_matches('/');
+    if u.is_empty() { None } else { Some(u.to_string()) }
+}
+
+/// Markaz kaliti: ENCODE_TOKEN dan hosil qilinadi (`/setkey` BIR MARTA o'rnatadi).
+fn hub_key(env: &Env) -> String {
+    use sha2::Digest;
+    let t = tg_secret(env, "ENCODE_TOKEN");
+    let mut h = sha2::Sha256::new();
+    h.update(b"markhub|");
+    h.update(t.as_bytes());
+    hex_of(&h.finalize())
+}
+
+async fn hub_fetch(url: &str, key: &str, body: &str, timeout_ms: u64) -> Option<Response> {
+    use futures_util::future::{select, Either};
+    let mut h = Headers::new();
+    h.set("Content-Type", "application/json").ok()?;
+    h.set("x-hub-key", key).ok()?;
+    let rq = Request::new_with_init(url, RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(body.to_string().into()))).ok()?;
+    let fetch = Fetch::Request(rq);
+    let f = Box::pin(fetch.send());
+    let t = Box::pin(Delay::from(core::time::Duration::from_millis(timeout_ms)));
+    match select(f, t).await {
+        Either::Left((Ok(r), _)) => Some(r),
+        _ => None,
+    }
+}
+
+/// Markazga POST; kalit hali o'rnatilmagan bo'lsa (401) `/setkey` bilan o'rnatib bir marta qayta uriniladi.
+async fn hub_post(env: &Env, path: &str, body: &Value, timeout_ms: u64) -> Option<Value> {
+    let base = hub_url(env)?;
+    let key = hub_key(env);
+    let body = body.to_string();
+    let mut resp = hub_fetch(&format!("{base}{path}"), &key, &body, timeout_ms).await?;
+    if resp.status_code() == 401 {
+        let _ = hub_fetch(&format!("{base}/setkey"), &key, &json!({"key": key}).to_string(), 3000).await;
+        resp = hub_fetch(&format!("{base}{path}"), &key, &body, timeout_ms).await?;
+    }
+    if resp.status_code() != 200 {
+        return None;
+    }
+    resp.json::<Value>().await.ok()
+}
+
+/// Belgilar markaziga BITTA murojaat (`bump` + `get`); javob bermasa `None` (30 soniya zaxira tizimida).
+async fn mark_hub_call(env: &Env, bump: &[String], at: i64, get: &[String]) -> Option<std::collections::HashMap<String, i64>> {
+    hub_url(env)?;
+    let remember = |keys: &[String], t: i64| {
+        HUB_PENDING.with(|p| {
+            let mut p = p.borrow_mut();
+            for k in keys {
+                let e = p.entry(k.clone()).or_insert(0);
+                if t > *e { *e = t; }
+            }
+        });
+    };
+    if HUB_OFF.with(|c| c.get()) > now_ms() {
+        remember(bump, at);
+        return None;
+    }
+    let pending: Vec<(String, i64)> = HUB_PENDING.with(|p| p.borrow_mut().drain().collect());
+    let mut bump_all: Vec<String> = bump.to_vec();
+    let mut at_all = at;
+    for (k, t) in &pending {
+        if !bump_all.contains(k) { bump_all.push(k.clone()); }
+        at_all = at_all.max(*t);
+    }
+    let v = hub_post(env, "/marks", &json!({"bump": bump_all, "at": at_all.max(1), "get": get}), 4000).await;
+    let Some(v) = v else {
+        for (k, t) in &pending { remember(std::slice::from_ref(k), *t); }
+        remember(bump, at);
+        HUB_OFF.with(|c| c.set(now_ms() + 30_000));
+        return None;
+    };
+    Some(v["v"].as_object().map(|m| m.iter().filter_map(|(k, x)| Some((k.clone(), x.as_i64()?))).collect()).unwrap_or_default())
+}
+
+/// Uzoq kutish (long-poll): `keys` ichidagi eng katta belgi `since` dan farq qilguncha (<= `timeout_ms`). `None` — markaz javob bermadi.
+async fn hub_wait(env: &Env, keys: &[String], since: i64, timeout_ms: u64) -> Option<(i64, bool)> {
+    hub_url(env)?;
+    if HUB_OFF.with(|c| c.get()) > now_ms() {
+        return None;
+    }
+    let v = hub_post(env, "/wait", &json!({"keys": keys, "since": since, "timeout_ms": timeout_ms}), timeout_ms + 5000).await;
+    let Some(v) = v else {
+        HUB_OFF.with(|c| c.set(now_ms() + 30_000));
+        return None;
+    };
+    Some((v["max"].as_i64()?, v["changed"].as_bool().unwrap_or(false)))
+}
+
 /// `MarkHub` ga BITTA murojaat: `bump` kalitlarini `at` vaqtiga
 /// yangilaydi va `get` kalitlarining qiymatlarini qaytaradi.
 async fn mark_do_call(env: &Env, bump: &[String], at: i64, get: &[String])
     -> Option<std::collections::HashMap<String, i64>> {
+    // ASOSIY: Ample belgilar markazi (Durable Object limiti yo'q).
+    if let Some(v) = mark_hub_call(env, bump, at, get).await {
+        return Some(v);
+    }
     let remember = || {
         MARK_PENDING.with(|p| {
             let mut p = p.borrow_mut();
@@ -343,6 +452,15 @@ async fn mark_do_call(env: &Env, bump: &[String], at: i64, get: &[String])
         });
         remember();
     };
+    // Zaxira DO uzoq vaqt ishlatilmagan bo'lishi mumkin (belgilar Ample'da yangilanardi): so'ralgan kalitlar bir marta "hozir" qilib qo'yiladi.
+    if hub_url(env).is_some() {
+        for k in get {
+            if DO_SEEDED.with(|s| s.borrow_mut().insert(k.clone())) {
+                if !bump_all.contains(k) { bump_all.push(k.clone()); }
+                at_all = at_all.max(now_ms());
+            }
+        }
+    }
     let body = json!({"bump": bump_all, "at": at_all.max(1), "get": get}).to_string();
     let mut init = RequestInit::new();
     init.with_method(Method::Post).with_body(Some(body.into()));
@@ -6981,6 +7099,14 @@ async fn live_wait(req: &Request, env: &Env) -> Result<Response> {
     // Birinchi so'rov (mk yo'q): faqat joriy belgini qaytaradi, kutmaydi — ilova shundan boshlab kuzatadi.
     if mk_before < 0 {
         return ok_nostore(json!({"new": false, "mk": first}));
+    }
+    // Ample markazida BITTA long-poll so'rov (~19 s): o'zgarish bo'lishi bilan qaytadi (eski ko'p murojaatli aylanish o'rniga). Javob bermasa — eski yo'l.
+    if first != mk_before {
+        return ok_nostore(json!({"new": true, "mk": first}));
+    }
+    let keys: Vec<String> = tables.iter().map(|t| mark_key(t)).collect();
+    if let Some((max, changed)) = hub_wait(env, &keys, mk_before, CHAT_WAIT_TICKS as u64 * CHAT_WAIT_STEP_MS - 1000).await {
+        return ok_nostore(json!({"new": changed, "mk": max.max(first)}));
     }
     let mut mk = first;
     for i in 0..=steps {

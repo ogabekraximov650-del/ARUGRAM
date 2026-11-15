@@ -4,13 +4,15 @@
 //     Each step fits Cloudflare's 50-subrequest limit; on errors it waits and retries. The token lives in memory only. Only ONE loop runs at a time.
 // RU: Исполнитель задач Ample. Воркер шлёт `POST /kick {"token": ENCODE_TOKEN}`; исполнитель повторно вызывает `/api/vd/jobstep` воркера до простоя.
 //     Каждый шаг укладывается в лимит 50 подзапросов Cloudflare; при ошибках ждёт и повторяет. Токен только в памяти. Одновременно работает ОДИН цикл.
-use axum::{extract::State, http::StatusCode, routing::{get, post}, Json, Router};
+mod hub;
+use axum::{extract::State, http::{HeaderMap, StatusCode}, routing::{get, post}, Json, Router};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::time::Duration;
 
 #[derive(Clone)]
 struct App {
+    hub: Arc<hub::Hub>,
     worker: String,
     running: Arc<AtomicBool>,
     token: Arc<Mutex<String>>,
@@ -75,12 +77,47 @@ async fn kick(State(app): State<App>, Json(b): Json<Value>) -> (StatusCode, Json
     (StatusCode::OK, Json(json!({"ok": true, "started": true})))
 }
 
+fn strs(v: &Value) -> Vec<String> {
+    v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default()
+}
+
+fn hub_key(h: &HeaderMap) -> String {
+    h.get("x-hub-key").and_then(|v| v.to_str().ok()).unwrap_or("").to_string()
+}
+
+/// POST /setkey {key} — kalit hali yo'q bo'lsagina o'rnatadi (birinchi chaqiruv).
+async fn setkey(State(app): State<App>, Json(b): Json<Value>) -> (StatusCode, Json<Value>) {
+    if app.hub.set_key(b["key"].as_str().unwrap_or("")) {
+        (StatusCode::OK, Json(json!({"ok": true})))
+    } else {
+        (StatusCode::FORBIDDEN, Json(json!({"error": "already set or invalid"})))
+    }
+}
+
+/// POST /marks {bump:[], at, get:[]} -> {v:{kalit: vaqt}} (`MarkHub` bilan bir xil shakl).
+async fn marks(State(app): State<App>, headers: HeaderMap, Json(b): Json<Value>) -> (StatusCode, Json<Value>) {
+    if !app.hub.authorized(&hub_key(&headers)) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthorized"})));
+    }
+    (StatusCode::OK, Json(app.hub.marks(&strs(&b["bump"]), b["at"].as_i64().unwrap_or(0), &strs(&b["get"]))))
+}
+
+/// POST /wait {keys:[], since, timeout_ms} -> {max, changed}: o'zgarguncha (<= 25 s) kutadi.
+async fn wait(State(app): State<App>, headers: HeaderMap, Json(b): Json<Value>) -> (StatusCode, Json<Value>) {
+    if !app.hub.authorized(&hub_key(&headers)) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error": "unauthorized"})));
+    }
+    let t = b["timeout_ms"].as_u64().unwrap_or(20_000).clamp(1_000, 25_000);
+    (StatusCode::OK, Json(app.hub.wait(&strs(&b["keys"]), b["since"].as_i64().unwrap_or(-1), Duration::from_millis(t)).await))
+}
+
 #[tokio::main]
 async fn main() {
     let worker = std::env::var("WORKER_URL").unwrap_or_else(|_| "https://arumediatv.uzcom.workers.dev".into()).trim_end_matches('/').to_string();
     let port: u16 = std::env::var("PORT").ok().and_then(|p| p.parse().ok()).unwrap_or(3000);
-    let app = App { worker, running: Arc::new(AtomicBool::new(false)), token: Arc::new(Mutex::new(String::new())) };
-    let router = Router::new().route("/", get(|| async { "ok" })).route("/kick", post(kick)).with_state(app);
+    let dir = std::env::var("HUB_DIR").unwrap_or_else(|_| "/var/lib/jobrunner".into());
+    let app = App { hub: Arc::new(hub::Hub::new(std::path::PathBuf::from(dir).join("hubkey"))), worker, running: Arc::new(AtomicBool::new(false)), token: Arc::new(Mutex::new(String::new())) };
+    let router = Router::new().route("/", get(|| async { "ok" })).route("/kick", post(kick)).route("/setkey", post(setkey)).route("/marks", post(marks)).route("/wait", post(wait)).with_state(app);
     let l = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.expect("port band");
     eprintln!("jobrunner :{port}");
     axum::serve(l, router).await.expect("server");

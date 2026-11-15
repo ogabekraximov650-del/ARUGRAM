@@ -2,13 +2,14 @@
 name = "jobrunner"
 version = "0.1.0"
 edition = "2024"
-description = "UZ: Ample'dagi ish yurituvchi — worker `/api/vd/jobstep` ni takror chaqirib og'ir ishlarni to'liq bajaradi. EN: Ample job runner — repeatedly calls the worker's `/api/vd/jobstep` until the heavy work is done. RU: Исполнитель задач на Ample — повторно вызывает `/api/vd/jobstep` воркера, пока тяжёлая работа не завершится."
+description = "UZ: Ample'dagi ish yurituvchi va o'zgarish belgilari markazi (MarkHub o'rnida) — worker `/api/vd/jobstep` ni takror chaqirib og'ir ishlarni to'liq bajaradi. EN: Ample job runner — repeatedly calls the worker's `/api/vd/jobstep` until the heavy work is done. RU: Исполнитель задач на Ample — повторно вызывает `/api/vd/jobstep` воркера, пока тяжёлая работа не завершится."
 
 [dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync"] }
 axum = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 serde_json = "1"
+sha2 = "0.11"
 
 [profile.release]
 opt-level = "s"
