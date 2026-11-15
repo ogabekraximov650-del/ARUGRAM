@@ -995,8 +995,6 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
     val introPlayer = remember { uz.arumediatv.com.ui.season.AruPlayer(ctx) }
     DisposableEffect(Unit) { onDispose { runCatching { introPlayer.release() } } }
     FormScaffold(if (initial == null) "Epizod qo'shish" else "Epizodni tahrirlash", 19, onBack) {
-        IntroPlayerCard(introPlayer, initial)
-        Spacer(Modifier.height(12.dp))
         error?.let { ErrorBox(it); Spacer(Modifier.height(16.dp)) }
         GlassField(number, { number = it.filter(Char::isDigit).take(5) }, "Epizod raqami (0 dan boshlash)", AruIcons.FormatListNumbered, number = true); Spacer(Modifier.height(12.dp))
         GlassField(name, { name = it }, "Epizod nomi (ixtiyoriy)", AruIcons.TitleIcon)
@@ -1041,6 +1039,10 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
             Spacer(Modifier.height(12.dp))
         }
         Spacer(Modifier.height(8.dp))
+
+        // ── Pleyer: intro maydonlari TEPASIDA (vaqtni aniqlab, pastdagi ⏱ bilan yozish uchun) ──
+        IntroPlayerCard(introPlayer, initial)
+        Spacer(Modifier.height(12.dp))
 
         // ── O'tkazib yuboriladigan joylar ──
         GlassCard(16, PaddingValues(start = 16.dp, top = 14.dp, end = 16.dp, bottom = 16.dp)) {
