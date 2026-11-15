@@ -520,6 +520,15 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let r = first_row(&r).unwrap_or(json!({}));
             ok(json!({"store": jint(&r, "store"), "mig": jint(&r, "mig"), "full": staged_bytes(env).await >= cap_bytes(env)}))
         }
+        // ── KANAL ALMASHTIRISH (2026-11, foydalanuvchi talabi): hamma saqlangan fayl (rasm, bo'lak, qism) yangi kanalga ko'chadi, fayl ID'lari va xabar
+        // raqamlari yangilanadi. Eski kanaldagi xabarlar O'CHIRILMAYDI. Har chaqiruvda <= 8 qator (Cloudflare 50 so'rov chegarasi); `remaining` 0 bo'lguncha takrorlanadi. ──
+        "/api/vd/move_channel" => {
+            let (from, to) = (b["from"].as_i64().unwrap_or(0), b["to"].as_i64().unwrap_or(0));
+            if from == 0 || to == 0 || from == to {
+                return bad("from/to");
+            }
+            ok(move_channel(env, from, to, b["limit"].as_i64().unwrap_or(8).clamp(1, 8)).await)
+        }
         // ── NOLDAN BOSHLASH (foydalanuvchi talabi): kanal postlari va R2 obyektlarini o'chirish. Jadvallarni Actions (`vd-wipe.yml`) tozalaydi. ──
         "/api/vd/wipe" => match b["stage"].as_str().unwrap_or("") {
             "cancel" => ok(json!({"cancelled": cancel_runs(env).await})),
@@ -1791,4 +1800,120 @@ mod owner_of_tests {
             }
         }
     }
+}
+
+
+/// (jadval, fayl ID'lari ustuni, xabar raqamlari ustuni): ma'lumot egalari (`*_vd_ids`/`*_vd_msgs`) va navbat jadvali.
+const MOVE_GROUPS: &[(&str, &str, &str)] = &[
+    ("anime_db", "photo_vd_ids", "photo_vd_msgs"),
+    ("season_db", "photo_vd_ids", "photo_vd_msgs"),
+    ("epizod_db", "q360_vd_ids", "q360_vd_msgs"),
+    ("epizod_db", "q480_vd_ids", "q480_vd_msgs"),
+    ("epizod_db", "q720_vd_ids", "q720_vd_msgs"),
+    ("epizod_db", "q1080_vd_ids", "q1080_vd_msgs"),
+    ("users_db", "avatar_vd_ids", "avatar_vd_msgs"),
+    ("comments_db", "media_vd_ids", "media_vd_msgs"),
+    ("chat_messages", "media_vd_ids", "media_vd_msgs"),
+    ("vd_queue", "chunk_ids", "msg_ids"),
+];
+
+/// Eski kanaldan (`from`) yangisiga (`to`) ko'chirish: har bo'lak `sendDocument` (eski `file_id` bilan, yuklab olinmaydi) yoki `copyMessage` (`tg_files`)
+/// orqali yangi kanalga tushadi; yangi `file_id` va xabar raqami bazaga yoziladi. Natija: `{ok, moved, remaining, errors}`.
+async fn move_channel(env: &Env, from: i64, to: i64, limit: i64) -> Value {
+    let me = tg_api(env, "getMe", json!({})).await.ok().and_then(|m| m["id"].as_i64()).unwrap_or(0);
+    let member = tg_api(env, "getChatMember", json!({"chat_id": to, "user_id": me})).await;
+    match &member {
+        Ok(m) => {
+            let st = m["status"].as_str().unwrap_or("");
+            if st != "administrator" && st != "creator" {
+                return json!({"ok": false, "error": format!("bot yangi kanalda admin emas (holat: {st})")});
+            }
+            if m["can_post_messages"] == json!(false) {
+                return json!({"ok": false, "error": "botda yangi kanalga xabar yuborish huquqi yo'q"});
+            }
+        }
+        Err(e) => return json!({"ok": false, "error": format!("yangi kanalni tekshirib bo'lmadi: {e}")}),
+    }
+    let mut moved = 0i64;
+    let mut pending = 0i64;
+    let mut errors: Vec<String> = Vec::new();
+    let mut budget = limit;
+    for (table, idc, msgc) in MOVE_GROUPS {
+        let sel = format!("SELECT rowid AS rid, {idc} AS ids, {msgc} AS msgs FROM {table} WHERE COALESCE({idc},'')<>'' AND COALESCE({msgc},'')<>''");
+        let Ok(res) = turso_exec(env, &sel, vec![]).await else { continue };
+        for row in rows_of(&res) {
+            let (rid, old_ids, old_msgs) = (jint(&row, "rid"), row["ids"].as_str().unwrap_or("").to_string(), row["msgs"].as_str().unwrap_or("").to_string());
+            let key = format!("chmv:{to}:{table}:{idc}:{rid}");
+            if config_get(env, &key).await.is_some() {
+                continue;
+            }
+            if budget <= 0 {
+                pending += 1;
+                continue;
+            }
+            budget -= 1;
+            let mut new_ids: Vec<String> = Vec::new();
+            let mut new_msgs: Vec<String> = Vec::new();
+            let mut failed = false;
+            for fid in ids(&old_ids) {
+                match tg_api(env, "sendDocument", json!({"chat_id": to, "document": fid, "disable_notification": true})).await {
+                    Ok(m) if m["document"]["file_id"].as_str().is_some() => {
+                        new_ids.push(m["document"]["file_id"].as_str().unwrap_or("").to_string());
+                        new_msgs.push(m["message_id"].as_i64().unwrap_or(0).to_string());
+                    }
+                    other => {
+                        errors.push(format!("{table}#{rid}: {}", other.err().map(|e| e.to_string()).unwrap_or_else(|| "javobda file_id yo'q".into())));
+                        failed = true;
+                        break;
+                    }
+                }
+            }
+            if failed {
+                pending += 1;
+                continue;
+            }
+            let upd = format!("UPDATE {table} SET {idc}=?, {msgc}=? WHERE rowid=? AND {msgc}=?");
+            let ok_upd = turso_exec(env, &upd, vec![TursoArg::text(&new_ids.join(",")), TursoArg::text(&new_msgs.join(",")), TursoArg::int(rid), TursoArg::text(&old_msgs)]).await.is_ok();
+            if ok_upd {
+                config_put(env, &key, "1").await;
+                moved += 1;
+            } else {
+                errors.push(format!("{table}#{rid}: bazani yangilab bo'lmadi"));
+                pending += 1;
+            }
+        }
+    }
+    // Eski yo'l: `tg_files` (faqat xabar raqami bor) — `copyMessage`.
+    if let Ok(res) = turso_exec(env, "SELECT file_name, msg_id FROM tg_files", vec![]).await {
+        for row in rows_of(&res) {
+            let (name, mid) = (row["file_name"].as_str().unwrap_or("").to_string(), jint(&row, "msg_id"));
+            let key = format!("chmv:{to}:tg_files:{name}");
+            if config_get(env, &key).await.is_some() {
+                continue;
+            }
+            if budget <= 0 {
+                pending += 1;
+                continue;
+            }
+            budget -= 1;
+            match tg_api(env, "copyMessage", json!({"chat_id": to, "from_chat_id": from, "message_id": mid, "disable_notification": true})).await {
+                Ok(m) if m["message_id"].as_i64().unwrap_or(0) > 0 => {
+                    let nm = m["message_id"].as_i64().unwrap_or(0);
+                    if turso_exec(env, "UPDATE tg_files SET msg_id=? WHERE file_name=? AND msg_id=?", vec![TursoArg::int(nm), TursoArg::text(&name), TursoArg::int(mid)]).await.is_ok() {
+                        config_put(env, &key, "1").await;
+                        moved += 1;
+                    } else {
+                        errors.push(format!("tg_files {name}: bazani yangilab bo'lmadi"));
+                        pending += 1;
+                    }
+                }
+                other => {
+                    errors.push(format!("tg_files {name}: {}", other.err().map(|e| e.to_string()).unwrap_or_else(|| "nusxa olinmadi".into())));
+                    pending += 1;
+                }
+            }
+        }
+    }
+    errors.truncate(6);
+    json!({"ok": true, "moved": moved, "remaining": pending, "errors": errors})
 }
