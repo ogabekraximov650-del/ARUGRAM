@@ -36,7 +36,7 @@ jobs:
             R=$(curl -sS -m 120 -X POST "$API_BASE/api/vd/move_channel" -H "X-Encode-Token: $TOKEN" -H 'Content-Type: application/json' -H 'User-Agent: arumediatv-chan-move' -d "{\"from\":$FROM,\"to\":$TO,\"limit\":8}" || echo '{}')
             echo "$i: $R" | head -c 700; echo
             OK=$(printf '%s' "$R" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(1 if d.get("ok") else 0)' 2>/dev/null || echo 0)
-            if [ "$OK" != "1" ]; then echo "::error::Ko'chirish to'xtadi (bot yangi kanalda admin bo'lishi kerak)"; exit 1; fi
+            if [ "$OK" != "1" ]; then echo "::error::Ko'chirish to'xtadi: javob yuqorida (bot yangi kanalda admin bo'lishi kerak)"; exit 1; fi
             REM=$(printf '%s' "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("remaining",0))')
             MOV=$(printf '%s' "$R" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("moved",0))')
             if [ "$REM" = "0" ]; then echo "Tayyor: hammasi ko'chdi."; exit 0; fi
