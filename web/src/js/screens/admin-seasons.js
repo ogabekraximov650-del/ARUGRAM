@@ -96,7 +96,6 @@ function openSeasonForm(animeId, season, onSaved) {
         <input class="field ad-b" type="number" inputmode="numeric" placeholder="Bo'lim raqami (N-bo'lim)" value="${v('bolim_id')}" style="margin-top:12px">
         <input class="field ad-n" placeholder="Nomi" value="${v('nomi')}" style="margin-top:12px">
         <input class="field ad-s" placeholder="Studiya" value="${v('studio')}" style="margin-top:12px">
-        <input class="field ad-tj" placeholder="Tarjimon" value="${v('tarjimon')}" style="margin-top:12px">
         <input class="field ad-dv" placeholder="Davlat" value="${v('davlat')}" style="margin-top:12px">
         <input class="field ad-rj" placeholder="Rejissyor" value="${v('rejissyor')}" style="margin-top:12px">
         <input class="field ad-y" inputmode="numeric" placeholder="Yili" value="${v('yili')}" style="margin-top:12px">
@@ -155,7 +154,7 @@ function openSeasonForm(animeId, season, onSaved) {
           anime_id: animeId,
           bolim_id: parseInt($('.ad-b').value, 10) || 0,
           photo_url: photoName || '',
-          nomi: $('.ad-n').value, studio: $('.ad-s').value, tarjimon: $('.ad-tj').value, yili: $('.ad-y').value,
+          nomi: $('.ad-n').value, studio: $('.ad-s').value, yili: $('.ad-y').value,
           davlat: $('.ad-dv').value.trim(), rejissyor: $('.ad-rj').value.trim(),
           janrlar: jl, janri: jl.join(', '), turi, holati, tavsif: $('.ad-t').value,
           yosh: parseInt($('.ad-yo').value, 10) || 0,

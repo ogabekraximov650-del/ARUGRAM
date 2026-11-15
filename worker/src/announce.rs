@@ -106,7 +106,9 @@ fn caption(season: &Value, ep_number: i64) -> String {
 
 async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result<(), String> {
     let season = turso_exec(env,
-        "SELECT nomi, photo_url, bolim_id, turi, epizod_count, tarjimon FROM season_db WHERE anime_id=? AND season_id=?",
+        "SELECT s.nomi, s.photo_url, s.bolim_id, s.turi, s.epizod_count,
+                COALESCE(NULLIF((SELECT t.name FROM translator_db t JOIN anime_db an ON an.translator_id = t.id WHERE an.id = s.anime_id), ''), s.tarjimon) AS tarjimon
+           FROM season_db s WHERE s.anime_id=? AND s.season_id=?",
         vec![TursoArg::int(a), TursoArg::int(s)]).await.map_err(|e| e.to_string())?;
     let season = first_row(&season).ok_or("bo'lim topilmadi")?;
     let num = turso_exec(env, "SELECT epizod_number FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
@@ -276,11 +278,16 @@ fn line(icon: &str, label: &str, value: &str) -> String {
 /// bo'lim va qism, yili, janr, studiya, tarjimon, turi, holati, yosh, davlat), tagida Mini App
 /// tugmasi — u aynan shu anime va qismni ochadi (`web/src/js/app.js`, `?w=`).
 pub(crate) async fn watch_card(env: &Env, chat: i64, a: i64, s: i64, e: Option<i64>) {
-    let Some(season) = turso_exec(env, "SELECT * FROM season_db WHERE anime_id=? AND season_id=?",
+    let Some(mut season) = turso_exec(env, "SELECT * FROM season_db WHERE anime_id=? AND season_id=?",
         vec![TursoArg::int(a), TursoArg::int(s)]).await.ok().and_then(|r| first_row(&r)) else {
         tg_send_help(env, chat).await;
         return;
     };
+    // Tarjimon nomi — anime biriktirilgan tarjimondan (eski matn maydoni faqat zaxira).
+    if let Some(n) = turso_exec(env, "SELECT t.name FROM translator_db t JOIN anime_db an ON an.translator_id = t.id WHERE an.id=?", vec![TursoArg::int(a)]).await
+        .ok().and_then(|r| first_row(&r)).and_then(|r| r["name"].as_str().map(|x| x.trim().to_string())).filter(|x| !x.is_empty()) {
+        season["tarjimon"] = json!(n);
+    }
     let anime = turso_exec(env, "SELECT name, davlat FROM anime_db WHERE id=?", vec![TursoArg::int(a)]).await
         .ok().and_then(|r| first_row(&r)).unwrap_or(json!({}));
     let seasons = turso_exec(env, "SELECT COUNT(*) AS n FROM season_db WHERE anime_id=?", vec![TursoArg::int(a)]).await

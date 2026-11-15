@@ -12843,26 +12843,60 @@ fn encbot_keyboard(rows: Vec<Vec<String>>) -> Value {
 }
 
 const ENCBOT_BTN_ANIMES: &str = "\u{2B05}\u{FE0F} Animelar";
+const ENCBOT_BTN_TRANSLATORS: &str = "\u{2B05}\u{FE0F} Tarjimonlar";
+
+/// 0-qadam: tarjimonlar ro'yxati (Tarjimon -> Anime -> Bo'lim -> Qism). Tanlangan tarjimon `app_config.encbot_tr` da turadi ("0" — tarjimonsiz).
+async fn encbot_translator_page(env: &Env) -> (String, Value) {
+    let res = turso_exec(env,
+        "SELECT t.id, t.name, (SELECT COUNT(*) FROM anime_db a WHERE a.translator_id=t.id AND EXISTS (SELECT 1 FROM season_db s WHERE s.anime_id=a.id)) AS n
+           FROM translator_db t ORDER BY t.id", vec![]).await;
+    let mut rows = res.map(|r| rows_of(&r)).unwrap_or_default();
+    // Tarjimonsiz (bo'limi bor) animelar bo'lsa — alohida qator.
+    let un = turso_exec(env,
+        "SELECT COUNT(*) AS n FROM anime_db a WHERE (COALESCE(a.translator_id,0)=0 OR a.translator_id NOT IN (SELECT id FROM translator_db))
+           AND EXISTS (SELECT 1 FROM season_db s WHERE s.anime_id=a.id)", vec![]).await
+        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    if un > 0 {
+        rows.push(json!({"id": 0, "name": "Tarjimonsiz", "n": un}));
+    }
+    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()]];
+    if rows.is_empty() {
+        return ("Hali tarjimon qo'shilmagan.\nAvval ilovada Admin \u{2192} Animelarni boshqarish orqali tarjimon, anime va bo'lim qo'shing, keyin shu yerga qayting.".into(), encbot_keyboard(kb));
+    }
+    for r in &rows {
+        let id = jint(r, "id");
+        let name = r["name"].as_str().unwrap_or("").trim().to_string();
+        let twin = rows.iter().filter(|x| x["name"].as_str().unwrap_or("").trim() == name).count() > 1;
+        let label = if name.is_empty() || twin { format!("\u{1F464} {name} (#{id}) \u{2014} {} ta anime", jint(r, "n")) } else { format!("\u{1F464} {name} \u{2014} {} ta anime", jint(r, "n")) };
+        kb.push(vec![label]);
+    }
+    ("\u{1F464} Qaysi tarjimonning animesiga qism qo'shmoqchisiz?\n\nPastdagi tugmalardan birini bosing.".into(), encbot_keyboard(kb))
+}
 const ENCBOT_BTN_STATUS: &str = "\u{1F4CB} Holat";
 
 /// 1-qadam: bo'limi bor animelar ro'yxati.
 async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
     let page = page.max(0);
+    // Tarjimon tanlanmagan bo'lsa — avval tarjimonlar ro'yxati.
+    let Some(tr) = config_get(env, "encbot_tr").await.and_then(|v| v.trim().parse::<i64>().ok()) else {
+        return encbot_translator_page(env).await;
+    };
     let res = turso_exec(env,
         "SELECT a.id, a.name FROM anime_db a
           WHERE EXISTS (SELECT 1 FROM season_db s WHERE s.anime_id=a.id)
+            AND (CASE WHEN ?3 = 0 THEN (COALESCE(a.translator_id,0)=0 OR a.translator_id NOT IN (SELECT id FROM translator_db)) ELSE a.translator_id = ?3 END)
           ORDER BY MAX(COALESCE(a.created_at,0), COALESCE((SELECT MAX(MAX(COALESCE(s.last_ep_at,0), COALESCE(s.created_at,0))) FROM season_db s WHERE s.anime_id=a.id),0)) DESC, a.id DESC
-          LIMIT ? OFFSET ?",
-        vec![TursoArg::int(ENCBOT_PAGE + 1), TursoArg::int(page * ENCBOT_PAGE)]).await;
+          LIMIT ?1 OFFSET ?2",
+        vec![TursoArg::int(ENCBOT_PAGE + 1), TursoArg::int(page * ENCBOT_PAGE), TursoArg::int(tr)]).await;
     let rows = res.map(|r| rows_of(&r)).unwrap_or_default();
     if rows.is_empty() && page == 0 {
-        return ("Hali birorta animega bo'lim qo'shilmagan.\nAvval ilovada anime va uning bo'limini qo'shing, \
+        return ("Bu tarjimonda hali bo'limi bor anime yo'q.\nAvval ilovada shu tarjimonga anime va uning bo'limini qo'shing, \
                  keyin shu yerga qayting.".into(),
-            encbot_keyboard(vec![vec![ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()]]));
+            encbot_keyboard(vec![vec![ENCBOT_BTN_TRANSLATORS.to_string()], vec![ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()]]));
     }
     let shown: Vec<&Value> = rows.iter().take(ENCBOT_PAGE as usize).collect();
     // "Holat" — eng tepada (foydalanuvchi talabi).
-    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()]];
+    let mut kb: Vec<Vec<String>> = vec![vec![ENCBOT_BTN_STATUS.to_string(), postbot::BTN_HOME.to_string()], vec![ENCBOT_BTN_TRANSLATORS.to_string()]];
     kb.extend(shown.iter().map(|r| {
         let id = jint(r, "id");
         let name = r["name"].as_str().unwrap_or("").trim().to_string();
@@ -13253,6 +13287,7 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     if text == postbot::BTN_APP {
         config_put(env, "encbot_mode", "").await;
         config_put(env, "post_edit", "").await;
+        config_put(env, "encbot_tr", "").await; // avval tarjimon tanlanadi
         let (t, kb) = encbot_anime_page(env, 0).await;
         encbot_send(env, chat, &t, Some(kb)).await;
         return ok(json!({"ok": true}));
@@ -13439,6 +13474,32 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
             }
         }
         return ok(json!({"ok": true}));
+    }
+    // "⬅️ Tarjimonlar" — tarjimon tanlashga qaytish.
+    if text == ENCBOT_BTN_TRANSLATORS {
+        config_put(env, "encbot_tr", "").await;
+        let (t, kb) = encbot_translator_page(env).await;
+        encbot_send(env, chat, &t, Some(kb)).await;
+        return ok(json!({"ok": true}));
+    }
+    // Tarjimon tugmasi: "👤 Nom — 3 ta anime" yoki "👤 Nom (#2) — 3 ta anime".
+    if let Some(rest) = text.strip_prefix("\u{1F464}") {
+        let head = rest.rsplit_once(" \u{2014} ").map(|(h, _)| h).unwrap_or(rest).trim();
+        let by_id = head.rsplit_once("(#")
+            .and_then(|(_, t)| t.strip_suffix(')'))
+            .and_then(|t| t.trim().parse::<i64>().ok());
+        let tr = match by_id {
+            Some(id) => Some(id),
+            None if head == "Tarjimonsiz" => Some(0),
+            None => turso_exec(env, "SELECT id FROM translator_db WHERE TRIM(name)=? ORDER BY id LIMIT 1", vec![TursoArg::text(head)]).await
+                .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")),
+        };
+        if let Some(tr) = tr {
+            config_put(env, "encbot_tr", &tr.to_string()).await;
+            let (t, kb) = encbot_anime_page(env, 0).await;
+            encbot_send(env, chat, &t, Some(kb)).await;
+            return ok(json!({"ok": true}));
+        }
     }
     // Anime tugmasi: "🎬 nomi" yoki "🎬 nomi (#12)".
     if let Some(rest) = text.strip_prefix("\u{1F3AC}") {

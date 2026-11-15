@@ -386,7 +386,7 @@ function buildPlayer(el, route, season, opts) {
       </div>
       <div class="pl-card big">
         ${inf('Turi', sStr('turi'))}${inf('Yili', sStr('yili'))}${inf('Janri', sStr('janri'))}
-        ${inf('Studio', sStr('studio'))}${inf('Tarjimon', sStr('tarjimon'))}${inf('Holati', sStr('holati'))}
+        ${inf('Studio', sStr('studio'))}${inf('Tarjimon', sStr('tr_name') || sStr('tarjimon'))}${inf('Holati', sStr('holati'))}
         ${tav ? `<div class="pl-desc-t">Tavsif</div><div class="pl-desc">${esc(tav)}</div>` : ''}
       </div>`;
     pane.querySelector('.rate').addEventListener('click', async () => {
