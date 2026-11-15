@@ -136,9 +136,46 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(start = 16.dp, end = 16.dp, top = LocalBarPad.current.calculateTopPadding()),
     ) {
-        uz.arumediatv.com.ui.common.PageHeader("Profil", Modifier.padding(horizontal = 4.dp), trailing = {
-            if (accounts.isNotEmpty() || user != null) AccountsPill { showAccounts = true }
-        })
+        if (accounts.isNotEmpty() || user != null) {
+            Spacer(Modifier.height(8.dp))
+            AccountsCapsule(
+                expanded = showAccounts,
+                onToggle = { showAccounts = it },
+                accounts = accounts,
+                activeId = user?.id ?: 0L,
+                limit = auth.accounts.limit(),
+                onSwitch = { a ->
+                    showAccounts = false
+                    busy = "Account almashtirilmoqda"
+                    scope.launch {
+                        withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
+                        uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, a.id)
+                    }
+                },
+                onAdd = {
+                    showAccounts = false
+                    scope.launch {
+                        busy = "Tekshirilmoqda"
+                        // Obuna holati yangi bo'lishi uchun (5 yoki 3 chegarasi): tarmoq bor bo'lsa hozirgi hisobniki yangilanadi.
+                        if (auth.isLoggedIn) kotlinx.coroutines.withTimeoutOrNull(3000L) { AppServices.billing.load(force = true) }
+                        if (!auth.accounts.canAdd()) {
+                            busy = null
+                            error = if (auth.accounts.limit() < 5) "Hozir 3 tagacha account ulash mumkin. Ulangan accountlardan birortasida obuna bo'lsa 5 tagacha ulash mumkin."
+                            else "Eng ko'pi 5 ta account ulash mumkin."
+                        } else if (!auth.isLoggedIn) {
+                            busy = null
+                            onBotLogin()
+                        } else {
+                            busy = "Account qo'shilmoqda"
+                            withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
+                            uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, 0L)
+                        }
+                    }
+                },
+                onRemove = { a -> removeTarget = a },
+            )
+        }
+        uz.arumediatv.com.ui.common.PageHeader("Profil", Modifier.padding(horizontal = 4.dp))
         Spacer(Modifier.height(8.dp))
         val u = user
         if (u == null) {
@@ -196,43 +233,6 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
     }
 
     // ── Ko'p hisob ──
-    if (showAccounts) {
-        AccountsDialog(
-            accounts = accounts,
-            activeId = user?.id ?: 0L,
-            limit = auth.accounts.limit(),
-            onDismiss = { showAccounts = false },
-            onSwitch = { a ->
-                showAccounts = false
-                busy = "Account almashtirilmoqda"
-                scope.launch {
-                    withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
-                    uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, a.id)
-                }
-            },
-            onAdd = {
-                showAccounts = false
-                scope.launch {
-                    busy = "Tekshirilmoqda"
-                    // Obuna holati yangi bo'lishi uchun (5 yoki 3 chegarasi): tarmoq bor bo'lsa hozirgi hisobniki yangilanadi.
-                    if (auth.isLoggedIn) kotlinx.coroutines.withTimeoutOrNull(3000L) { AppServices.billing.load(force = true) }
-                    if (!auth.accounts.canAdd()) {
-                        busy = null
-                        error = if (auth.accounts.limit() < 5) "Hozir 3 tagacha account ulash mumkin. Ulangan accountlardan birortasida obuna bo'lsa 5 tagacha ulash mumkin."
-                        else "Eng ko'pi 5 ta account ulash mumkin."
-                    } else if (!auth.isLoggedIn) {
-                        busy = null
-                        onBotLogin()
-                    } else {
-                        busy = "Account qo'shilmoqda"
-                        withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
-                        uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, 0L)
-                    }
-                }
-            },
-            onRemove = { a -> removeTarget = a },
-        )
-    }
     removeTarget?.let { a ->
         AlertDialog(
             onDismissRequest = { removeTarget = null },
