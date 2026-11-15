@@ -1490,6 +1490,21 @@ async fn init_db(env: &Env) -> bool {
             "ALTER TABLE anime_db ADD COLUMN translator_id INTEGER DEFAULT 0", vec![]).await;
         config_put(env, "mig_anime_translator", "1").await;
     }
+    // Bir martalik (2026-11-15, foydalanuvchi talabi): tarjimonsiz animelar "Anibla.uz" tarjimoniga o'tkaziladi. Tarjimon topilmasa belgi qo'yilmaydi
+    // (keyingi ishga tushishda qayta uriniladi). Yozuv `turso_exec` orqali ketadi, shuning uchun o'zgarish belgilari ham yangilanadi.
+    if ok && config_get(env, "mig_unassigned_anibla").await.is_none() {
+        if let Ok(r) = turso_exec(env, "SELECT id FROM translator_db WHERE LOWER(name) LIKE 'anibla%' ORDER BY id LIMIT 1", vec![]).await {
+            if let Some(row) = first_row(&r) {
+                let tid = jint(&row, "id");
+                if tid > 0 {
+                    let done = turso_exec(env,
+                        "UPDATE anime_db SET translator_id=? WHERE COALESCE(translator_id,0)=0 OR translator_id NOT IN (SELECT id FROM translator_db)",
+                        vec![TursoArg::int(tid)]).await.is_ok();
+                    if done { config_put(env, "mig_unassigned_anibla", "1").await; }
+                }
+            }
+        }
+    }
     // Avto-kodlash: qismning asl (original) videosi (2026-09).
     if ok && config_get(env, "mig_origin_video").await.is_none() {
         let _ = turso_exec(env,
