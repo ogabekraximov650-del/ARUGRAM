@@ -295,7 +295,7 @@ fun AdminAnimeScreen(translator: JSONObject, onBack: () -> Unit, onOpenAnime: (J
                 val r = api.delete("/api/anime/${a.optLong("id")}")
                 snackOk = r.ok
                 if (r.ok) load()
-                snack.showSnackbar(if (r.ok) "Anime o'chirildi" else "Xato: ${api.errorOf(r, "O'chirishda xato")}")
+                snack.showSnackbar(if (r.ok) "Anime o'chirildi (fayllar fonda tozalanadi)" else "Xato: ${api.errorOf(r, "O'chirishda xato")}")
             }
         }
     }

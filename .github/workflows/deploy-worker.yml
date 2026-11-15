@@ -158,6 +158,8 @@ jobs:
           if [ -s ../ci/TG_CHANNEL_ID ]; then put TG_CHANNEL_ID "$(tr -d '[:space:]' < ../ci/TG_CHANNEL_ID)"; fi
           # Video ombori (`vd`) bo'laklari saqlanadigan YANGI kanal: `ci/VD_CHANNEL_ID` (kanal ID raqami, maxfiy emas). Bo'sh/yo'q bo'lsa — TG_CHANNEL_ID.
           if [ -s ../ci/VD_CHANNEL_ID ]; then put VD_CHANNEL_ID "$(tr -d '[:space:]' < ../ci/VD_CHANNEL_ID)"; fi
+          # Fondagi ishlar (o'chirishdan keyingi fayl tozalash) Ample ish yurituvchisida (`ARUmultiplatform/jobrunner`): manzil `ci/JOBS_URL` (maxfiy emas). Bo'lmasa worker cron'i o'zi bajaradi.
+          if [ -s ../ci/JOBS_URL ]; then put JOBS_URL "$(tr -d '[:space:]' < ../ci/JOBS_URL)"; fi
           # Kodlashni TO'XTATISH / davom ettirish: `ci/ENCODE_PAUSE` ichida `1` — to'xtatilgan, `0` — davom etadi (`worker/src/lib.rs` `encode_paused`).
           if [ -s ../ci/ENCODE_PAUSE ]; then put ENCODE_PAUSE "$(tr -d '[:space:]' < ../ci/ENCODE_PAUSE)"; fi
           # Avto-kodlash (`encode.yml`): Actions shu kalit bilan kiradi.

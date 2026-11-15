@@ -314,6 +314,29 @@ pub(crate) async fn origin_src(env: &Env, name: &str) -> Option<Value> {
 }
 
 /// Qism/sifat o'chirilganda: R2 bo'laklari, kanal xabarlari va baza yozuvi ketadi.
+/// Fayl o'chirilgandan KEYIN (egasining qatori yo'q) tozalash: kanal xabarlari (`msgs` — vergul bilan), R2 va kesh. Qator bor bo'lsa oddiy `forget` ishlaydi.
+pub(crate) async fn forget_known(env: &Env, name: &str, msgs: &str) {
+    if !tg_safe_name(name) {
+        return;
+    }
+    meta_drop(name).await;
+    if let Some(bk) = bucket(env) {
+        r2_delete_all(&bk, name).await;
+    }
+    let channel = vd_channel(env);
+    if channel != 0 {
+        let all: Vec<i64> = ids(msgs).into_iter().take(400).filter_map(|id| id.parse::<i64>().ok()).collect();
+        for batch in all.chunks(100) {
+            if tg_api(env, "deleteMessages", json!({"chat_id": channel, "message_ids": batch})).await.is_err() {
+                for m in batch {
+                    let _ = tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": m})).await;
+                }
+            }
+        }
+    }
+    let _ = turso_exec(env, "DELETE FROM vd_queue WHERE name=?", vec![TursoArg::text(name)]).await;
+}
+
 pub(crate) async fn forget(env: &Env, name: &str) {
     if !tg_safe_name(name) {
         return;
@@ -358,7 +381,7 @@ pub(crate) async fn forget(env: &Env, name: &str) {
 
 pub(crate) fn is_actions_path(path: &str) -> bool {
     matches!(path, "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish"
-        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/move_channel" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/selftest" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
+        | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/move_channel" | "/api/vd/jobstep" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/selftest" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail")
 }
 
 pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Response> {
@@ -520,6 +543,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let r = first_row(&r).unwrap_or(json!({}));
             ok(json!({"store": jint(&r, "store"), "mig": jint(&r, "mig"), "full": staged_bytes(env).await >= cap_bytes(env)}))
         }
+        // ── FONDAGI ISHLAR (Ample `jobrunner`): navbatdagi eng eski ishning keyingi qismi (`job_step`). ──
+        "/api/vd/jobstep" => ok(job_step(env).await),
         // ── KANAL ALMASHTIRISH (2026-11, foydalanuvchi talabi): hamma saqlangan fayl (rasm, bo'lak, qism) yangi kanalga ko'chadi, fayl ID'lari va xabar
         // raqamlari yangilanadi. Eski kanaldagi xabarlar O'CHIRILMAYDI. Har chaqiruvda <= 8 qator (Cloudflare 50 so'rov chegarasi); `remaining` 0 bo'lguncha takrorlanadi. ──
         "/api/vd/move_channel" => {

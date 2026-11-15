@@ -25,7 +25,7 @@ enum class SyncResult { DONE, OFFLINE, NO_ACCOUNT }
  * 1. Hamma yozuv avval telefonda (ekranda o'zgarish darhol ko'rinadi), serverga keyin bitta paket bo'lib ketadi (`POST /api/sync`).
  * 2. Navbat siqiladi: bir xil `key` — eskisi almashtiriladi (50 marta bosilgan tugma navbatda 1 ta qator).
  * 3. Yuborish: yangi yozuvdan 1 daqiqa keyin (shu orada kelganlar ham shu paketga tushadi), ilova fonga ketganda — darhol;
- *    ikki paket orasida kamida 2 daqiqa. Yuborilmagan o'zgarishlar (tarix, sevimli, baho) ro'yxatlarda DARHOL ko'rinadi (`pendingHistory`, `pendingFavorites`). Navbat diskda shifrlangan holda turadi — ilova yopilsa ham yo'qolmaydi.
+ *    tarix paketi 10 daqiqada bir (ilova fonga o'tganda darhol); baho/sevimli/to'plam/sozlama 30 soniyada. Yuborilmagan o'zgarishlar (tarix, sevimli, baho) ro'yxatlarda DARHOL ko'rinadi (`pendingHistory`, `pendingFavorites`). Navbat diskda shifrlangan holda turadi — ilova yopilsa ham yo'qolmaydi.
  * 4. Har paketda bir martalik `batch_id`: javob yo'lda yo'qolib qayta yuborilsa, worker ikki marta sanamaydi.
  */
 class SyncQueue(
@@ -161,7 +161,7 @@ class SyncQueue(
         scope.launch { flush(force) }
     }
 
-    /** `force = false` — 2 daqiqalik oraliqni hurmat qiladi. */
+    /** `force = false` — 10 daqiqalik oraliqni hurmat qiladi. */
     suspend fun flush(force: Boolean = true): SyncResult {
       return sending.withLock {
         val token = auth.sessionToken ?: return@withLock SyncResult.NO_ACCOUNT
@@ -250,14 +250,27 @@ class SyncQueue(
             while (rows.size > MAX_QUEUE_ROWS) rows.removeAt(0)
             save()
         }
-        schedule(FLUSH_DELAY_MS)
+        // Tarix — 10 daqiqalik paket; baho/sevimli/to'plam/sozlama (kam uchraydi, foydalanuvchi kutadi) — 30 soniyada.
+        if (kind == Kind.HISTORY) schedule(FLUSH_DELAY_MS) else schedule(OTHER_DELAY_MS, force = true)
     }
 
-    private fun schedule(ms: Long) {
-        flushJob?.cancel()
+    @Volatile
+    private var nextFlushAt = 0L
+
+    /**
+     * Yuborishni belgilaydi. Allaqachon belgilangan (undan oldingi yoki bir vaqtdagi) yuborish bo'lsa TEGILMAYDI: har 10 soniyada tarix yozuvi
+     * kelib turgani uchun taymerni har safar qayta boshlasak, paket hech qachon ketmasdi (faqat ilova fonga o'tganda).
+     */
+    private fun schedule(ms: Long, force: Boolean = false) {
+        val at = System.currentTimeMillis() + ms
+        val cur = flushJob
+        if (cur != null && cur.isActive && nextFlushAt in 1..at) return
+        cur?.cancel()
+        nextFlushAt = at
         flushJob = scope.launch {
             delay(ms)
-            flush(force = false)
+            nextFlushAt = 0L
+            flush(force = force)
         }
     }
 
@@ -285,8 +298,9 @@ class SyncQueue(
     private fun now() = System.currentTimeMillis()
 
     private companion object {
-        const val FLUSH_DELAY_MS = 60_000L
-        const val MIN_GAP_MS = 120_000L
+        const val FLUSH_DELAY_MS = 600_000L // serverga paket: 10 daqiqada bir marta (fonga o'tganda/yopilganda darhol)
+        const val OTHER_DELAY_MS = 30_000L
+        const val MIN_GAP_MS = 600_000L
         const val MAX_ROWS_PER_BATCH = 150
         const val MAX_QUEUE_ROWS = 500
     }

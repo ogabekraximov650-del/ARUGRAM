@@ -3453,6 +3453,100 @@ fn urlencoding(v: &str) -> String {
     out
 }
 
+// ── FONDAGI ISHLAR (Ample ish yurituvchisi) ─────────────────────
+//
+// TALAB (foydalanuvchi): og'ir amallar (o'chirish va shunga o'xshash) worker'da emas, Ample'da to'liq bajarilsin; worker faqat qabul qiladi va tugagach
+// ilovaga habar beradi. Bazadagi yozuvlar darhol o'chadi (ilova to'g'ri ko'radi), fayl/kanal tozalash esa `async_jobs` navbatiga tushadi.
+// Ample'dagi `jobrunner` (`ARUmultiplatform/jobrunner`) `/api/vd/jobstep` ni takror chaqirib ishni qismlarga bo'lib bajaradi (har qism Cloudflare 50 so'rov
+// chegarasiga sig'adi); tugagach `async_jobs` belgisi yangilanadi va ilova jonli yangilanish orqali biladi. `JOBS_URL` (`ci/JOBS_URL`) bo'lmasa — cron qayta uriniladi.
+
+/// Bir qismda tozalanadigan fayllar soni (har fayl ~10 so'rov).
+const JOB_BATCH: usize = 3;
+
+/// `rows` dagi (nom ustuni, xabar raqamlari ustuni) juftliklaridan tozalash elementlari: `{"n": nom, "m": "xabar,xabar"}`. Xabar raqamlari qator o'chirilishidan OLDIN olinadi.
+fn cleanup_items(rows: &[Value], specs: &[(&str, &str)]) -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for r in rows {
+        for (nc, mc) in specs {
+            let n = r[*nc].as_str().unwrap_or("").trim().to_string();
+            if n.is_empty() || out.iter().any(|x| x["n"] == json!(n)) {
+                continue;
+            }
+            out.push(json!({"n": n, "m": r[*mc].as_str().unwrap_or("")}));
+        }
+    }
+    out
+}
+
+/// Tozalash ishini navbatga qo'yadi va Ample ish yurituvchisini uyg'otadi (`JOBS_URL`).
+async fn job_enqueue_cleanup(env: &Env, items: Vec<Value>) {
+    if items.is_empty() {
+        return;
+    }
+    let _ = turso_exec(env,
+        "CREATE TABLE IF NOT EXISTS async_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, payload TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued',
+          cursor INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, err TEXT NOT NULL DEFAULT '', created INTEGER NOT NULL, updated INTEGER NOT NULL)", vec![]).await;
+    let now = now_ms();
+    let _ = turso_exec(env,
+        "INSERT INTO async_jobs (kind, payload, state, total, created, updated) VALUES ('cleanup', ?, 'queued', ?, ?, ?)",
+        vec![TursoArg::text(&json!({"items": items}).to_string()), TursoArg::int(items.len() as i64), TursoArg::int(now), TursoArg::int(now)]).await;
+    jobs_kick(env).await;
+}
+
+/// Ample ish yurituvchisini uyg'otadi: u worker'ning `/api/vd/jobstep` ini ENCODE_TOKEN bilan takror chaqiradi (token xotirada, saqlanmaydi).
+pub(crate) async fn jobs_kick(env: &Env) -> bool {
+    let url = tg_secret(env, "JOBS_URL");
+    let token = tg_secret(env, "ENCODE_TOKEN");
+    if url.trim().is_empty() || token.is_empty() {
+        return false;
+    }
+    let mut h = Headers::new();
+    let _ = h.set("Content-Type", "application/json");
+    let body = json!({"token": token}).to_string();
+    let Ok(rq) = Request::new_with_init(&format!("{}/kick", url.trim().trim_end_matches('/')),
+        RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(body.into()))) else { return false };
+    Fetch::Request(rq).send().await.map(|r| r.status_code() < 300).unwrap_or(false)
+}
+
+/// Cron (har daqiqada): navbatda tugamagan ish bo'lsa ish yurituvchi qayta uyg'otiladi (u o'lib qolgan yoki uxlagan bo'lishi mumkin).
+async fn jobs_cron(env: &Env) {
+    if tg_secret(env, "JOBS_URL").trim().is_empty() {
+        // Ish yurituvchi sozlanmagan: zaxira — worker o'zi cron'da bir qismni bajaradi (fayllar yetim qolmasin).
+        let _ = job_step(env).await;
+        return;
+    }
+    let pending = turso_exec(env, "SELECT COUNT(*) AS n FROM async_jobs WHERE state IN ('queued','running')", vec![]).await
+        .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0);
+    if pending > 0 {
+        jobs_kick(env).await;
+    }
+}
+
+/// Navbatdagi eng eski ishning keyingi qismini bajaradi. Javob: `{idle}` (ish yo'q) yoki `{job, cursor, total, done}`.
+pub(crate) async fn job_step(env: &Env) -> Value {
+    let Some(row) = turso_exec(env, "SELECT id, payload, cursor, total FROM async_jobs WHERE state IN ('queued','running') ORDER BY id LIMIT 1", vec![]).await
+        .ok().and_then(|r| first_row(&r)) else {
+        return json!({"ok": true, "idle": true});
+    };
+    let (id, cursor) = (jint(&row, "id"), jint(&row, "cursor").max(0) as usize);
+    let payload: Value = serde_json::from_str(row["payload"].as_str().unwrap_or("{}")).unwrap_or(json!({}));
+    let items = payload["items"].as_array().cloned().unwrap_or_default();
+    let end = (cursor + JOB_BATCH).min(items.len());
+    for it in &items[cursor.min(items.len())..end] {
+        let name = it["n"].as_str().unwrap_or("");
+        vd::forget_known(env, name, it["m"].as_str().unwrap_or("")).await;
+        b2_delete(env, name).await;
+    }
+    let done = end >= items.len();
+    let _ = turso_exec(env, "UPDATE async_jobs SET cursor=?, state=?, updated=? WHERE id=?",
+        vec![TursoArg::int(end as i64), TursoArg::text(if done { "done" } else { "running" }), TursoArg::int(now_ms()), TursoArg::int(id)]).await;
+    if done {
+        // Tugadi: o'zgarish belgisi yangilanadi — ulangan ilovalar jonli yangilanish orqali biladi.
+        marks_bump(env, &["async_jobs".to_string()]).await;
+    }
+    json!({"ok": true, "idle": false, "job": id, "cursor": end, "total": items.len(), "done": done})
+}
+
 async fn b2_delete_epizod_files(env: &Env, ep: &Value) {
     for k in &["url_360p", "url_480p", "url_720p", "url_1080p"] {
         let u = ep[k].as_str().unwrap_or("");
@@ -6864,7 +6958,7 @@ async fn comments_wait(req: &Request, env: &Env) -> Result<Response> {
 }
 
 /// Jonli yangilanish uchun jadvallar to'plamlari. `content` — hamma uchun (faqat o'zgarish VAQTI qaytadi, ma'lumot emas); `users`/`reports` — faqat admin.
-const LIVE_CONTENT: &[&str] = &["anime_db", "season_db", "epizod_db", "translator_db"];
+const LIVE_CONTENT: &[&str] = &["anime_db", "season_db", "epizod_db", "translator_db", "async_jobs"];
 const LIVE_USERS: &[&str] = &["users_db"];
 const LIVE_REPORTS: &[&str] = &["reports_db"];
 
@@ -10603,7 +10697,7 @@ fn needs_app_check(path: &str) -> bool {
         | "/api/dub/claim" | "/api/dub/peek" | "/api/dub/check" | "/api/dub/finish" | "/api/dub/progress" | "/api/dub/state" | "/api/dub/stage"
         | "/api/anibla/claim" | "/api/anibla/diag" | "/api/anibla/probe" | "/api/anibla/progress" | "/api/anibla/done"
         | "/api/session/poll" | "/api/session/report"
-        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/move_channel" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/selftest" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
+        | "/api/encode/r2put" | "/api/encode/r2ready" | "/api/encode/qdiag" | "/api/encode/cancel" | "/api/encode/translate" | "/api/vd/mig/enqueue" | "/api/vd/mig/claim" | "/api/vd/mig/fail" | "/api/vd/init" | "/api/vd/put" | "/api/vd/finish" | "/api/vd/peek" | "/api/vd/verify" | "/api/vd/wipe" | "/api/vd/move_channel" | "/api/vd/jobstep" | "/api/vd/channel" | "/api/vd/forget" | "/api/vd/selftest" | "/api/vd/dl" | "/api/vd/claim" | "/api/vd/read" | "/api/vd/chunkdone" | "/api/vd/done" | "/api/vd/fail" | "/api/r2/claim" | "/api/r2/beat" | "/api/r2/fail" | "/api/r2/done" | "/api/r2/diag" | "/api/r2/dmsg" | "/api/r2/peek" | "/api/r2/put" | "/api/r2/ready" | "/api/r2/part" | "/api/r2/get")
     {
         return false;
     }
@@ -14488,6 +14582,8 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
                 let _ = Fetch::Request(rq).send().await;
             }
         }
+        // Fondagi ishlar (o'chirishdan keyingi tozalash): tugamagan bo'lsa Ample ish yurituvchisi qayta uyg'otiladi.
+        jobs_cron(&env).await;
         if ((ev.schedule() / 60_000.0) as i64) % 10 != 0 { return; }
     }
     // Kodlash navbati BIRINCHI: Cloudflare bitta chaqiruvda ~50 ta ichki so'rovga ruxsat beradi (subrequest). Quyidagi bot/navbatlar ularni
@@ -15710,7 +15806,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
 
                         if method == Method::Delete {
                             let old = turso_exec(&env,
-                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]).await?;
                             let ec = old["cols"].as_array().cloned().unwrap_or_default();
                             let er = old["rows"].as_array().cloned().unwrap_or_default();
@@ -15736,15 +15832,17 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                             // Bo'lim kartasidagi "N ta qism" hisobi 10 daqiqa keshda turardi: o'chirilgan qismlar poster ustida qolib ketardi.
                             free_seasons_forget().await;
                             if !er.is_empty() {
+                                // Fayllarni tozalash Ample ish yurituvchisiga topshiriladi (qism bazadan allaqachon o'chdi).
                                 let row = row_to_obj(&ec, er[0].as_array().unwrap_or(&vec![]));
-                                b2_delete_epizod_files(&env, &row).await;
+                                let mut items = cleanup_items(&[row.clone()], &[("url_360p", "q360_vd_msgs"), ("url_480p", "q480_vd_msgs"), ("url_720p", "q720_vd_msgs"), ("url_1080p", "q1080_vd_msgs")]);
                                 // Kodlanishi kutilayotgan asl video ham kanaldan o'chadi.
                                 let ov = row["origin_video"].as_str().unwrap_or("");
                                 if ov.starts_with("orig_") {
-                                    tg_forget_file(&env, ov).await;
+                                    items.push(json!({"n": ov, "m": ""}));
                                 }
+                                job_enqueue_cleanup(&env, items).await;
                             }
-                            return ok(json!({"success": true}));
+                            return ok(json!({"success": true, "cleanup": "queued"}));
                         }
                     }
                 }
@@ -15820,17 +15918,17 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                         if method == Method::Delete {
                             // 1. Epizod videolarini B2dan o'chirish
                             let eps = turso_exec(&env,
-                                "SELECT url_360p,url_480p,url_720p,url_1080p FROM epizod_db WHERE anime_id=? AND season_id=?",
+                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=? AND season_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
                             let ec = eps["cols"].as_array().cloned().unwrap_or_default();
                             let er = eps["rows"].as_array().cloned().unwrap_or_default();
-                            // 3. Bo'lim rasmini B2dan o'chirish
-                            let old = turso_exec(&env, "SELECT photo_url FROM season_db WHERE anime_id=? AND season_id=?",
+                            // 3. Bo'lim rasmi
+                            let old = turso_exec(&env, "SELECT photo_url, photo_vd_msgs FROM season_db WHERE anime_id=? AND season_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
                             let or_ = old["rows"].as_array().cloned().unwrap_or_default();
                             if or_.is_empty() { return err404("Bo'lim topilmadi"); }
                             let oc = old["cols"].as_array().cloned().unwrap_or_default();
-                            let op = row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]))["photo_url"].as_str().unwrap_or("").to_string();
+                            let photo_row = row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]));
                             // AVVAL bazadan (bo'lim darhol yo'qoladi), KEYIN fayllar: fayllar bittalab o'chirilganda so'rov chegarasi (50) oshib to'xtasa ham
                             // bo'lim bazada qolib ketmaydi. Fayllar tozalash cheklangan (qolganlari ombor/kanalda yetim qolishi mumkin).
                             // epizod_db dan o'chirish
@@ -15860,11 +15958,13 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                                 ("DELETE FROM season_db WHERE anime_id=? AND season_id=?",
                                  vec![TursoArg::int(aid), TursoArg::int(sid)]),
                             ]).await;
-                            for row in er.iter().take(6) {
-                                b2_delete_epizod_files(&env, &row_to_obj(&ec, row.as_array().unwrap_or(&vec![]))).await;
-                            }
-                            if !op.is_empty() { b2_delete(&env, &op).await; }
-                            return ok(json!({"success": true}));
+                            // Hamma qism fayllari + bo'lim rasmi: Ample ish yurituvchisi to'liq tozalaydi (ilgari faqat dastlabki 6 qism, qolgani yetim qolardi).
+                            let ep_rows: Vec<Value> = er.iter().map(|r| row_to_obj(&ec, r.as_array().unwrap_or(&vec![]))).collect();
+                            let mut items = cleanup_items(&ep_rows, &[("url_360p", "q360_vd_msgs"), ("url_480p", "q480_vd_msgs"), ("url_720p", "q720_vd_msgs"), ("url_1080p", "q1080_vd_msgs")]);
+                            items.extend(ep_rows.iter().filter_map(|r| r["origin_video"].as_str().filter(|o| o.starts_with("orig_")).map(|o| json!({"n": o, "m": ""}))));
+                            items.extend(cleanup_items(&[photo_row], &[("photo_url", "photo_vd_msgs")]));
+                            job_enqueue_cleanup(&env, items).await;
+                            return ok(json!({"success": true, "cleanup": "queued"}));
                         }
                     }
                 }
@@ -15914,33 +16014,29 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                     }
 
                     if method == Method::Delete {
-                        // CASCADE: anime + barcha bo'limlar + barcha epizodlar (B2 + DB)
-                        // 1. Barcha epizod videolarini B2dan o'chirish
+                        // CASCADE: anime + barcha bo'limlar + barcha epizodlar. AVVAL bazadan (hammasi darhol yo'qoladi), fayllar/kanal tozalash esa Ample ish yurituvchisida.
+                        // Fayl nomlari va kanal xabar raqamlari qatorlar o'chirilishidan OLDIN yig'iladi.
                         let eps = turso_exec(&env,
-                            "SELECT url_360p,url_480p,url_720p,url_1080p FROM epizod_db WHERE anime_id=?",
+                            "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=?",
                             vec![TursoArg::int(id)]).await?;
                         let ec = eps["cols"].as_array().cloned().unwrap_or_default();
-                        let er = eps["rows"].as_array().cloned().unwrap_or_default();
-                        for row in &er { b2_delete_epizod_files(&env, &row_to_obj(&ec, row.as_array().unwrap_or(&vec![]))).await; }
-                        turso_exec(&env, "DELETE FROM epizod_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
-                        free_seasons_forget().await;
-                        // 2. Barcha bo'lim rasmlarini B2dan o'chirish
-                        let ss = turso_exec(&env, "SELECT photo_url FROM season_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
+                        let ep_rows: Vec<Value> = eps["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| row_to_obj(&ec, r.as_array().unwrap_or(&vec![]))).collect();
+                        let mut items = cleanup_items(&ep_rows, &[("url_360p", "q360_vd_msgs"), ("url_480p", "q480_vd_msgs"), ("url_720p", "q720_vd_msgs"), ("url_1080p", "q1080_vd_msgs")]);
+                        items.extend(ep_rows.iter().filter_map(|r| r["origin_video"].as_str().filter(|o| o.starts_with("orig_")).map(|o| json!({"n": o, "m": ""}))));
+                        let ss = turso_exec(&env, "SELECT photo_url, photo_vd_msgs FROM season_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
                         let sc = ss["cols"].as_array().cloned().unwrap_or_default();
-                        let sr = ss["rows"].as_array().cloned().unwrap_or_default();
-                        for row in &sr {
-                            let u = row_to_obj(&sc, row.as_array().unwrap_or(&vec![]))["photo_url"].as_str().unwrap_or("").to_string();
-                            if !u.is_empty() { b2_delete(&env, &u).await; }
-                        }
-                        turso_exec(&env, "DELETE FROM season_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
-                        // 3. Anime rasmini B2dan o'chirish + anime_db dan o'chirish
-                        let old = turso_exec(&env, "SELECT photo_url FROM anime_db WHERE id=?", vec![TursoArg::int(id)]).await?;
+                        let sr: Vec<Value> = ss["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| row_to_obj(&sc, r.as_array().unwrap_or(&vec![]))).collect();
+                        items.extend(cleanup_items(&sr, &[("photo_url", "photo_vd_msgs")]));
+                        let old = turso_exec(&env, "SELECT photo_url, photo_vd_msgs FROM anime_db WHERE id=?", vec![TursoArg::int(id)]).await?;
                         let or_ = old["rows"].as_array().cloned().unwrap_or_default();
                         if or_.is_empty() { return err404("Anime topilmadi"); }
                         let oc = old["cols"].as_array().cloned().unwrap_or_default();
-                        let op = row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]))["photo_url"].as_str().unwrap_or("").to_string();
-                        if !op.is_empty() { b2_delete(&env, &op).await; }
+                        items.extend(cleanup_items(&[row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]))], &[("photo_url", "photo_vd_msgs")]));
+                        turso_exec(&env, "DELETE FROM epizod_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
+                        free_seasons_forget().await;
+                        turso_exec(&env, "DELETE FROM season_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
                         turso_exec(&env, "DELETE FROM anime_db WHERE id=?", vec![TursoArg::int(id)]).await?;
+                        job_enqueue_cleanup(&env, items).await;
                         // 4. Hamma foydalanuvchining tomosha tarixidan ham.
                         let _ = turso_exec(&env, "DELETE FROM watch_history_db WHERE anime_id=?",
                             vec![TursoArg::int(id)]).await;
