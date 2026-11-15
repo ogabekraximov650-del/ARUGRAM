@@ -98,6 +98,7 @@ private class HistoryDraft(
     var positionMs: Long = 0,
     var durationMs: Long = 0,
     var lastStamp: String = "",
+    var lastSyncStamp: String = "",
 )
 
 /**
@@ -164,14 +165,18 @@ fun SeasonScreen(
     val sorted = remember(episodes) { episodes.sortedBy { it.number } }
 
     // ── Tomosha tarixi: qism almashganda / chiqishda yoziladi (SyncQueue — bitta paket) ──
-    fun flushHistory() {
+    // `sync=false`: faqat ro'yxat va telefon xotirasi (har soniyada, arzon); `sync=true`: serverga yuborish navbati ham (SyncQueue o'zi 2 daqiqada bir paket qiladi).
+    fun flushHistory(sync: Boolean = true) {
         val d = draft ?: return
         if (d.durationMs <= 0 || d.positionMs < 1000) return
         val stamp = "${d.positionMs}/${d.watchedMs}/${d.quality}/${d.newView}"
+        if (sync && stamp != d.lastSyncStamp) {
+            d.lastSyncStamp = stamp
+            AppServices.sync.putHistory(d.animeId, d.seasonId, d.epId, d.url, d.quality, d.positionMs, d.durationMs, d.watchedMs, d.newView)
+        }
         if (stamp == d.lastStamp) return
         d.lastStamp = stamp
-        AppServices.sync.putHistory(d.animeId, d.seasonId, d.epId, d.url, d.quality, d.positionMs, d.durationMs, d.watchedMs, d.newView)
-        // Ro'yxatda (Kutubxona > Tarix) darhol ko'rinadi — server paketini kutmaydi.
+        // Ro'yxatda (Kutubxona > Tarix) darhol ko'rinadi va telefon xotirasiga yoziladi — server paketini kutmaydi.
         sorted.firstOrNull { it.id == d.epId }?.let { ep ->
             AppServices.library.applyHistory(
                 HistoryItem(
@@ -182,12 +187,11 @@ fun SeasonScreen(
                 ),
             )
         }
-        d.newView = false
+        if (sync) d.newView = false
     }
 
     fun saveProgress() {
         if (progressUrl.isNotEmpty() && player.durationMs > 0) {
-            AppServices.progress.save(progressUrl, player.positionMs, player.durationMs)
             current?.let { e -> AppServices.progress.saveEpisode("${season.animeId}:${season.seasonId}:${e.id}", player.positionMs, player.durationMs, e.qualityOf(progressUrl)) }
         }
     }
@@ -291,8 +295,7 @@ fun SeasonScreen(
                 d.durationMs = player.durationMs
                 if (player.playing) d.watchedMs = (d.watchedMs + 500).coerceAtMost(player.durationMs)
             }
-            if (++n % 2 == 0) saveProgress() // har 1 soniyada (tick 500 ms)
-            if (n % 20 == 0) flushHistory() // har 10 soniyada: Tarix ro'yxati va telefon xotirasi darhol yangilanadi (serverga yuborish SyncQueue'da, 2 daqiqada bir)
+            if (++n % 2 == 0) { saveProgress(); flushHistory(sync = n % 20 == 0) } // har 1 soniyada: joy + Tarix ro'yxati + telefon xotirasi; serverga yuborish navbati 10 soniyada (tick 500 ms)
             // Intro: avto o'tkazish
             val ep = current
             if (ep != null && autoSkipIntro) {

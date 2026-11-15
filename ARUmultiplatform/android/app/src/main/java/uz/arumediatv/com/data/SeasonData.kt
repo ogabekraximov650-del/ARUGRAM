@@ -263,8 +263,8 @@ class SeasonRepository(
 /** Davom etish joyini tanlash (sofi mantiq, test qilinadi). */
 object ResumePoint {
     /**
-     * Ustuvorlik: aniq so'ralgan joy (`resumeAt`) > qism bo'yicha saqlangan joy (sifatdan mustaqil) > server tarixi (faqat yangiroq bo'lsa yoki
-     * mahalliy joy yo'q bo'lsa) > faylga bog'liq joy (`urlPos`, eng oxirida: sifat almashtirilganda eskirib qoladi).
+     * BITTA umumiy vaqt (sifatdan mustaqil): aniq so'ralgan joy (`resumeAt`) > qism bo'yicha saqlangan joy > server tarixi (faqat yangiroq bo'lsa
+     * yoki mahalliy joy yo'q bo'lsa). Faylga bog'liq joy (`urlPos`) endi YOZILMAYDI; faqat eski o'rnatishlardan qolgan qiymat uchun oxirgi zaxira.
      */
     fun choose(resumeAt: Long?, localPos: Long, localStamp: Long, histPos: Long, histUpdatedAt: Long, urlPos: Long): Long {
         if (resumeAt != null) return resumeAt
