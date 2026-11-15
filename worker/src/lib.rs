@@ -1602,6 +1602,13 @@ async fn init_db(env: &Env) -> bool {
             "ALTER TABLE anime_db ADD COLUMN created_at INTEGER DEFAULT 0", vec![]).await;
         config_put(env, "mig_anime_created_at", "1").await;
     }
+    // Google bilan kirish (2026-11): `google_sub` — Google akkauntning o'zgarmas ID'si (`sub`), `email` — faqat hisobni tanish uchun.
+    if ok && config_get(env, "mig_users_google").await.is_none() {
+        let a = turso_exec(env, "ALTER TABLE users_db ADD COLUMN google_sub TEXT DEFAULT ''", vec![]).await.is_ok();
+        let b = turso_exec(env, "ALTER TABLE users_db ADD COLUMN email TEXT DEFAULT ''", vec![]).await.is_ok();
+        let c = turso_exec(env, "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_gsub ON users_db(google_sub) WHERE google_sub <> ''", vec![]).await.is_ok();
+        if a && b && c { config_put(env, "mig_users_google", "1").await; }
+    }
     // Anime -> tarjimon (2026-11): 0 — tarjimonsiz.
     if ok && config_get(env, "mig_anime_translator").await.is_none() {
         let _ = turso_exec(env,
@@ -4344,6 +4351,71 @@ async fn upsert_user(env: &Env, from: &Value) -> Result<Value> {
             Ok(r) => { if let Some(u) = first_row(&r) { return Ok(u); } }
             // ID, telegram_id yoki username band bo'lib qoldi —
             // qaytadan urinamiz (bo'sh raqam qaytadan qidiriladi).
+            Err(_) => continue,
+        }
+    }
+    Err(Error::RustError("Foydalanuvchi yaratib bo'lmadi".into()))
+}
+
+// ── GOOGLE BILAN KIRISH ─────────────────────────────────────────
+//
+// Ilova Credential Manager orqali Google'dan ID token oladi, worker uni Google'ning `tokeninfo` xizmati bilan tekshiradi (imzoni Google o'zi tekshiradi)
+// va `aud` (Web Client ID), `iss`, `exp`, `email_verified` ni solishtiradi. Hisob `google_sub` bo'yicha topiladi yoki yangi yaratiladi
+// (ism/username avtomatik, Telegramdagidek). Admin huquqi Telegram ID'ga bog'liq — Google hisob hech qachon admin bo'lmaydi.
+const GOOGLE_WEB_CLIENT_ID: &str = "818006812529-99ospcjp0u3jqhak0ka5m5mogl3lcl38.apps.googleusercontent.com";
+
+/// ID tokenni tekshiradi; to'g'ri bo'lsa `(sub, email)`. Aks holda tushunarli xato matni.
+async fn google_verify(id_token: &str) -> std::result::Result<(String, String), String> {
+    let t = id_token.trim();
+    if t.len() < 100 || t.len() > 4096 || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
+        return Err("Google tokeni noto'g'ri".into());
+    }
+    let req = Request::new(&format!("https://oauth2.googleapis.com/tokeninfo?id_token={t}"), Method::Get).map_err(|e| e.to_string())?;
+    let mut resp = Fetch::Request(req).send().await.map_err(|_| "Google bilan bog'lanib bo'lmadi".to_string())?;
+    if resp.status_code() != 200 {
+        return Err("Google tokeni yaroqsiz yoki muddati tugagan".into());
+    }
+    let c: Value = resp.json().await.map_err(|_| "Google javobi tushunarsiz".to_string())?;
+    google_claims_ok(&c, now_ms() / 1000)
+}
+
+/// `tokeninfo` javobini tekshiradi (sof mantiq, test qilinadi).
+fn google_claims_ok(c: &Value, now_s: i64) -> std::result::Result<(String, String), String> {
+    if c["aud"].as_str() != Some(GOOGLE_WEB_CLIENT_ID) {
+        return Err("Token bu ilova uchun berilmagan".into());
+    }
+    if !matches!(c["iss"].as_str(), Some("accounts.google.com") | Some("https://accounts.google.com")) {
+        return Err("Token Google'dan emas".into());
+    }
+    let exp: i64 = c["exp"].as_str().and_then(|x| x.parse().ok()).or_else(|| c["exp"].as_i64()).unwrap_or(0);
+    if exp <= now_s {
+        return Err("Token muddati tugagan".into());
+    }
+    if !(c["email_verified"].as_str() == Some("true") || c["email_verified"].as_bool() == Some(true)) {
+        return Err("Google email tasdiqlanmagan".into());
+    }
+    let sub = c["sub"].as_str().unwrap_or("").to_string();
+    if sub.is_empty() {
+        return Err("Google ID yo'q".into());
+    }
+    Ok((sub, c["email"].as_str().unwrap_or("").to_lowercase()))
+}
+
+/// `google_sub` bo'yicha hisobni topadi (so'ngi kirish vaqtini yangilaydi) yoki yangisini yaratadi.
+async fn google_user(env: &Env, sub: &str, email: &str) -> Result<Value> {
+    let now = now_ms();
+    let res = turso_exec(env, "UPDATE users_db SET last_login_at=? WHERE google_sub=? RETURNING *",
+        vec![TursoArg::int(now), TursoArg::text(sub)]).await?;
+    if let Some(u) = first_row(&res) { return Ok(u); }
+    for _ in 0..5 {
+        let (new_id, n) = next_user_slot(env).await?;
+        let res = turso_exec(env,
+            "INSERT INTO users_db (id,telegram_id,username,first_name,last_name,is_banned,created_at,last_login_at,profile_done,google_sub,email)
+             VALUES (?,NULL,?,?,'',0,?,?,1,?,?) RETURNING *",
+            vec![TursoArg::int(new_id), TursoArg::text(&format!("user_{n}")), TursoArg::text(&format!("User {n}")),
+                 TursoArg::int(now), TursoArg::int(now), TursoArg::text(sub), TursoArg::text(email)]).await;
+        match res {
+            Ok(r) => { if let Some(u) = first_row(&r) { return Ok(u); } }
             Err(_) => continue,
         }
     }
@@ -10292,6 +10364,49 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             }))
         }
 
+        // ── GOOGLE BILAN KIRISH: `{id_token, device, platform, app_version}` -> `{status, session, user}` ──
+        (Method::Post, "/api/auth/google") => {
+            let mut req = req;
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let (sub, email) = match google_verify(b["id_token"].as_str().unwrap_or("")).await {
+                Ok(v) => v,
+                Err(e) => return json_resp(&json!({"error": e}), 401),
+            };
+            let user = google_user(env, &sub, &email).await?;
+            let now = now_ms();
+            if let Some((until, reason)) = ban_state(&user, now) {
+                return ok_nostore(json!({"status": "banned", "message": ban_message(until, &reason, now)}));
+            }
+            let session = create_session(env, &user, &b, "").await?;
+            ok_nostore(json!({"status": "ok", "session": session, "user": user_public(origin, &user)}))
+        }
+
+        // ── GOOGLE'NI MAVJUD (Telegram) HISOBGA ULASH: sessiya + `{id_token}` ──
+        (Method::Post, "/api/auth/google/link") => {
+            let Some(me) = session_user(env, &bearer(&req)).await? else {
+                return json_resp(&json!({"error": "unauthorized"}), 401);
+            };
+            let mut req = req;
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let (sub, email) = match google_verify(b["id_token"].as_str().unwrap_or("")).await {
+                Ok(v) => v,
+                Err(e) => return json_resp(&json!({"error": e}), 401),
+            };
+            let mine = me["id"].as_i64().unwrap_or(0);
+            let taken = turso_exec(env, "SELECT id FROM users_db WHERE google_sub=?", vec![TursoArg::text(&sub)]).await?;
+            if let Some(o) = first_row(&taken) {
+                if o["id"].as_i64().unwrap_or(0) != mine {
+                    return json_resp(&json!({"error": "Bu Google akkaunt boshqa hisobga ulangan"}), 409);
+                }
+            }
+            let r = turso_exec(env, "UPDATE users_db SET google_sub=?, email=? WHERE id=? AND (google_sub IS NULL OR google_sub='' OR google_sub=?)",
+                vec![TursoArg::text(&sub), TursoArg::text(&email), TursoArg::int(mine), TursoArg::text(&sub)]).await?;
+            if jint(&r, "affected_row_count") == 0 {
+                return json_resp(&json!({"error": "Hisobda boshqa Google akkaunt ulangan"}), 409);
+            }
+            ok_nostore(json!({"status": "ok"}))
+        }
+
         // ── 2-QADAM: Telegram START tugmasi bosildi ─────────────
         (Method::Post, "/api/telegram/webhook") => handle_tg_webhook(env, req).await,
 
@@ -16198,5 +16313,23 @@ mod tg_tests {
         assert_eq!(normalize_channel_id(" 1001234567890 "), -1001234567890);
         assert_eq!(normalize_channel_id(""), 0);
         assert_eq!(normalize_channel_id("abc"), 0);
+    }
+}
+
+#[cfg(test)]
+mod google_tests {
+    use super::*;
+
+    fn claims(aud: &str, iss: &str, exp: i64, verified: &str) -> Value {
+        json!({"aud": aud, "iss": iss, "exp": exp.to_string(), "email_verified": verified, "sub": "123456", "email": "Ali@Gmail.com"})
+    }
+
+    #[test]
+    fn tokeninfo_checks() {
+        assert_eq!(google_claims_ok(&claims(GOOGLE_WEB_CLIENT_ID, "https://accounts.google.com", 2000, "true"), 1000).unwrap(), ("123456".to_string(), "ali@gmail.com".to_string()));
+        assert!(google_claims_ok(&claims("boshqa", "accounts.google.com", 2000, "true"), 1000).is_err(), "aud noto'g'ri");
+        assert!(google_claims_ok(&claims(GOOGLE_WEB_CLIENT_ID, "evil.com", 2000, "true"), 1000).is_err(), "iss noto'g'ri");
+        assert!(google_claims_ok(&claims(GOOGLE_WEB_CLIENT_ID, "accounts.google.com", 900, "true"), 1000).is_err(), "muddati o'tgan");
+        assert!(google_claims_ok(&claims(GOOGLE_WEB_CLIENT_ID, "accounts.google.com", 2000, "false"), 1000).is_err(), "email tasdiqlanmagan");
     }
 }

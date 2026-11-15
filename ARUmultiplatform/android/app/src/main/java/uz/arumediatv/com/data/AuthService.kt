@@ -209,6 +209,23 @@ class AuthService(
         }
     }
 
+    /** Google ID token bilan kirish. `null` — kirildi; aks holda xato matni (banned bo'lsa `banMessage` ham to'ladi). */
+    suspend fun loginWithGoogle(idToken: String): String? = withContext(Dispatchers.IO) {
+        val r = http.callJson("$base/api/auth/google", "POST", deviceInfo().put("id_token", idToken))
+        val j = r.json
+        if (r.code == 0) return@withContext "Tarmoq xatosi — qaytadan urinib ko'ring"
+        if (j == null) return@withContext "Server javobi tushunarsiz"
+        if (j.optString("status") == "banned") {
+            banMessage = j.optString("message")
+            return@withContext banMessage.ifEmpty { "Hisob bloklangan" }
+        }
+        val session = j.optString("session")
+        val u = j.optJSONObject("user")
+        if (!r.ok || session.isEmpty() || u == null) return@withContext j.optString("error").ifEmpty { "Google orqali kirib bo'lmadi" }
+        save(session, AppUser.fromJson(u))
+        null
+    }
+
     suspend fun logout() = withContext(Dispatchers.IO) {
         sessionToken?.let { http.callJson("$base/api/auth/logout", "POST", bearer = it) }
         clear()

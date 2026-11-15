@@ -107,6 +107,10 @@ dependencies {
     // Telegram .tgs (Lottie) stikerlarini bir marta animatsiyali WebP'ga aylantirish uchun (faqat chizuvchi sifatida)
     implementation("com.airbnb.android:lottie:6.7.1")
     implementation(libs.okhttp)
+    // Google bilan kirish (Credential Manager + Google ID).
+    implementation("androidx.credentials:credentials:1.3.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.3.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     // JNA: Rust yadrosining C funksiyalarini (`librust_core.so`) JNI yozmasdan to'g'ridan-to'g'ri chaqiradi.
     implementation("net.java.dev.jna:jna:5.19.1@aar")
     implementation(libs.kotlinx.serialization.json)
