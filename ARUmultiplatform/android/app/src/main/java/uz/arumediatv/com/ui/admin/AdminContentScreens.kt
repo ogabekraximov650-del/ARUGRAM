@@ -767,6 +767,7 @@ fun AdminEpisodesScreen(anime: JSONObject, season: JSONObject, onBack: () -> Uni
                             Text(name.ifEmpty { "Epizod $num" }, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             Spacer(Modifier.height(3.dp))
                             Text(qualitiesLine(e), color = white50, fontSize = 11.sp)
+                            introLine(e)?.let { Text(it, color = white50, fontSize = 11.sp) }
                         }
                         MgmtIcon(Icons.AutoMirrored.Filled.Send, Color(0x8AFFFFFF)) { postFor = e }
                         Icon(Icons.Filled.Edit, null, tint = Color(0x62FFFFFF), modifier = Modifier.size(18.dp))
@@ -796,6 +797,16 @@ fun AdminEpisodesScreen(anime: JSONObject, season: JSONObject, onBack: () -> Uni
             }
         }
     }
+}
+
+/** Qism kartasida sifat qatori ostida: "Intro: 1:20–2:50, 22:10–23:40" (bo'sh juftliklar tashlanadi); intro yo'q bo'lsa — `null`. */
+private fun introLine(e: JSONObject): String? {
+    val parts = (0 until 5).mapNotNull { i ->
+        val a = introText(e.optString("intro_${i * 2 + 1}"))
+        val b = introText(e.optString("intro_${i * 2 + 2}"))
+        if (a.isEmpty() && b.isEmpty()) null else "${a.ifEmpty { "?" }}\u2013${b.ifEmpty { "?" }}"
+    }
+    return if (parts.isEmpty()) null else "\u23ED Intro: " + parts.joinToString(", ")
 }
 
 /** Flutter `_AdminEpizodCard._qualities` bilan bir xil: kodlanguncha ASL video "Original — tayyorlanmoqda". */
@@ -1107,7 +1118,7 @@ private fun StampBtn(onClick: () -> Unit) {
 }
 
 /**
- * Intro vaqtini aniqlash uchun pleyer (qism tahrirlash oynasining tepasida): mavjud eng yaxshi sifat ochiladi; ◀◀ ◀ ▶/⏸ ▶ ▶▶ va surgich;
+ * Intro vaqtini aniqlash uchun pleyer (qism tahrirlash oynasining tepasida): asosiy tayyor pleyer, mavjud eng yaxshi sifat ochiladi;
  * pastdagi intro qatorlarida ⏱ bosilsa hozirgi vaqt (m:ss) shu maydonga yoziladi. Video yo'q (yangi qism) bo'lsa pleyer ko'rsatilmaydi.
  */
 @Composable
@@ -1137,35 +1148,18 @@ private fun IntroPlayerCard(player: uz.arumediatv.com.ui.season.AruPlayer, initi
         }
     }
     GlassCard(16, PaddingValues(12.dp)) {
+        // Asosiy TAYYOR pleyer (`PlayerSurface` + `PlayerControls`) — qayta yozilmagan; keraksiz tugmalar (keyingi qism, qulf, ro'yxat) bo'sh qoldirilgan.
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
             uz.arumediatv.com.ui.season.PlayerSurface(player, Modifier.fillMaxSize())
+            uz.arumediatv.com.ui.season.PlayerControls(
+                player = player, title = jstr(initial, "epizod_name"), subtitle = "Intro vaqtini aniqlash",
+                fullscreen = false, locked = false, hasPrev = false, hasNext = false, introActive = false,
+                speedLabel = if (player.speed == player.speed.toInt().toFloat()) "${player.speed.toInt()}x" else "${player.speed}x",
+                onSkipIntro = {}, onPrev = {}, onNext = {}, onBack = {}, onToggleFullscreen = {}, onSettings = {}, onQuality = {},
+                onEpisodeList = {}, onToggleLock = {}, onRetry = { opened = false; err = null },
+            )
             err?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 12.sp) }
         }
-        Spacer(Modifier.height(8.dp))
-        val dur = player.durationMs.coerceAtLeast(1L)
-        var drag by remember { mutableStateOf<Float?>(null) }
-        androidx.compose.material3.Slider(
-            value = drag ?: (player.positionMs.toFloat() / dur).coerceIn(0f, 1f),
-            onValueChange = { drag = it },
-            onValueChangeFinished = { drag?.let { player.seekTo((it * dur).toLong()) }; drag = null },
-            colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = AruColors.Accent2, activeTrackColor = AruColors.Accent2),
-        )
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("${IntroTime.format(player.positionMs)} / ${IntroTime.format(player.durationMs)}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                for ((label, d) in listOf("-10" to -10_000L, "-1" to -1_000L)) SeekBtn(label) { player.seekTo((player.positionMs + d).coerceAtLeast(0)) }
-                SeekBtn(if (player.playing) "\u23F8" else "\u25B6") { if (player.playing) player.pause() else player.play() }
-                for ((label, d) in listOf("+1" to 1_000L, "+10" to 10_000L)) SeekBtn(label) { player.seekTo((player.positionMs + d).coerceAtMost(player.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE)) }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SeekBtn(text: String, onClick: () -> Unit) {
-    val sh = RoundedCornerShape(10.dp)
-    Box(Modifier.clip(sh).background(Color(0x14FFFFFF)).border(1.dp, Color(0x1AFFFFFF), sh).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
-        Text(text, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
