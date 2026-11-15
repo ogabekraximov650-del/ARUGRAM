@@ -153,7 +153,6 @@ fun InfoTab(season: Season, info: SeasonInfo?, onRate: (Int) -> Unit, onFavorite
                 InfoRow("Yili", s("yili", season.year))
                 InfoRow("Janri", s("janri", season.genres.joinToString(", ")))
                 InfoRow("Studio", s("studio"))
-                InfoRow("Tarjimon", s("tarjimon"))
                 InfoRow("Holati", s("holati", season.status))
                 val tavsif = s("tavsif")
                 if (tavsif.isNotEmpty()) {
@@ -161,6 +160,31 @@ fun InfoTab(season: Season, info: SeasonInfo?, onRate: (Int) -> Unit, onFavorite
                     Text("Tavsif", color = AruColors.TextDim, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                     Spacer(Modifier.height(6.dp))
                     Text(tavsif, color = Color.White.copy(alpha = 0.82f), fontSize = 14.sp, lineHeight = 22.sp)
+                }
+            }
+        }
+        // Tarjimon: logotip, nom va "haqida" matni (anime biriktirilgan tarjimon bo'lsa).
+        val trName = s("tr_name")
+        if (trName.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            CardBox {
+                Column(Modifier.padding(16.dp)) {
+                    Text("Tarjimon", color = AruColors.TextDim, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val logo = s("tr_photo")
+                        Box(Modifier.size(56.dp).clip(CircleShape).background(AruColors.CardAlt), contentAlignment = Alignment.Center) {
+                            if (logo.isNotEmpty()) uz.arumediatv.com.ui.common.TgImage(logo, Modifier.fillMaxSize(), maxPx = 168)
+                            else Text(trName.take(1).uppercase(), color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Text(trName, color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.SemiBold)
+                    }
+                    val bio = s("tr_bio")
+                    if (bio.isNotEmpty()) {
+                        Spacer(Modifier.height(12.dp))
+                        Text(bio, color = Color.White.copy(alpha = 0.82f), fontSize = 14.sp, lineHeight = 22.sp)
+                    }
                 }
             }
         }

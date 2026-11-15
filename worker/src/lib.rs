@@ -128,7 +128,8 @@ fn bare_name(value: &str) -> String {
 }
 
 const ANIME_URL_KEYS: &[&str] = &["photo_url"];
-const SEASON_URL_KEYS: &[&str] = &["photo_url"];
+const SEASON_URL_KEYS: &[&str] = &["photo_url", "tr_photo"];
+const TRANSLATOR_URL_KEYS: &[&str] = &["photo_url"];
 const EPIZOD_URL_KEYS: &[&str] = &["url_360p", "url_480p", "url_720p", "url_1080p"];
 
 // ── Turso ─────────────────────────────────────────────────────
@@ -785,6 +786,14 @@ async fn init_db(env: &Env) -> bool {
         )", vec![]),
         // Indeks yo'q: ro'yxat `ORDER BY id DESC LIMIT 100` (PK),
         // qidiruv esa ILOVANING O'ZIDA (Rust yadrosi) bajariladi.
+
+        // Tarjimonlar (2026-11): har anime bitta tarjimonga biriktiriladi (`anime_db.translator_id`); bo'lim sahifasida logotip, nom va
+        // "haqida" matni ko'rsatiladi.
+        ("CREATE TABLE IF NOT EXISTS translator_db (
+            id INTEGER PRIMARY KEY,
+            name TEXT, photo_url TEXT, bio TEXT,
+            created_at INTEGER DEFAULT 0
+        )", vec![]),
 
         ("CREATE TABLE IF NOT EXISTS season_db (
             anime_id INTEGER, season_id INTEGER, bolim_id INTEGER,
@@ -1474,6 +1483,12 @@ async fn init_db(env: &Env) -> bool {
         let _ = turso_exec(env,
             "ALTER TABLE anime_db ADD COLUMN created_at INTEGER DEFAULT 0", vec![]).await;
         config_put(env, "mig_anime_created_at", "1").await;
+    }
+    // Anime -> tarjimon (2026-11): 0 — tarjimonsiz.
+    if ok && config_get(env, "mig_anime_translator").await.is_none() {
+        let _ = turso_exec(env,
+            "ALTER TABLE anime_db ADD COLUMN translator_id INTEGER DEFAULT 0", vec![]).await;
+        config_put(env, "mig_anime_translator", "1").await;
     }
     // Avto-kodlash: qismning asl (original) videosi (2026-09).
     if ok && config_get(env, "mig_origin_video").await.is_none() {
@@ -6834,7 +6849,7 @@ async fn comments_wait(req: &Request, env: &Env) -> Result<Response> {
 }
 
 /// Jonli yangilanish uchun jadvallar to'plamlari. `content` — hamma uchun (faqat o'zgarish VAQTI qaytadi, ma'lumot emas); `users`/`reports` — faqat admin.
-const LIVE_CONTENT: &[&str] = &["anime_db", "season_db", "epizod_db"];
+const LIVE_CONTENT: &[&str] = &["anime_db", "season_db", "epizod_db", "translator_db"];
 const LIVE_USERS: &[&str] = &["users_db"];
 const LIVE_REPORTS: &[&str] = &["reports_db"];
 
@@ -9700,6 +9715,97 @@ fn average_rating(sum: i64, count: i64) -> f64 {
     ((sum as f64 / count as f64) * 100.0).round() / 100.0
 }
 
+/// Bo'lim obyektlariga tarjimon ma'lumotini qo'shadi (`tr_name`, `tr_photo`, `tr_bio`): anime -> `anime_db.translator_id` -> `translator_db`.
+async fn attach_translators(env: &Env, items: &mut [Value]) {
+    let Ok(res) = turso_exec(env,
+        "SELECT a.id AS aid, t.id AS tid, t.name, t.photo_url, t.bio FROM anime_db a JOIN translator_db t ON t.id = a.translator_id WHERE a.translator_id > 0",
+        vec![]).await else { return };
+    let cols = res["cols"].as_array().cloned().unwrap_or_default();
+    let map: std::collections::HashMap<i64, Value> = res["rows"].as_array().cloned().unwrap_or_default().iter()
+        .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
+        .map(|o| (jint(&o, "aid"), o))
+        .collect();
+    for it in items.iter_mut() {
+        if let Some(t) = map.get(&jint(it, "anime_id")) {
+            it["tr_id"] = json!(jint(t, "tid"));
+            it["tr_name"] = t["name"].clone();
+            it["tr_photo"] = t["photo_url"].clone();
+            it["tr_bio"] = t["bio"].clone();
+        }
+    }
+}
+
+/// /api/translators: tarjimonlar ro'yxati (hamma ko'radi), qo'shish/tahrirlash/o'chirish — faqat admin.
+async fn translators_route(mut req: Request, env: &Env, origin: &str, path: &str, method: Method) -> Result<Response> {
+    let id_part = path.strip_prefix("/api/translators").unwrap_or("").trim_start_matches('/');
+    if id_part.is_empty() {
+        if method == Method::Get {
+            let res = turso_exec(env,
+                "SELECT t.*, (SELECT COUNT(*) FROM anime_db a WHERE a.translator_id = t.id) AS anime_count FROM translator_db t ORDER BY t.id", vec![]).await?;
+            let cols = res["cols"].as_array().cloned().unwrap_or_default();
+            let mut items: Vec<Value> = res["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect();
+            // Tarjimonsiz animelar bo'lsa — "Tarjimonsiz" qatori (id 0): admin ularni ko'rib, tarjimonga biriktiradi.
+            let un = turso_exec(env,
+                "SELECT COUNT(*) AS n FROM anime_db WHERE COALESCE(translator_id,0) = 0 OR translator_id NOT IN (SELECT id FROM translator_db)", vec![]).await?;
+            let n = first_row(&un).map(|r| jint(&r, "n")).unwrap_or(0);
+            let mut out = resolve_list(origin, std::mem::take(&mut items), TRANSLATOR_URL_KEYS);
+            if n > 0 {
+                out.push(json!({"id": 0, "name": "Tarjimonsiz", "photo_url": "", "bio": "", "anime_count": n}));
+            }
+            return ok(json!(out));
+        }
+        if method == Method::Post {
+            if let Some(deny) = admin_only(&req, env).await? { return Ok(deny); }
+            let b: Value = req.json().await?;
+            let name = b["name"].as_str().unwrap_or("").trim().to_string();
+            if name.is_empty() { return json_resp(&json!({"error": "Tarjimon nomini kiriting"}), 400); }
+            let r = turso_exec(env, "SELECT COALESCE(MAX(id), 0) + 1 AS n FROM translator_db", vec![]).await?;
+            let new_id = first_row(&r).map(|r| jint(&r, "n")).unwrap_or(1).max(1);
+            let res = turso_exec(env,
+                "INSERT INTO translator_db (id,name,photo_url,bio,created_at) VALUES (?,?,?,?,?) RETURNING *",
+                vec![TursoArg::int(new_id), TursoArg::text(&name), TursoArg::text(b["photo_url"].as_str().unwrap_or("")),
+                     TursoArg::text(b["bio"].as_str().unwrap_or("")), TursoArg::int(now_ms())]).await?;
+            let Some(row) = first_row(&res) else { return err500("Qo'shib bo'lmadi") };
+            return created(resolve_fields(origin, row, TRANSLATOR_URL_KEYS));
+        }
+        return json_resp(&json!({"error": "method"}), 405);
+    }
+    let Ok(id) = id_part.parse::<i64>() else { return err404("Topilmadi") };
+    if method == Method::Get {
+        let res = turso_exec(env, "SELECT * FROM translator_db WHERE id=?", vec![TursoArg::int(id)]).await?;
+        let Some(row) = first_row(&res) else { return err404("Tarjimon topilmadi") };
+        return ok(resolve_fields(origin, row, TRANSLATOR_URL_KEYS));
+    }
+    if let Some(deny) = admin_only(&req, env).await? { return Ok(deny); }
+    if method == Method::Put {
+        let b: Value = req.json().await?;
+        let name = b["name"].as_str().unwrap_or("").trim().to_string();
+        if name.is_empty() { return json_resp(&json!({"error": "Tarjimon nomini kiriting"}), 400); }
+        let pu = b["photo_url"].as_str().unwrap_or("").to_string();
+        let old = turso_exec(env, "SELECT photo_url FROM translator_db WHERE id=?", vec![TursoArg::int(id)]).await?;
+        let Some(o) = first_row(&old) else { return err404("Tarjimon topilmadi") };
+        let op = o["photo_url"].as_str().unwrap_or("").to_string();
+        if !op.is_empty() && op != pu { b2_delete(env, &op).await; }
+        let res = turso_exec(env, "UPDATE translator_db SET name=?,photo_url=?,bio=? WHERE id=? RETURNING *",
+            vec![TursoArg::text(&name), TursoArg::text(&pu), TursoArg::text(b["bio"].as_str().unwrap_or("")), TursoArg::int(id)]).await?;
+        let Some(row) = first_row(&res) else { return err500("Yangilashda xato") };
+        return ok(resolve_fields(origin, row, TRANSLATOR_URL_KEYS));
+    }
+    if method == Method::Delete {
+        let old = turso_exec(env, "SELECT photo_url FROM translator_db WHERE id=?", vec![TursoArg::int(id)]).await?;
+        let Some(o) = first_row(&old) else { return err404("Tarjimon topilmadi") };
+        let op = o["photo_url"].as_str().unwrap_or("").to_string();
+        // Animelar o'chmaydi: tarjimonsiz bo'lib qoladi.
+        let _ = turso_batch(env, &[
+            ("UPDATE anime_db SET translator_id=0 WHERE translator_id=?", vec![TursoArg::int(id)]),
+            ("DELETE FROM translator_db WHERE id=?", vec![TursoArg::int(id)]),
+        ]).await;
+        if !op.is_empty() { b2_delete(env, &op).await; }
+        return ok(json!({"success": true}));
+    }
+    json_resp(&json!({"error": "method"}), 405)
+}
+
 async fn season_detail(env: &Env, origin: &str, req: &Request, aid: i64, sid: i64) -> Result<Response> {
     let me = match session_user(env, &bearer(req)).await? {
         Some(u) => u["id"].as_i64().unwrap_or(0),
@@ -9725,6 +9831,9 @@ async fn season_detail(env: &Env, origin: &str, req: &Request, aid: i64, sid: i6
 
     let mut row = row;
     row["free"] = json!(true); // hamma anime bepul
+    let mut one = [row];
+    attach_translators(env, &mut one).await;
+    let [row] = one;
     ok_nostore(json!({
         "season": resolve_fields(origin, row, SEASON_URL_KEYS),
         "rating": rating,
@@ -14704,7 +14813,7 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
             // `/api/anime`...) uchun UMUMIY ("pub"), qolganlari uchun faqat shu sessiya (token xeshi) — boshqa odamga ko'rinmaydi. Jadval
             // o'zgarsa belgi butun dunyoda yangilanadi (`MarkHub`) va eski nusxa o'zi e'tiborsiz qoladi; keyingi so'rov (istalgan mintaqadan)
             // Turso'dan BIR marta o'qib keshga yozadi. Shaxsiy javob keshdan faqat YAROQLI sessiya bilan beriladi (chiqqan/bloklangan token olmaydi).
-            let shared = path == "/api/seasons" || path.starts_with("/api/seasons/anime/") || path == "/api/anime" || path.starts_with("/api/anime/janr/");
+            let shared = path == "/api/seasons" || path == "/api/translators" || path.starts_with("/api/seasons/anime/") || path == "/api/anime" || path.starts_with("/api/anime/janr/");
             let tok = bearer(&req);
             let cacheable = shared || (!tok.is_empty() && session_user(&env, &tok).await?.is_some());
             let (host, query) = req.url().ok()
@@ -14758,8 +14867,8 @@ async fn main(req: Request, env: Env, ctx: Context) -> Result<Response> {
 /// yo'q jadval o'zgarsa, ilova eski javobni ko'rib qoladi. Pul va kirish
 /// (balans, obuna, sessiya) ATAYLAB yo'q.
 fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
-    const SEASONS: &[&str] = &["season_db", "epizod_db"];
-    const SEASON_ONE: &[&str] = &["season_db", "epizod_db", "ratings_db", "favorites_db"];
+    const SEASONS: &[&str] = &["season_db", "epizod_db", "anime_db", "translator_db"];
+    const SEASON_ONE: &[&str] = &["season_db", "epizod_db", "ratings_db", "favorites_db", "anime_db", "translator_db"];
     const FAVS: &[&str] = &["favorites_db", "season_db"];
     const ME_STATS: &[&str] = &["watch_history_db", "favorites_db", "ratings_db", "comments_db"];
     const USER_STATS: &[&str] = &[
@@ -14767,9 +14876,11 @@ fn etag_tables(path: &str) -> Option<&'static [&'static str]> {
         "users_db", "anime_db", "season_db", "epizod_db",
     ];
     const ANIMES: &[&str] = &["anime_db", "season_db"];
+    const TRANSLATORS: &[&str] = &["translator_db", "anime_db"];
     const ANIME_JANR: &[&str] = &["anime_db"];
     match path {
         "/api/anime" => return Some(ANIMES),
+        "/api/translators" => return Some(TRANSLATORS),
         "/api/seasons" => return Some(SEASONS),
         "/api/favorites" => return Some(FAVS),
         "/api/me/stats" => return Some(ME_STATS),
@@ -15160,6 +15271,10 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
     }
 
+    if path == "/api/translators" || path.starts_with("/api/translators/") {
+        return translators_route(req, &env, &origin, path, method.clone()).await;
+    }
+
     // ── SHAXSIY STATISTIKA VA SEVIMLILAR RO'YXATI ─────────────
     if path == "/api/me/stats" && method == Method::Get {
         return me_stats_route(req, &env).await;
@@ -15211,8 +15326,8 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
             let b: Value = req.json().await?;
             let new_id = next_anime_id(&env).await?;
             let res = turso_exec(&env,
-                "INSERT INTO anime_db (id,photo_url,name,davlat,studiya,janri,tavsif,created_at)
-                 VALUES (?,?,?,?,?,?,?,?) RETURNING *",
+                "INSERT INTO anime_db (id,photo_url,name,davlat,studiya,janri,tavsif,created_at,translator_id)
+                 VALUES (?,?,?,?,?,?,?,?,?) RETURNING *",
                 vec![
                     TursoArg::int(new_id),
                     TursoArg::text(b["photo_url"].as_str().unwrap_or("")),
@@ -15222,6 +15337,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                     TursoArg::text(b["janri"].as_str().unwrap_or("")),
                     TursoArg::text(b["tavsif"].as_str().unwrap_or("")),
                     TursoArg::int(now_ms()),
+                    TursoArg::int(b["translator_id"].as_i64().unwrap_or(0)),
                 ],
             ).await?;
             let cols = res["cols"].as_array().cloned().unwrap_or_default();
@@ -15256,6 +15372,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
             if let Some(counts) = visible_episode_counts(&env).await {
                 mark_visible_counts(&mut items, &counts);
             }
+            attach_translators(&env, &mut items).await;
             ok(json!(resolve_list(&origin, items, SEASON_URL_KEYS)))
         }
 
@@ -15402,6 +15519,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                     if let Some(counts) = visible_episode_counts(&env).await {
                         mark_visible_counts(&mut items, &counts);
                     }
+                    attach_translators(&env, &mut items).await;
                     return ok(json!(resolve_list(&origin, items, SEASON_URL_KEYS)));
                 }
             }
@@ -15699,16 +15817,19 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                             b["janri"].as_str().unwrap_or("").to_string(),
                             b["tavsif"].as_str().unwrap_or("").to_string(),
                         );
-                        let old = turso_exec(&env, "SELECT photo_url FROM anime_db WHERE id=?", vec![TursoArg::int(id)]).await?;
+                        let old = turso_exec(&env, "SELECT photo_url, translator_id FROM anime_db WHERE id=?", vec![TursoArg::int(id)]).await?;
                         let or_ = old["rows"].as_array().cloned().unwrap_or_default();
                         if or_.is_empty() { return err404("Anime topilmadi"); }
                         let oc = old["cols"].as_array().cloned().unwrap_or_default();
-                        let op = row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]))["photo_url"].as_str().unwrap_or("").to_string();
+                        let old_row = row_to_obj(&oc, or_[0].as_array().unwrap_or(&vec![]));
+                        let op = old_row["photo_url"].as_str().unwrap_or("").to_string();
+                        let old_tr = jint(&old_row, "translator_id");
                         if !op.is_empty() && op != pu { b2_delete(&env, &op).await; }
                         let res = turso_exec(&env,
-                            "UPDATE anime_db SET photo_url=?,name=?,davlat=?,studiya=?,janri=?,tavsif=? WHERE id=? RETURNING *",
+                            "UPDATE anime_db SET photo_url=?,name=?,davlat=?,studiya=?,janri=?,tavsif=?,translator_id=? WHERE id=? RETURNING *",
                             vec![TursoArg::text(&pu), TursoArg::text(&na), TursoArg::text(&da),
-                                 TursoArg::text(&st), TursoArg::text(&ja), TursoArg::text(&ta), TursoArg::int(id)],
+                                 TursoArg::text(&st), TursoArg::text(&ja), TursoArg::text(&ta),
+                                 TursoArg::int(b["translator_id"].as_i64().unwrap_or(old_tr)), TursoArg::int(id)],
                         ).await?;
                         let cols = res["cols"].as_array().cloned().unwrap_or_default();
                         let rows = res["rows"].as_array().cloned().unwrap_or_default();

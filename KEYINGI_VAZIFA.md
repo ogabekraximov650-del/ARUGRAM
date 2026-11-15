@@ -7389,3 +7389,10 @@ Sabab: jurnal bo'lagi (`db_1_v1`) har yozuvdan keyin butun fayl bo'lib (≤1 MiB
 **Xavfsizlik:** `ample-rs/src/fetch.rs` — faqat `PROXY_HOSTS` (standart `anibla.uz`) hostlari, faqat https, yo'naltirishsiz, javob <= 8 MiB, 20 s; admin kaliti kerak.
 **Qolgan xavf:** GitHub Actions (`anibla.yml` videoni yuklaydi) ham bloklangan bo'lishi mumkin — alohida tekshirish kerak.
 **Fayllar:** `ARUmultiplatform/ample-rs/src/fetch.rs`, `main.rs`, `worker/src/anibla.rs` (`PROXY`, `set_proxy`, `http_via`).
+
+## Tarjimonlar (2026-11): Tarjimon -> Anime -> Bo'lim -> Qism
+
+**Nima:** admin panelda "Animelarni boshqarish" endi tarjimonlar ro'yxatini ochadi (logotip, nom; pastda +). Tarjimon qo'shish oynasi: logotip, nom, "tarjimon haqida". Tarjimon bosilsa — uning animelari (avvalgi tizim o'zgarmagan: anime/bo'lim/qism). Yangi anime tanlangan tarjimonga biriktiriladi; anime tahrirlashda tarjimonni almashtirish mumkin. Bo'lim formasidagi "Tarjimon" matn maydoni olib tashlandi (`season_db.tarjimon` ustuni qoldi, ishlatilmaydi). Bo'lim sahifasi "Ma'lumot" tagida tarjimon kartasi: logotip, nom, haqida matni.
+
+**Qanday:** `translator_db (id, name, photo_url, bio, created_at)`; `anime_db.translator_id` (0 — tarjimonsiz). Worker: `GET/POST /api/translators`, `GET/PUT/DELETE /api/translators/{id}` (yozish — faqat admin; o'chirilganda animelar `translator_id=0`), `GET /api/translators` oxirida id 0 "Tarjimonsiz" qatori (tarjimonsiz anime bo'lsa). Bo'lim javoblariga (`/api/seasons`, `/api/seasons/anime/{id}`, `/api/season/{a}/{s}`) `tr_id`, `tr_name`, `tr_photo`, `tr_bio` qo'shiladi (`attach_translators`). O'zgarish belgilari/ETag jadvallari va `LIVE_CONTENT` ga `translator_db` qo'shildi. Android: `AdminContentScreens.kt` (`AdminTranslatorsScreen`, `AdminTranslatorEditScreen`, `AdminAnimeScreen(translator, ...)`), `MainActivity.kt` (sahifalar), `SeasonTabs.kt` (karta).
+**Eski animelar:** "Tarjimonsiz" qatorida turadi; tarjimonlar qo'shilgach anime tahrirlashda tarjimon tanlanadi (yoki bazada `translator_id` qo'yiladi).

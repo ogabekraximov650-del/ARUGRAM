@@ -82,6 +82,8 @@ import uz.arumediatv.com.ui.admin.AdminAppScreen
 import uz.arumediatv.com.ui.admin.AdminCookieScreen
 import uz.arumediatv.com.ui.admin.AdminEncodeScreen
 import uz.arumediatv.com.ui.admin.AdminAnimeScreen
+import uz.arumediatv.com.ui.admin.AdminTranslatorsScreen
+import uz.arumediatv.com.ui.admin.AdminTranslatorEditScreen
 import uz.arumediatv.com.ui.admin.AdminAnimeEditScreen
 import uz.arumediatv.com.ui.admin.AdminSeasonsScreen
 import uz.arumediatv.com.ui.admin.AdminSeasonEditScreen
@@ -152,9 +154,11 @@ private sealed interface Page {
     data object AdminStats : Page
     data object AdminApp : Page
     data object AdminCookie : Page
-    data object AdminAnime : Page
+    data object AdminTranslators : Page
+    data class AdminTranslatorEdit(val translator: org.json.JSONObject?) : Page
+    data class AdminAnime(val translator: org.json.JSONObject) : Page
     data object AdminEncode : Page
-    data class AdminAnimeEdit(val anime: org.json.JSONObject?) : Page
+    data class AdminAnimeEdit(val anime: org.json.JSONObject?, val translatorId: Long) : Page
     data class AdminSeasons(val anime: org.json.JSONObject) : Page
     data class AdminSeasonEdit(val animeId: Long, val season: org.json.JSONObject?) : Page
     data class AdminEpisodes(val anime: org.json.JSONObject, val season: org.json.JSONObject) : Page
@@ -336,7 +340,7 @@ private fun AruApp() {
                             AdminSection.STATS -> push(Page.AdminStats)
                             AdminSection.APP -> push(Page.AdminApp)
                             AdminSection.COOKIE -> push(Page.AdminCookie)
-                            AdminSection.ANIME -> push(Page.AdminAnime)
+                            AdminSection.ANIME -> push(Page.AdminTranslators)
                             AdminSection.ENCODE -> push(Page.AdminEncode)
                             else -> android.widget.Toast.makeText(ctx, "${s.title}: keyingi qadamda", android.widget.Toast.LENGTH_SHORT).show()
                         }
@@ -351,8 +355,10 @@ private fun AruApp() {
                     Page.AdminApp -> AdminAppScreen(onBack = ::pop)
                     Page.AdminCookie -> AdminCookieScreen(onBack = ::pop)
                     Page.AdminEncode -> AdminEncodeScreen(onBack = ::pop)
-                    Page.AdminAnime -> AdminAnimeScreen(onBack = ::pop, onOpenAnime = { a -> push(Page.AdminSeasons(a)) }, onEdit = { a -> push(Page.AdminAnimeEdit(a)) })
-                    is Page.AdminAnimeEdit -> AdminAnimeEditScreen(page.anime, onBack = ::pop, onDone = ::pop)
+                    Page.AdminTranslators -> AdminTranslatorsScreen(onBack = ::pop, onOpen = { t -> push(Page.AdminAnime(t)) }, onEdit = { t -> push(Page.AdminTranslatorEdit(t)) })
+                    is Page.AdminTranslatorEdit -> AdminTranslatorEditScreen(page.translator, onBack = ::pop, onDone = ::pop)
+                    is Page.AdminAnime -> AdminAnimeScreen(page.translator, onBack = ::pop, onOpenAnime = { a -> push(Page.AdminSeasons(a)) }, onEdit = { a -> push(Page.AdminAnimeEdit(a, page.translator.optLong("id"))) })
+                    is Page.AdminAnimeEdit -> AdminAnimeEditScreen(page.anime, page.translatorId, onBack = ::pop, onDone = ::pop)
                     is Page.AdminSeasons -> AdminSeasonsScreen(page.anime, onBack = ::pop, onOpenSeason = { s -> push(Page.AdminEpisodes(page.anime, s)) }, onEdit = { s -> push(Page.AdminSeasonEdit(page.anime.optLong("id"), s)) })
                     is Page.AdminSeasonEdit -> AdminSeasonEditScreen(page.animeId, page.season, onBack = ::pop, onDone = ::pop)
                     is Page.AdminEpisodes -> AdminEpisodesScreen(page.anime, page.season, onBack = ::pop, onEdit = { e -> push(Page.AdminEpisodeEdit(page.anime.optLong("id"), page.season.optLong("season_id"), e)) })

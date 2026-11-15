@@ -238,28 +238,31 @@ private fun ConfirmDialog(title: String, text: String, confirm: String, danger: 
     )
 }
 
-/** Animelarni boshqarish: ro'yxat (diskdan darhol), qo'shish, tahrirlash, o'chirish; bosilsa bo'limlar ochiladi. */
+/** Tarjimon ichidagi animelar: ro'yxat (diskdan darhol), qo'shish, tahrirlash, o'chirish; bosilsa bo'limlar ochiladi. */
 @Composable
-fun AdminAnimeScreen(onBack: () -> Unit, onOpenAnime: (JSONObject) -> Unit, onEdit: (JSONObject?) -> Unit) {
+fun AdminAnimeScreen(translator: JSONObject, onBack: () -> Unit, onOpenAnime: (JSONObject) -> Unit, onEdit: (JSONObject?) -> Unit) {
+    val trId = translator.optLong("id")
     val ctx = LocalContext.current
     val api = AppServices.admin
     val scope = rememberCoroutineScope()
     val snack = remember { SnackbarHostState() }
     var snackOk by remember { mutableStateOf(false) }
-    var items by remember { mutableStateOf(AdminListCache.read(ctx, "admin_anime") ?: emptyList()) }
-    var loading by remember { mutableStateOf(items.isEmpty()) }
+    var all by remember { mutableStateOf(AdminListCache.read(ctx, "admin_anime") ?: emptyList()) }
+    // Faqat shu tarjimonning animelari (id 0 — tarjimonsizlar).
+    val items = all.filter { it.optLong("translator_id") == trId }
+    var loading by remember { mutableStateOf(all.isEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
     var delFor by remember { mutableStateOf<JSONObject?>(null) }
     suspend fun load() {
-        loading = items.isEmpty(); error = null
+        loading = all.isEmpty(); error = null
         val (code, text) = try { withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callText("${uz.arumediatv.com.BuildConfig.API_BASE}/api/anime") } } catch (e: Exception) { -1 to (e.message ?: "") }
-        if (code == 200) { items = parseRows(text); AdminListCache.write(ctx, "admin_anime", text) } else error = if (code < 0) "Xato: $text" else "Xato: Animelar yuklab olib bo'lmadi"
+        if (code == 200) { all = parseRows(text); AdminListCache.write(ctx, "admin_anime", text) } else error = if (code < 0) "Xato: $text" else "Xato: Animelar yuklab olib bo'lmadi"
         loading = false
     }
     LaunchedEffect(Unit) { load() }
     uz.arumediatv.com.data.LiveEffect("content") { load() }
     MgmtScaffold(onBack, { onEdit(null) }, snack, snackOk, header = {
-        Text("Animelarni boshqarish", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        Text(translator.optString("name").ifEmpty { "Animelar" }, color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
     }) {
         when {
             loading -> MgmtLoading()
@@ -268,7 +271,7 @@ fun AdminAnimeScreen(onBack: () -> Unit, onOpenAnime: (JSONObject) -> Unit, onEd
                 Spacer(Modifier.height(12.dp)); Text(error!!, color = Color(0xB3FFFFFF), fontSize = 14.sp); Spacer(Modifier.height(16.dp))
                 Button(onClick = { scope.launch { load() } }, colors = ButtonDefaults.buttonColors(containerColor = AruColors.Accent, contentColor = Color.White)) { Text("Qayta urinish") }
             }
-            items.isEmpty() -> MgmtEmpty(AruIcons.Movie, "Hali anime qo'shilmagan")
+            items.isEmpty() -> MgmtEmpty(AruIcons.Movie, "Bu tarjimonda hali anime yo'q", "Pastdagi + tugmasi bilan qo'shing")
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(items, key = { it.optLong("id") }) { a ->
                     Row(Modifier.fillMaxWidth().clip(glassRow).background(AruColors.Card).border(1.dp, AruColors.Border, glassRow).clickable { onOpenAnime(a) }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -395,9 +398,10 @@ private fun FormButtons(cancel: String, ok: String, busy: Boolean, onCancel: () 
     }
 }
 
-/** Anime qo'shish / tahrirlash (rasm Telegram'ga yuklanadi, bazaga faqat fayl nomi yoziladi). Hech qaysi maydon majburiy emas. */
+/** Anime qo'shish / tahrirlash (rasm Telegram'ga yuklanadi, bazaga faqat fayl nomi yoziladi). Hech qaysi maydon majburiy emas. Yangi anime `translatorId` tarjimoniga biriktiriladi; tahrirlashda tarjimonni almashtirish mumkin. */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun AdminAnimeEditScreen(initial: JSONObject?, onBack: () -> Unit, onDone: () -> Unit) {
+fun AdminAnimeEditScreen(initial: JSONObject?, translatorId: Long, onBack: () -> Unit, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val api = AppServices.admin
@@ -407,6 +411,12 @@ fun AdminAnimeEditScreen(initial: JSONObject?, onBack: () -> Unit, onDone: () ->
     var janri by remember { mutableStateOf(jstr(initial, "janri")) }
     var tavsif by remember { mutableStateOf(jstr(initial, "tavsif")) }
     var photo by remember { mutableStateOf(fileNameOfUrl(jstr(initial, "photo_url"))) }
+    var trId by remember { mutableStateOf(if (initial == null) translatorId else initial.optLong("translator_id")) }
+    var translators by remember { mutableStateOf(AdminListCache.read(ctx, "admin_translators") ?: emptyList()) }
+    LaunchedEffect(Unit) {
+        val (code, text) = try { withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callText("${uz.arumediatv.com.BuildConfig.API_BASE}/api/translators") } } catch (e: Exception) { -1 to "" }
+        if (code == 200) { translators = parseRows(text); AdminListCache.write(ctx, "admin_translators", text) }
+    }
     var busy by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -416,6 +426,12 @@ fun AdminAnimeEditScreen(initial: JSONObject?, onBack: () -> Unit, onDone: () ->
         PhotoBox(200, photo, busy) { pick.launch("image/*") }
         Spacer(Modifier.height(16.dp))
         error?.let { ErrorBox(it); Spacer(Modifier.height(16.dp)) }
+        SectionLabel("Tarjimon")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Chip("Tarjimonsiz", trId == 0L) { trId = 0 }
+            translators.filter { it.optLong("id") > 0 }.forEach { t -> Chip(t.optString("name"), trId == t.optLong("id")) { trId = t.optLong("id") } }
+        }
+        Spacer(Modifier.height(16.dp))
         GlassField(name, { name = it }, "Anime nomi (ixtiyoriy)", AruIcons.Movie); Spacer(Modifier.height(12.dp))
         GlassField(davlat, { davlat = it }, "Davlat (ixtiyoriy)", AruIcons.LocationOn); Spacer(Modifier.height(12.dp))
         GlassField(studiya, { studiya = it }, "Studiya (ixtiyoriy)", AruIcons.Business); Spacer(Modifier.height(12.dp))
@@ -425,8 +441,107 @@ fun AdminAnimeEditScreen(initial: JSONObject?, onBack: () -> Unit, onDone: () ->
         FormButtons("Bekor", "Saqlash", busy, onBack) {
             busy = true; error = null
             scope.launch {
-                val b = JSONObject().put("photo_url", photo).put("name", name).put("davlat", davlat).put("studiya", studiya).put("janri", janri).put("tavsif", tavsif)
+                val b = JSONObject().put("photo_url", photo).put("name", name).put("davlat", davlat).put("studiya", studiya).put("janri", janri).put("tavsif", tavsif).put("translator_id", trId)
                 val r = if (initial == null) api.post("/api/anime", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/anime/${initial.optLong("id")}", "PUT", b) }
+                busy = false
+                if (r.ok) onDone() else error = "Xato: ${api.errorOf(r, "Saqlashda xato")}"
+            }
+        }
+    }
+}
+
+// ══════════════════════ TARJIMONLAR ══════════════════════
+
+/** Animelarni boshqarish: tarjimonlar ro'yxati (logotip, nom); + yangi tarjimon; bosilsa uning animelari ochiladi. */
+@Composable
+fun AdminTranslatorsScreen(onBack: () -> Unit, onOpen: (JSONObject) -> Unit, onEdit: (JSONObject?) -> Unit) {
+    val ctx = LocalContext.current
+    val api = AppServices.admin
+    val scope = rememberCoroutineScope()
+    val snack = remember { SnackbarHostState() }
+    var snackOk by remember { mutableStateOf(false) }
+    var items by remember { mutableStateOf(AdminListCache.read(ctx, "admin_translators") ?: emptyList()) }
+    var loading by remember { mutableStateOf(items.isEmpty()) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var delFor by remember { mutableStateOf<JSONObject?>(null) }
+    suspend fun load() {
+        loading = items.isEmpty(); error = null
+        val (code, text) = try { withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callText("${uz.arumediatv.com.BuildConfig.API_BASE}/api/translators") } } catch (e: Exception) { -1 to (e.message ?: "") }
+        if (code == 200) { items = parseRows(text); AdminListCache.write(ctx, "admin_translators", text) } else error = if (code < 0) "Xato: $text" else "Xato: Tarjimonlar yuklab olib bo'lmadi"
+        loading = false
+    }
+    LaunchedEffect(Unit) { load() }
+    uz.arumediatv.com.data.LiveEffect("content") { load() }
+    MgmtScaffold(onBack, { onEdit(null) }, snack, snackOk, header = {
+        Text("Animelarni boshqarish", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+    }) {
+        when {
+            loading -> MgmtLoading()
+            error != null -> Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                Icon(AruIcons.ErrorOutline, null, tint = Color(0xFFF44336), modifier = Modifier.size(48.dp))
+                Spacer(Modifier.height(12.dp)); Text(error!!, color = Color(0xB3FFFFFF), fontSize = 14.sp); Spacer(Modifier.height(16.dp))
+                Button(onClick = { scope.launch { load() } }, colors = ButtonDefaults.buttonColors(containerColor = AruColors.Accent, contentColor = Color.White)) { Text("Qayta urinish") }
+            }
+            items.isEmpty() -> MgmtEmpty(AruIcons.Translate, "Hali tarjimon qo'shilmagan", "Pastdagi + tugmasi bilan qo'shing")
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(items, key = { it.optLong("id") }) { t ->
+                    val real = t.optLong("id") > 0
+                    Row(Modifier.fillMaxWidth().clip(glassRow).background(AruColors.Card).border(1.dp, AruColors.Border, glassRow).clickable { onOpen(t) }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        MgmtPhoto(t.optString("photo_url"), 64, 32, 192)
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text(t.optString("name"), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                            Text("${t.optInt("anime_count")} ta anime", color = white50, fontSize = 12.sp)
+                        }
+                        if (real) {
+                            MgmtIcon(Icons.Filled.Edit, Color(0x8AFFFFFF)) { onEdit(t) }
+                            MgmtIcon(AruIcons.DeleteOutline, Color(0xFFFF5252)) { delFor = t }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    delFor?.let { t ->
+        ConfirmDialog("Tarjimonni o'chirish?", "\"${t.optString("name")}\" o'chiriladi. Animelari o'chmaydi, \"Tarjimonsiz\" bo'lib qoladi.", "Ha, o'chirish", danger = true) { yes ->
+            delFor = null
+            if (yes) scope.launch {
+                val r = api.delete("/api/translators/${t.optLong("id")}")
+                snackOk = r.ok
+                if (r.ok) load()
+                snack.showSnackbar(if (r.ok) "Tarjimon o'chirildi" else "Xato: ${api.errorOf(r, "O'chirishda xato")}")
+            }
+        }
+    }
+}
+
+/** Tarjimon qo'shish / tahrirlash: logotip, nom, tarjimon haqida. */
+@Composable
+fun AdminTranslatorEditScreen(initial: JSONObject?, onBack: () -> Unit, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val api = AppServices.admin
+    var name by remember { mutableStateOf(jstr(initial, "name")) }
+    var bio by remember { mutableStateOf(jstr(initial, "bio")) }
+    var photo by remember { mutableStateOf(fileNameOfUrl(jstr(initial, "photo_url"))) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch { busy = true; val (n, e) = uploadPhoto(ctx, uri, "translator"); busy = false; if (n != null) { photo = n; error = null } else error = "Rasm yuklashda xato: $e" }
+    }
+    FormScaffold(if (initial == null) "Tarjimon qo'shish" else "Tarjimonni tahrirlash", 20, onBack) {
+        PhotoBox(180, photo, busy) { pick.launch("image/*") }
+        Spacer(Modifier.height(16.dp))
+        error?.let { ErrorBox(it); Spacer(Modifier.height(16.dp)) }
+        GlassField(name, { name = it }, "Tarjimon nomi", AruIcons.Translate); Spacer(Modifier.height(12.dp))
+        GlassField(bio, { bio = it }, "Tarjimon haqida", AruIcons.DescriptionOutline, maxLines = 6)
+        Spacer(Modifier.height(24.dp))
+        FormButtons("Bekor", "Saqlash", busy, onBack) {
+            if (name.isBlank()) { error = "Tarjimon nomini kiriting"; return@FormButtons }
+            busy = true; error = null
+            scope.launch {
+                val b = JSONObject().put("photo_url", photo).put("name", name.trim()).put("bio", bio.trim())
+                val r = if (initial == null) api.post("/api/translators", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/translators/${initial.optLong("id")}", "PUT", b) }
                 busy = false
                 if (r.ok) onDone() else error = "Xato: ${api.errorOf(r, "Saqlashda xato")}"
             }
@@ -504,7 +619,7 @@ fun AdminSeasonsScreen(anime: JSONObject, onBack: () -> Unit, onOpenSeason: (JSO
     }
 }
 
-/** Bo'lim qo'shish / tahrirlash: raqam, nom, studiya, tarjimon, davlat, rejissyor, yil, yosh, janrlar, tur, holat, tavsif, rasm. */
+/** Bo'lim qo'shish / tahrirlash: raqam, nom, studiya, davlat, rejissyor, yil, yosh, janrlar, tur, holat, tavsif, rasm. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AdminSeasonEditScreen(animeId: Long, initial: JSONObject?, onBack: () -> Unit, onDone: () -> Unit) {
@@ -514,7 +629,6 @@ fun AdminSeasonEditScreen(animeId: Long, initial: JSONObject?, onBack: () -> Uni
     var bolim by remember { mutableStateOf(initial?.optInt("bolim_id")?.takeIf { it > 0 }?.toString().orEmpty()) }
     var nomi by remember { mutableStateOf(jstr(initial, "nomi")) }
     var studio by remember { mutableStateOf(jstr(initial, "studio")) }
-    var tarjimon by remember { mutableStateOf(jstr(initial, "tarjimon")) }
     var yili by remember { mutableStateOf(jstr(initial, "yili")) }
     var tavsif by remember { mutableStateOf(jstr(initial, "tavsif")) }
     var davlat by remember { mutableStateOf(jstr(initial, "davlat")) }
@@ -536,7 +650,6 @@ fun AdminSeasonEditScreen(animeId: Long, initial: JSONObject?, onBack: () -> Uni
         GlassField(bolim, { bolim = it.filter(Char::isDigit) }, "Bo'lim raqami (N-bo'lim)", AruIcons.Tag, number = true); Spacer(Modifier.height(12.dp))
         GlassField(nomi, { nomi = it }, "Nomi", AruIcons.Movie); Spacer(Modifier.height(12.dp))
         GlassField(studio, { studio = it }, "Studiya", AruIcons.Business); Spacer(Modifier.height(12.dp))
-        GlassField(tarjimon, { tarjimon = it }, "Tarjimon", AruIcons.Translate); Spacer(Modifier.height(12.dp))
         GlassField(davlat, { davlat = it }, "Davlat", AruIcons.LocationOn); Spacer(Modifier.height(12.dp))
         GlassField(rejissyor, { rejissyor = it }, "Rejissyor", AruIcons.VideocamOutline); Spacer(Modifier.height(12.dp))
         GlassField(yili, { yili = it }, "Yili", AruIcons.CalendarToday, number = true); Spacer(Modifier.height(12.dp))
@@ -563,7 +676,7 @@ fun AdminSeasonEditScreen(animeId: Long, initial: JSONObject?, onBack: () -> Uni
             scope.launch {
                 val g = genres.sorted()
                 val b = JSONObject().put("anime_id", animeId).put("bolim_id", bolim.toIntOrNull() ?: 0).put("photo_url", photo).put("nomi", nomi).put("studio", studio)
-                    .put("tarjimon", tarjimon).put("yili", yili).put("janrlar", JSONArray(g)).put("janri", g.joinToString(", ")).put("turi", turi).put("holati", holati)
+                    .put("yili", yili).put("janrlar", JSONArray(g)).put("janri", g.joinToString(", ")).put("turi", turi).put("holati", holati)
                     .put("tavsif", tavsif).put("davlat", davlat.trim()).put("rejissyor", rejissyor.trim()).put("yosh", yosh.trim().toIntOrNull() ?: 0)
                 val r = if (initial == null) api.post("/api/seasons", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/seasons/$animeId/${initial.optLong("season_id")}", "PUT", b) }
                 busy = false
