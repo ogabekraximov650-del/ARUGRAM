@@ -32,6 +32,7 @@ jobs:
           FROM=$(awk '{print $1}' ci/CHAN_MOVE_ONCE); TO=$(awk '{print $2}' ci/CHAN_MOVE_ONCE)
           echo "Kanal: $FROM -> $TO"
           TOKEN=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          echo "Tashxis /api/vd/channel:"; curl -sS -m 60 -X POST "$API_BASE/api/vd/channel" -H "X-Encode-Token: $TOKEN" -H 'Content-Type: application/json' -H 'User-Agent: arumediatv-chan-move' -d '{}' | head -c 900; echo
           for i in $(seq 1 60); do
             R=$(curl -sS -m 120 -X POST "$API_BASE/api/vd/move_channel" -H "X-Encode-Token: $TOKEN" -H 'Content-Type: application/json' -H 'User-Agent: arumediatv-chan-move' -d "{\"from\":$FROM,\"to\":$TO,\"limit\":8}" || echo '{}')
             echo "$i: $R" | head -c 700; echo
