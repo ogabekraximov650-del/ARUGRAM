@@ -118,6 +118,32 @@ jobs:
           done
           echo "dir=$OUT" >> "$GITHUB_OUTPUT"
 
+      # ── TELEGRAM: "SAQLANGAN XABARLAR"GA YUBORISH (Flutter workflow'idagidek) ──
+      # Sessiya `tool/encode/session.enc` dan (`ENCODE_TOKEN` bilan) tiklanadi, nusxada ishlanadi. Xato bo'lsa build buzilmaydi.
+      # Runner'dagi standart Python 3.14 da Pyrogram import xatosi beradi (`There is no current event loop`) — 3.11 qo'yiladi.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: APK'larni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        working-directory: ${{ github.workspace }}
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" \
+              "ARUMEDIATV Android (Kotlin) build ${{ github.run_number }}: $(basename "$APK")"
+            rm -f "$S.session"
+          done
+
       - uses: actions/upload-artifact@v7
         with:
           name: arumediatv-native-${{ github.run_number }}
