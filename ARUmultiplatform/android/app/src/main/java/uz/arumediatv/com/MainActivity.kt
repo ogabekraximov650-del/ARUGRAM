@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.border
@@ -197,8 +198,42 @@ private fun AuthGate() {
     val restored by AppServices.auth.restored.collectAsStateWithLifecycle()
     Box(Modifier.fillMaxSize().background(AruColors.Bg)) {
         // Saqlangan hisob aniqlanmaguncha bo'sh ekran (bosh sahifa «mehmon» holatida miltillamasin).
-        if (!restored) return@Box
-        AruApp()
+        if (restored) AruApp()
+        SwitchOverlay(restored)
+    }
+}
+
+/** Account almashtirish/qo'shishda butun ekran qoplamasi: ilova "chiqib ketgandek" emas, bir tekis ochiladi. */
+@Composable
+private fun SwitchOverlay(restored: Boolean) {
+    val text by uz.arumediatv.com.data.AccountSwitcher.switching.collectAsStateWithLifecycle()
+    // Yangi jarayon tayyor bo'lgach qoplama biroz turib, yumshoq yo'qoladi.
+    LaunchedEffect(restored) {
+        if (restored && uz.arumediatv.com.data.AccountSwitcher.switching.value != null) {
+            kotlinx.coroutines.delay(350)
+            uz.arumediatv.com.data.AccountSwitcher.switching.value = null
+        }
+    }
+    androidx.compose.animation.AnimatedVisibility(
+        visible = text != null,
+        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
+        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(260)),
+    ) {
+        Box(
+            Modifier.fillMaxSize().background(AruColors.Bg).pointerInput(Unit) { detectTapGestures { } },
+            contentAlignment = Alignment.Center,
+        ) {
+            androidx.compose.foundation.layout.Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                androidx.compose.foundation.layout.Row {
+                    androidx.compose.material3.Text("ARU", color = Color.White, fontSize = 28.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Black)
+                    androidx.compose.material3.Text("MEDIATV", color = AruColors.Accent2, fontSize = 28.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Black)
+                }
+                androidx.compose.foundation.layout.Spacer(Modifier.height(18.dp))
+                androidx.compose.material3.CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(28.dp))
+                androidx.compose.foundation.layout.Spacer(Modifier.height(14.dp))
+                androidx.compose.material3.Text(text.orEmpty(), color = Color.White.copy(alpha = 0.6f), fontSize = 13.sp)
+            }
+        }
     }
 }
 

@@ -109,9 +109,13 @@ object AccountSwitcher {
     private const val KEY_SESSION = "session_v1"
     private const val KEY_USER = "user_v1"
 
+    /** Almashtirish davomida butun ekran qoplamasi (yumshoq o'tish): matn — ko'rsatiladigan yozuv, `null` — yo'q. Yangi jarayonda ham boshlanishda ko'rsatiladi. */
+    val switching = MutableStateFlow<String?>(null)
+
     /** `to == 0L` — yangi hisob qo'shish (hozirgi hisob saqlanadi, ilova mehmon holatida kirish oynasi bilan ochiladi). */
     fun request(ctx: Context, from: Long, to: Long) {
         val app = ctx.applicationContext
+        switching.value = if (to == 0L) "Account qo'shilmoqda" else "Account almashtirilmoqda"
         app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .putLong("from", from).putLong("to", to).putBoolean("pending", true).commit()
         val i = app.packageManager.getLaunchIntentForPackage(app.packageName)
@@ -123,13 +127,14 @@ object AccountSwitcher {
         Handler(Looper.getMainLooper()).postDelayed({
             Process.killProcess(Process.myPid())
             System.exit(0)
-        }, 400)
+        }, 900)
     }
 
     /** Ilova ochilishining eng boshida (`AruApplication.onCreate`, `AppServices.init` dan OLDIN). */
     fun applyPending(ctx: Context) {
         val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (!p.getBoolean("pending", false)) return
+        switching.value = "Tayyorlanmoqda"
         try {
             val from = p.getLong("from", 0L)
             val to = p.getLong("to", 0L)

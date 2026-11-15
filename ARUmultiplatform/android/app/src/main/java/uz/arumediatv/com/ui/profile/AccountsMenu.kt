@@ -1,6 +1,9 @@
 package uz.arumediatv.com.ui.profile
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
@@ -77,14 +80,14 @@ fun AccountsCapsule(
                                         .padding(horizontal = 8.dp, vertical = 8.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Box(Modifier.size(38.dp).clip(CircleShape).background(AruColors.Accent.copy(alpha = 0.25f)), contentAlignment = Alignment.Center) {
-                                        Text(u?.initials ?: "#", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    }
+                                    Avatar(u, 40.dp)
                                     Spacer(Modifier.width(12.dp))
                                     Column(Modifier.weight(1f)) {
-                                        Text(u?.fullName ?: "Account ${a.id}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        // 1-qator: qanday kirilgan (TG: @user / TG: 123456 / Google email); 2-qator: accountning o'z useri.
+                                        Text(u?.identity ?: "ID ${a.id}", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                         val sub = if (a.subUntil > now) " · Obuna" else ""
-                                        Text("ID ${a.id}$sub", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1)
+                                        val own = u?.username?.takeIf { it.isNotEmpty() }?.let { "@$it" } ?: "ID ${a.id}"
+                                        Text("$own$sub", color = Color.White.copy(alpha = 0.5f), fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                     }
                                     if (active) {
                                         Text("✓", color = AruColors.Accent2, fontSize = 18.sp, fontWeight = FontWeight.Bold)
@@ -127,7 +130,21 @@ private fun CapsuleHeader(open: Boolean, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("Accountlarim", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
-        Spacer(Modifier.width(8.dp))
-        Text(if (open) "⌃" else "⌄", color = Color.White, fontSize = 16.sp)
+        Spacer(Modifier.width(10.dp))
+        Chevron(up = open)
+    }
+}
+
+/** Yassi strelka: eni uzun, bo'yi kalta. */
+@Composable
+private fun Chevron(up: Boolean) {
+    Canvas(Modifier.size(width = 16.dp, height = 8.dp)) {
+        val w = size.width
+        val h = size.height
+        val sw = 2.2.dp.toPx()
+        val ya = if (up) h else 0f
+        val yb = if (up) 0f else h
+        drawLine(Color.White, Offset(sw / 2, ya), Offset(w / 2, yb), sw, StrokeCap.Round)
+        drawLine(Color.White, Offset(w / 2, yb), Offset(w - sw / 2, ya), sw, StrokeCap.Round)
     }
 }

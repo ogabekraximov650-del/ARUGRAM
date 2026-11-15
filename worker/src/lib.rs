@@ -1609,6 +1609,12 @@ async fn init_db(env: &Env) -> bool {
         let c = turso_exec(env, "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_gsub ON users_db(google_sub) WHERE google_sub <> ''", vec![]).await.is_ok();
         if a && b && c { config_put(env, "mig_users_google", "1").await; }
     }
+    // Telegram username (faqat ko'rsatish uchun: "Accountlarim" ro'yxati). Kirishda o'zgargan bo'lsa yangilanadi.
+    if ok && config_get(env, "mig_users_tgname").await.is_none() {
+        if turso_exec(env, "ALTER TABLE users_db ADD COLUMN tg_username TEXT DEFAULT ''", vec![]).await.is_ok() {
+            config_put(env, "mig_users_tgname", "1").await;
+        }
+    }
     // Anime -> tarjimon (2026-11): 0 — tarjimonsiz.
     if ok && config_get(env, "mig_anime_translator").await.is_none() {
         let _ = turso_exec(env,
@@ -4452,6 +4458,9 @@ fn user_public(origin: &str, u: &Value) -> Value {
         // shunchaki ekranni yashiradi — haqiqiy to'siq har bir
         // so'rovda serverda (`is_admin`).
         "is_admin": is_admin(u),
+        // "Accountlarim" ro'yxati uchun: Telegram username va Google email (faqat egasining o'ziga).
+        "tg_username": u["tg_username"].as_str().unwrap_or(""),
+        "email": u["email"].as_str().unwrap_or(""),
         // Ism/username to'ldirilganmi. Yangi hisobga nom
         // AVTOMATIK berilgani uchun bu endi doim 1 — maydon
         // eski ilova versiyalari bilan moslik uchun qoldirilgan.
@@ -5137,6 +5146,14 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         tg_send(env, chat_id, MSG_TRY_LATER).await;
         return ok(json!({"ok": true}));
     };
+    // Telegram username o'zgargan bo'lsa saqlanadi (ustun bo'lmasa — javobda `null`, tegilmaydi; xato kirishga xalaqit bermaydi).
+    let tg_name = from["username"].as_str().unwrap_or("");
+    if let Some(old) = user["tg_username"].as_str() {
+        if old != tg_name {
+            let _ = turso_exec(env, "UPDATE users_db SET tg_username=? WHERE id=?",
+                vec![TursoArg::text(tg_name), TursoArg::int(user["id"].as_i64().unwrap_or(0))]).await;
+        }
+    }
 
     // ── BLOKLANGAN HISOB ──────────────────────────────────────
     //
