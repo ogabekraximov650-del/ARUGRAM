@@ -222,7 +222,12 @@ fun SeasonScreen(
             current = ep
             currentUrl = url
             player.error = null
-            val start = resumeAt ?: AppServices.progress.positionOf(url).takeIf { it > 0 } ?: (saved?.first ?: 0L)
+            // Davom etish joyi: QISM bo'yicha saqlangani (sifatdan mustaqil) birinchi; server tarixi undan YANGIROQ bo'lsa (boshqa qurilma) — o'sha;
+            // faylga bog'liq joy (`positionOf`) eng oxirida: u sifat almashtirilganda ESKI joyda qolib ketardi (25-daqiqadan chiqib, qayta kirganda 12-daqiqadan boshlanardi).
+            val histPos = hist?.positionMs?.takeIf { it >= 3000 && (hist.durationMs <= 0 || it <= hist.durationMs - 5000) } ?: 0L
+            val localPos = saved?.first ?: 0L
+            val localStamp = AppServices.progress.episodeStamp(epKey)
+            val start = uz.arumediatv.com.data.ResumePoint.choose(resumeAt, localPos, localStamp, histPos, hist?.updatedAt ?: 0L, AppServices.progress.positionOf(url))
             val src = PlaySource.resolve(url, AppServices.telegram, preferWorker)
             if (src == null) {
                 player.error = if (!uz.arumediatv.com.data.Net.isOnline(ctx)) "Bu qism yuklab olinmagan — internetga ulaning" else "Videoni ochib bo'lmadi"
@@ -287,7 +292,7 @@ fun SeasonScreen(
                 if (player.playing) d.watchedMs = (d.watchedMs + 500).coerceAtMost(player.durationMs)
             }
             if (++n % 2 == 0) saveProgress() // har 1 soniyada (tick 500 ms)
-            if (n % 120 == 0) flushHistory()
+            if (n % 20 == 0) flushHistory() // har 10 soniyada: Tarix ro'yxati va telefon xotirasi darhol yangilanadi (serverga yuborish SyncQueue'da, 2 daqiqada bir)
             // Intro: avto o'tkazish
             val ep = current
             if (ep != null && autoSkipIntro) {

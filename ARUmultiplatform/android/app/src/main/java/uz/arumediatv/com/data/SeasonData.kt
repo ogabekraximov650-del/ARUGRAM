@@ -260,6 +260,19 @@ class SeasonRepository(
     }
 }
 
+/** Davom etish joyini tanlash (sofi mantiq, test qilinadi). */
+object ResumePoint {
+    /**
+     * Ustuvorlik: aniq so'ralgan joy (`resumeAt`) > qism bo'yicha saqlangan joy (sifatdan mustaqil) > server tarixi (faqat yangiroq bo'lsa yoki
+     * mahalliy joy yo'q bo'lsa) > faylga bog'liq joy (`urlPos`, eng oxirida: sifat almashtirilganda eskirib qoladi).
+     */
+    fun choose(resumeAt: Long?, localPos: Long, localStamp: Long, histPos: Long, histUpdatedAt: Long, urlPos: Long): Long {
+        if (resumeAt != null) return resumeAt
+        val pick = if (histPos > 0 && (localPos <= 0 || histUpdatedAt > localStamp + 2000)) histPos else localPos
+        return if (pick > 0) pick else urlPos
+    }
+}
+
 /** Qayerda to'xtagani (qism fayli nomi bo'yicha) — keyingi safar shu joydan davom etadi. */
 class WatchProgress(context: Context) {
     private val prefs = context.getSharedPreferences("aru_progress", Context.MODE_PRIVATE)
@@ -285,12 +298,15 @@ class WatchProgress(context: Context) {
 
     /**
      * QISM bo'yicha ijro joyi (sifatdan mustaqil): har sifat alohida fayl, shu sabab faqat fayl nomi bo'yicha saqlansa boshqa sifatda (yoki oflaynda yuklab olingan sifatda) ochilganda joy topilmasdi.
-     * Format: "pozitsiya/davomiylik/sifat".
+     * Format: "pozitsiya/davomiylik/sifat/vaqt(ms)". Vaqt — qaysi nusxa (telefon yoki server tarixi) yangiroq ekanini aniqlash uchun.
      */
     fun saveEpisode(key: String, positionMs: Long, durationMs: Long, quality: String) {
         if (key.isEmpty() || durationMs <= 0) return
-        prefs.edit().putString("e:$key", "$positionMs/$durationMs/$quality").apply()
+        prefs.edit().putString("e:$key", "$positionMs/$durationMs/$quality/${System.currentTimeMillis()}").apply()
     }
+
+    /** Qism bo'yicha joy oxirgi marta saqlangan vaqt (ms); eski yozuvlarda yo'q — 0. */
+    fun episodeStamp(key: String): Long = prefs.getString("e:$key", null)?.split('/')?.getOrNull(3)?.toLongOrNull() ?: 0L
 
     /** Qism bo'yicha saqlangan (pozitsiya, sifat); tugab qolgan (oxirgi 5 s) yoki 3 s dan kam bo'lsa pozitsiya 0. */
     fun episodeState(key: String): Pair<Long, String>? {
