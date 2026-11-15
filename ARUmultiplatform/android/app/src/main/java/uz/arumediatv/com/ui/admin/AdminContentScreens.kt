@@ -85,6 +85,9 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import uz.arumediatv.com.AppServices
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.layout.aspectRatio
+import kotlinx.coroutines.delay
 import uz.arumediatv.com.data.Episode
 import uz.arumediatv.com.data.callJson
 import uz.arumediatv.com.data.callText
@@ -977,7 +980,12 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
         return if (q.ok) null else api.errorOf(q, "xato")
     }
 
+    // Intro vaqtini aniqlash uchun asosiy pleyer (tahrirlashda): "boshi/oxiri" yonidagi ⏱ tugmasi hozirgi vaqtni maydonga yozadi.
+    val introPlayer = remember { uz.arumediatv.com.ui.season.AruPlayer(ctx) }
+    DisposableEffect(Unit) { onDispose { runCatching { introPlayer.release() } } }
     FormScaffold(if (initial == null) "Epizod qo'shish" else "Epizodni tahrirlash", 19, onBack) {
+        IntroPlayerCard(introPlayer, initial)
+        Spacer(Modifier.height(12.dp))
         error?.let { ErrorBox(it); Spacer(Modifier.height(16.dp)) }
         GlassField(number, { number = it.filter(Char::isDigit).take(5) }, "Epizod raqami (0 dan boshlash)", AruIcons.FormatListNumbered, number = true); Spacer(Modifier.height(12.dp))
         GlassField(name, { name = it }, "Epizod nomi (ixtiyoriy)", AruIcons.TitleIcon)
@@ -1036,8 +1044,10 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("${row + 1}", color = Color(0x59FFFFFF), fontSize = 12.sp, modifier = Modifier.width(20.dp))
                     IntroField(intro[row * 2].value, { intro[row * 2].value = it }, "boshi", Modifier.weight(1f))
-                    Spacer(Modifier.width(10.dp))
+                    StampBtn { intro[row * 2].value = IntroTime.format(introPlayer.positionMs) }
+                    Spacer(Modifier.width(6.dp))
                     IntroField(intro[row * 2 + 1].value, { intro[row * 2 + 1].value = it }, "oxiri", Modifier.weight(1f))
+                    StampBtn { intro[row * 2 + 1].value = IntroTime.format(introPlayer.positionMs) }
                 }
                 if (row != 4) Spacer(Modifier.height(8.dp))
             }
@@ -1084,6 +1094,78 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
                 if (r.ok) { origin = ""; originNew = false; job = null; toast("Asl video o'chirildi") } else toast("Asl video o'chirilmadi: ${api.errorOf(r, "xato")}")
             }
         }
+    }
+}
+
+/** Maydon yonidagi ⏱ tugmasi: pleyerdagi hozirgi vaqtni shu maydonga yozadi. */
+@Composable
+private fun StampBtn(onClick: () -> Unit) {
+    val sh = RoundedCornerShape(10.dp)
+    Box(Modifier.padding(start = 4.dp).clip(sh).background(AruColors.Accent2.copy(alpha = 0.18f)).border(1.dp, AruColors.Accent2.copy(alpha = 0.5f), sh).clickable(onClick = onClick).padding(horizontal = 9.dp, vertical = 9.dp), contentAlignment = Alignment.Center) {
+        Text("\u23F1", color = Color.White, fontSize = 14.sp)
+    }
+}
+
+/**
+ * Intro vaqtini aniqlash uchun pleyer (qism tahrirlash oynasining tepasida): mavjud eng yaxshi sifat ochiladi; ◀◀ ◀ ▶/⏸ ▶ ▶▶ va surgich;
+ * pastdagi intro qatorlarida ⏱ bosilsa hozirgi vaqt (m:ss) shu maydonga yoziladi. Video yo'q (yangi qism) bo'lsa pleyer ko'rsatilmaydi.
+ */
+@Composable
+private fun IntroPlayerCard(player: uz.arumediatv.com.ui.season.AruPlayer, initial: JSONObject?) {
+    val best = remember(initial) {
+        listOf("1080p", "720p", "480p", "360p").map { jstr(initial, "url_$it") }.firstOrNull { it.isNotEmpty() && it != jstr(initial, "origin_video") }
+            ?: jstr(initial, "origin_video")
+    }
+    var err by remember { mutableStateOf<String?>(null) }
+    var opened by remember { mutableStateOf(false) }
+    if (best.isEmpty()) {
+        GlassCard(16, PaddingValues(14.dp)) {
+            Text("Intro vaqtini aniqlash uchun avval video yuklang — shu yerda pleyer chiqadi.", color = Color(0x8CFFFFFF), fontSize = 12.sp)
+        }
+        return
+    }
+    LaunchedEffect(best) {
+        val src = uz.arumediatv.com.data.PlaySource.resolve(best, AppServices.telegram)
+        if (src == null) { err = "Videoni ochib bo'lmadi"; return@LaunchedEffect }
+        player.open(src.uri, 0L, false)
+        opened = true
+    }
+    LaunchedEffect(opened) {
+        while (opened) {
+            delay(250)
+            player.tick()
+        }
+    }
+    GlassCard(16, PaddingValues(12.dp)) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+            uz.arumediatv.com.ui.season.PlayerSurface(player, Modifier.fillMaxSize())
+            err?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 12.sp) }
+        }
+        Spacer(Modifier.height(8.dp))
+        val dur = player.durationMs.coerceAtLeast(1L)
+        var drag by remember { mutableStateOf<Float?>(null) }
+        androidx.compose.material3.Slider(
+            value = drag ?: (player.positionMs.toFloat() / dur).coerceIn(0f, 1f),
+            onValueChange = { drag = it },
+            onValueChangeFinished = { drag?.let { player.seekTo((it * dur).toLong()) }; drag = null },
+            colors = androidx.compose.material3.SliderDefaults.colors(thumbColor = AruColors.Accent2, activeTrackColor = AruColors.Accent2),
+        )
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("${IntroTime.format(player.positionMs)} / ${IntroTime.format(player.durationMs)}", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                for ((label, d) in listOf("-10" to -10_000L, "-1" to -1_000L)) SeekBtn(label) { player.seekTo((player.positionMs + d).coerceAtLeast(0)) }
+                SeekBtn(if (player.playing) "\u23F8" else "\u25B6") { if (player.playing) player.pause() else player.play() }
+                for ((label, d) in listOf("+1" to 1_000L, "+10" to 10_000L)) SeekBtn(label) { player.seekTo((player.positionMs + d).coerceAtMost(player.durationMs.takeIf { it > 0 } ?: Long.MAX_VALUE)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SeekBtn(text: String, onClick: () -> Unit) {
+    val sh = RoundedCornerShape(10.dp)
+    Box(Modifier.clip(sh).background(Color(0x14FFFFFF)).border(1.dp, Color(0x1AFFFFFF), sh).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 8.dp), contentAlignment = Alignment.Center) {
+        Text(text, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
