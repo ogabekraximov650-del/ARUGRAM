@@ -19,6 +19,8 @@ class AruApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Hisob almashtirish kutilayotgan bo'lsa — hech narsa ochilmasdan oldin bajariladi.
+        uz.arumediatv.com.data.AccountSwitcher.applyPending(this)
         AppServices.init(this)
         scope.launch {
             AppServices.auth.restore()

@@ -54,7 +54,9 @@ class BillingStore(
     fun restore() {
         val uid = auth.user.value?.id ?: 0L
         if (uid == 0L) return
-        _state.update { it.copy(balance = prefs.getLong("bal_$uid", 0), until = prefs.getLong("until_$uid", 0)) }
+        val until = prefs.getLong("until_$uid", 0)
+        _state.update { it.copy(balance = prefs.getLong("bal_$uid", 0), until = until) }
+        if (until > 0) auth.accounts.setSub(uid, until)
     }
 
     fun clear() {
@@ -88,7 +90,7 @@ class BillingStore(
             .map { BillingEntry(it.optString("kind"), it.optLong("amount"), it.optInt("days"), it.optString("note"), it.optLong("created_at")) }
         val bal = j.optLong("balance")
         val until = j.optLong("subscription_until")
-        auth.user.value?.id?.let { uid -> prefs.edit().putLong("bal_$uid", bal).putLong("until_$uid", until).putLong("at_$uid", System.currentTimeMillis()).apply() }
+        auth.user.value?.id?.let { uid -> prefs.edit().putLong("bal_$uid", bal).putLong("until_$uid", until).putLong("at_$uid", System.currentTimeMillis()).apply(); auth.accounts.setSub(uid, until) }
         _state.value = BillingState(bal, until, plans, links, hist, loading = false, loaded = true, error = null)
     }
 

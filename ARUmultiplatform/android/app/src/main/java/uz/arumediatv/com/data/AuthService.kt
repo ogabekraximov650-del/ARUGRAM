@@ -25,7 +25,6 @@ data class AppUser(
     val hiddenStats: List<String> = emptyList(),
     /** Bepul bo'limlar uchun kanallarga avtomatik obuna ruxsati. */
     val chanConsent: Boolean = false,
-    val googleLinked: Boolean = false,
 ) {
     fun isHidden(key: String): Boolean = key in hiddenStats
 
@@ -55,7 +54,7 @@ data class AppUser(
         .put("id", id).put("telegram_id", telegramId).put("username", username)
         .put("first_name", firstName).put("last_name", lastName).put("photo_url", photoUrl)
         .put("balance", balance).put("profile_done", profileDone).put("is_admin", isAdmin)
-        .put("hidden_stats", JSONArray(hiddenStats)).put("chan_consent", chanConsent).put("google_linked", googleLinked)
+        .put("hidden_stats", JSONArray(hiddenStats)).put("chan_consent", chanConsent)
 
     companion object {
         fun fromJson(j: JSONObject) = AppUser(
@@ -70,14 +69,13 @@ data class AppUser(
             isAdmin = j.optBoolean("is_admin", false),
             hiddenStats = j.optJSONArray("hidden_stats")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
             chanConsent = j.optBoolean("chan_consent", false),
-            googleLinked = j.optBoolean("google_linked", false),
         )
     }
 }
 
 data class LoginRequest(val token: String, val deepLink: String, val expiresIn: Int)
 
-enum class LoginStatus { PENDING, OK, EXPIRED, ERROR, BANNED, CONFLICT }
+enum class LoginStatus { PENDING, OK, EXPIRED, ERROR, BANNED }
 
 data class DeviceSession(val id: Long, val device: String, val platform: String, val lastSeen: String, val current: Boolean, val appVersion: String = "", val createdAt: Long = 0, val lastSeenAt: Long = 0)
 
@@ -87,6 +85,9 @@ class AuthService(
     private val http: okhttp3.OkHttpClient = Http.client,
     private val base: String = BuildConfig.API_BASE,
 ) {
+    /** Shu telefonga kirilgan hisoblar (ko'p hisob). */
+    val accounts = AccountStore(secure)
+
     private val _user = MutableStateFlow<AppUser?>(null)
     val user: StateFlow<AppUser?> = _user.asStateFlow()
 
@@ -112,6 +113,10 @@ class AuthService(
             } catch (_: Exception) {
             }
         }
+        // Eski o'rnatishdan: kirilgan hisob bor, lekin ro'yxatda yo'q — qo'shiladi.
+        val su = _user.value
+        val ss = sessionToken
+        if (su != null && ss != null && accounts.get(su.id) == null) accounts.upsert(ss, su)
         _restored.value = true
         if (sessionToken != null) refresh()
     }
@@ -177,8 +182,7 @@ class AuthService(
     }
 
     suspend fun start(): LoginRequest? = withContext(Dispatchers.IO) {
-        // Sessiya bor bo'lsa (Google bilan kirgan) — Telegram shu hisobga ulanadi.
-        val r = http.callJson("$base/api/auth/telegram/start", "POST", deviceInfo(), sessionToken)
+        val r = http.callJson("$base/api/auth/telegram/start", "POST", deviceInfo())
         val j = r.json ?: return@withContext null
         if (!r.ok) return@withContext null
         val token = j.optString("token")
@@ -204,10 +208,6 @@ class AuthService(
                 }
             }
             "expired" -> LoginStatus.EXPIRED
-            "conflict" -> {
-                banMessage = j.optString("message")
-                LoginStatus.CONFLICT
-            }
             "banned" -> {
                 banMessage = j.optString("message")
                 LoginStatus.BANNED
@@ -233,14 +233,9 @@ class AuthService(
         null
     }
 
-    /** Joriy hisobga Google akkauntni ulaydi. `null` — ulandi; aks holda xato matni. */
-    suspend fun linkGoogle(idToken: String): String? = withContext(Dispatchers.IO) {
-        val s = sessionToken ?: return@withContext "Avval hisobga kiring"
-        val r = http.callJson("$base/api/auth/google/link", "POST", JSONObject().put("id_token", idToken), s)
-        if (r.code == 0) return@withContext "Tarmoq xatosi — qaytadan urinib ko'ring"
-        if (!r.ok) return@withContext r.json?.optString("error")?.takeIf { it.isNotEmpty() } ?: "Ulab bo'lmadi (${r.code})"
-        _user.value?.let { save(s, it.copy(googleLinked = true)) }
-        null
+    /** Ro'yxatdagi (hozir faol bo'lmagan) hisobning sessiyasini serverda tugatadi (xato bo'lsa e'tibor berilmaydi). */
+    suspend fun revokeToken(session: String) = withContext(Dispatchers.IO) {
+        http.callJson("$base/api/auth/logout", "POST", bearer = session)
     }
 
     suspend fun logout() = withContext(Dispatchers.IO) {
@@ -302,6 +297,7 @@ class AuthService(
         _user.value = u
         secure.putString(KEY_SESSION, session)
         secure.putString(KEY_USER, u.toJson().toString())
+        accounts.upsert(session, u)
     }
 
     /** UZ: sessiya tugaganda (chiqish yoki server 401) — foydalanuvchiga bog'liq mahalliy nusxalar (chat, kutubxona...) o'chiriladi. EN/RU: called when the session ends so user-bound caches can be wiped. */
@@ -309,6 +305,7 @@ class AuthService(
 
     private fun clear() {
         val had = sessionToken != null
+        _user.value?.id?.let { accounts.remove(it) }
         sessionToken = null
         _user.value = null
         secure.remove(KEY_SESSION)

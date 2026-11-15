@@ -237,6 +237,8 @@ private fun AruApp() {
     // Kirish kerak joyda: Telegram bot orqali kirish (token -> Telegram ilovasini tanlash -> Start). Telegram hisobini ulash — Profilda.
     val login = { push(Page.BotLogin) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
+    // "Account qo'shish" dan keyin ilova qayta ochilgan: kirish oynasi darhol ochiladi.
+    LaunchedEffect(Unit) { if (uz.arumediatv.com.data.AccountSwitcher.consumeOpenLogin(ctx)) push(Page.Login) }
     // Kirilgach emoji shrifti fonda tayyorlanadi (chat va izohlarda ham Telegram emojisi ko'rinsin).
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(4000)
@@ -320,7 +322,13 @@ private fun AruApp() {
         stack.lastOrNull()?.let { page ->
             Box(Modifier.fillMaxSize().background(AruColors.Bg).pointerInput(Unit) { detectTapGestures { } }.then(if (uz.arumediatv.com.core.Immersive.on) Modifier else Modifier.statusBarsPadding().navigationBarsPadding())) {
                 when (page) {
-                    Page.Login -> LoginScreen(onDone = ::pop, onClose = ::pop, onBot = { pop(); push(Page.BotLogin) })
+                    Page.Login -> LoginScreen(onDone = ::pop, onClose = {
+                        // "Account qo'shish" rejimida bekor qilinsa — avvalgi accountga qaytiladi.
+                        val back = AppServices.auth.accounts.addReturn
+                        if (!AppServices.auth.isLoggedIn && back > 0L && AppServices.auth.accounts.get(back) != null) {
+                            uz.arumediatv.com.data.AccountSwitcher.request(ctx, 0L, back)
+                        } else pop()
+                    }, onBot = { pop(); push(Page.BotLogin) })
                     Page.BotLogin -> BotLoginScreen(onDone = ::pop, onBack = ::pop)
                     Page.Edit -> EditProfileScreen(onBack = ::pop)
                     Page.Sessions -> SessionsScreen(onBack = ::pop)

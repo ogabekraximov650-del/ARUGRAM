@@ -31,7 +31,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExitToApp
@@ -92,6 +91,9 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
     var unsavedWarn by remember { mutableStateOf(false) }
     var deleteStep by remember { mutableStateOf(0) } // 0 yo'q, 1 birinchi, 2 ikkinchi tasdiq
     var showAbout by remember { mutableStateOf(false) }
+    val accounts by auth.accounts.list.collectAsStateWithLifecycle()
+    var showAccounts by remember { mutableStateOf(false) }
+    var removeTarget by remember { mutableStateOf<uz.arumediatv.com.data.SavedAccount?>(null) }
     var cacheBytes by remember { mutableStateOf(0L) }
     var busy by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -111,6 +113,12 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
         AppServices.unread.clear()
     }
 
+    // Hisob chiqib ketgach (chiqish/o'chirish): boshqa hisob qolgan bo'lsa shunga o'tiladi (jarayon qayta ochiladi).
+    fun afterAccountGone() {
+        val next = auth.accounts.list.value.firstOrNull() ?: return
+        uz.arumediatv.com.data.AccountSwitcher.request(ctx, 0L, next.id)
+    }
+
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
     var avatarBusy by remember { mutableStateOf(false) }
     val pickAvatar = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
@@ -128,7 +136,9 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
         Modifier.fillMaxSize().verticalScroll(rememberScrollState())
             .padding(start = 16.dp, end = 16.dp, top = LocalBarPad.current.calculateTopPadding()),
     ) {
-        uz.arumediatv.com.ui.common.PageHeader("Profil", Modifier.padding(horizontal = 4.dp))
+        uz.arumediatv.com.ui.common.PageHeader("Profil", Modifier.padding(horizontal = 4.dp), trailing = {
+            if (accounts.isNotEmpty() || user != null) AccountsPill { showAccounts = true }
+        })
         Spacer(Modifier.height(8.dp))
         val u = user
         if (u == null) {
@@ -155,16 +165,6 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
             Divider2()
             if (u == null) {
                 Tile(Icons.AutoMirrored.Filled.Send, "Telegram orqali kirish", onClick = onBotLogin)
-                Divider2()
-            }
-            if (u != null && !u.googleLinked) {
-                Tile(Icons.Filled.AccountCircle, "Google accountni ulash", onClick = {
-                    scope.launch {
-                        val r = uz.arumediatv.com.data.GoogleSignIn.idToken(ctx)
-                        val err = r.second ?: auth.linkGoogle(r.first.orEmpty())
-                        if (err == null) toast("Google akkaunt ulandi") else if (err.isNotEmpty()) toast(err)
-                    }
-                })
                 Divider2()
             }
             if (!tgState.authorized) {
@@ -195,6 +195,64 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
         Spacer(Modifier.height(32.dp + LocalBarPad.current.calculateBottomPadding()))
     }
 
+    // ── Ko'p hisob ──
+    if (showAccounts) {
+        AccountsDialog(
+            accounts = accounts,
+            activeId = user?.id ?: 0L,
+            limit = auth.accounts.limit(),
+            onDismiss = { showAccounts = false },
+            onSwitch = { a ->
+                showAccounts = false
+                busy = "Account almashtirilmoqda"
+                scope.launch {
+                    withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
+                    uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, a.id)
+                }
+            },
+            onAdd = {
+                showAccounts = false
+                scope.launch {
+                    busy = "Tekshirilmoqda"
+                    // Obuna holati yangi bo'lishi uchun (5 yoki 3 chegarasi): tarmoq bor bo'lsa hozirgi hisobniki yangilanadi.
+                    if (auth.isLoggedIn) kotlinx.coroutines.withTimeoutOrNull(3000L) { AppServices.billing.load(force = true) }
+                    if (!auth.accounts.canAdd()) {
+                        busy = null
+                        error = if (auth.accounts.limit() < 5) "Hozir 3 tagacha account ulash mumkin. Ulangan accountlardan birortasida obuna bo'lsa 5 tagacha ulash mumkin."
+                        else "Eng ko'pi 5 ta account ulash mumkin."
+                    } else if (!auth.isLoggedIn) {
+                        busy = null
+                        onBotLogin()
+                    } else {
+                        busy = "Account qo'shilmoqda"
+                        withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
+                        uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, 0L)
+                    }
+                }
+            },
+            onRemove = { a -> removeTarget = a },
+        )
+    }
+    removeTarget?.let { a ->
+        AlertDialog(
+            onDismissRequest = { removeTarget = null },
+            title = { Text("Accountni olib tashlash") },
+            text = { Text("«${a.user?.fullName ?: a.id}» shu telefondan chiqariladi. Accountning o'zi o'chmaydi — keyin yana kirish mumkin.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    removeTarget = null
+                    scope.launch {
+                        runCatching { auth.revokeToken(a.session) }
+                        auth.accounts.remove(a.id)
+                        uz.arumediatv.com.data.AccountSwitcher.forget(ctx, a.id)
+                    }
+                }) { Text("Olib tashlash", color = Color(0xFFF87171)) }
+            },
+            dismissButton = { TextButton(onClick = { removeTarget = null }) { Text("Bekor qilish") } },
+            containerColor = AruColors.Surface,
+        )
+    }
+
     // ── Chiqish ──
     if (confirmLogout) {
         AlertDialog(
@@ -216,6 +274,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                                 wipeLocal()
                                 busy = null
                                 confirmLogout = false
+                                afterAccountGone()
                             }
                         }
                     },
@@ -237,6 +296,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                     scope.launch {
                         auth.logout()
                         wipeLocal()
+                        afterAccountGone()
                     }
                 }) { Text("Baribir chiqish", color = Color(0xFFF87171)) }
             },
@@ -267,8 +327,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                     busy = "Ma'lumotlar tozalanmoqda"
                     scope.launch {
                         val err = auth.deleteAccount()
-                        if (err == null) wipeLocal() else error = err
-                        busy = null
+                        if (err == null) { wipeLocal(); busy = null; afterAccountGone() } else { error = err; busy = null }
                     }
                 }) { Text("Ha, o'chirilsin", color = Color(0xFFF87171)) }
             },
