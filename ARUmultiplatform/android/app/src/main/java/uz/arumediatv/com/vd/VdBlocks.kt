@@ -148,7 +148,7 @@ object VdBlocks {
         var force = false
         for (attempt in 0 until 3) {
             if (force || !VdWarm.isWarm(name, w)) {
-                if (!VdApi.warmBlocking(name, w, force)) throw IOException("Kesh tayyor emas (oyna $w)")
+                if (!VdApi.warmBlocking(name, w, force)) throw IOException("Kesh tayyor emas (oyna $w): ${VdApi.lastWarm}")
                 VdWarm.markWarm(name, w)
                 force = false
             }
