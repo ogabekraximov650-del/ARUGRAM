@@ -290,6 +290,19 @@ pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
     eprintln!("bot: @{username}");
     // UZ: oldingi ishdan qolgan vaqtinchalik fayllar diskni to'ldirmasin. EN: drop leftovers of interrupted jobs.
     let _ = std::fs::remove_dir_all(format!("{}/tmp", cfg.data_dir));
+    // yt-dlp (PyInstaller) `_MEI*` chiqindilari: o'ldirilgan jarayondan qolib diskni to'ldirmasin ("No space left on device", "[PYI-...:ERROR]").
+    let _ = std::fs::remove_dir_all(format!("{}/pyi", cfg.data_dir));
+    eprintln!("tozalash: {} ta eski vaqtinchalik fayl o'chirildi", dl::janitor(&cfg, 60));
+    {
+        let c = Arc::clone(&cfg);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(600)).await;
+                let n = dl::janitor(&c, 21600);
+                if n > 0 { eprintln!("tozalash: {n} ta eski vaqtinchalik fayl o'chirildi"); }
+            }
+        });
+    }
     let acc = init_account(&cfg).await;
     let app = Arc::new(App { cfg, db: conn, bot, acc, bot_username: username, peer: Mutex::new(None) });
     let w = Arc::clone(&app);
@@ -595,6 +608,10 @@ async fn worker(app: Arc<App>) {
         match db::job_take(&app.db).await {
             Some(job) => {
                 let id = job.id;
+                // Disk kam bo'lsa ish boshlanishidan oldin chiqindilar tozalanadi.
+                if dl::free_bytes(Path::new(&app.cfg.data_dir)).map_or(false, |f| f < 800_000_000) {
+                    dl::janitor(&app.cfg, 300);
+                }
                 let res = run_job(&app, &job).await;
                 let st = db::job_state(&app.db, id).await;
                 match res {
@@ -606,7 +623,13 @@ async fn worker(app: Arc<App>) {
                     Err(e) => {
                         eprintln!("#{id} xato: {e}");
                         db::job_finish(&app.db, id, "failed", &e.to_string()).await;
-                        app.bot.edit(job.chat_id, job.status_msg, &format!("❌ #{id}: {e}"), None).await;
+                        let es = e.to_string();
+                        // Disk to'lgan bo'lsa: chiqindilar darhol tozalanadi va foydalanuvchiga tushunarli xabar beriladi.
+                        let hint = if es.contains("No space left") || es.contains("[PYI-") {
+                            let n = dl::janitor(&app.cfg, 300);
+                            format!("\n\n🧹 Serverda joy qolmagan edi, vaqtinchalik fayllar tozalandi ({n} ta). Iltimos, qaytadan urinib ko'ring.")
+                        } else { String::new() };
+                        app.bot.edit(job.chat_id, job.status_msg, &format!("❌ #{id}: {e}{hint}"), None).await;
                     }
                 }
                 let _ = std::fs::remove_dir_all(format!("{}/tmp/{id}", app.cfg.data_dir));

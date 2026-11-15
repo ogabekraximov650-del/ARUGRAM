@@ -199,8 +199,51 @@ pub fn check_cookies(text: &str) -> Option<(usize, bool)> {
     (n > 0).then_some((n, auth))
 }
 
+/// yt-dlp (PyInstaller) har ishga tushganda `_MEI*` papkasini vaqtinchalik joyga ochadi; jarayon o'ldirilsa u qolib ketib diskni to'ldiradi.
+/// Shu sabab yt-dlp uchun alohida papka (`<data>/pyi`): boshlanishda va vaqti-vaqti bilan tozalanadi.
+pub fn pyi_dir(cfg: &Cfg) -> std::path::PathBuf {
+    let d = std::path::Path::new(&cfg.data_dir).join("pyi");
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+/// Vaqtinchalik chiqindi papka nomimi (yt-dlp, FIFO, bo'lish, PDF, Pyrogram nusxasi).
+pub fn is_junk_name(n: &str) -> bool {
+    n.starts_with("_MEI") || n.starts_with("ytfifo-") || n.starts_with("ytbot-") || n.starts_with("pyro-")
+}
+
+/// Chiqindilarni tozalaydi: `min_age_secs` dan eski `_MEI*`/`ytfifo-*`/`ytbot-*`/`pyro-*` (tizim temp va `<data>/pyi` ichida) hamda 6 soatdan eski ish papkalari
+/// (`<data>/tmp/*`). Nechta o'chirilgani qaytadi.
+pub fn janitor(cfg: &Cfg, min_age_secs: u64) -> usize {
+    let now = std::time::SystemTime::now();
+    let old = |p: &std::path::Path, age: u64| -> bool {
+        std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| now.duration_since(t).ok()).map_or(false, |d| d.as_secs() >= age)
+    };
+    let mut n = 0;
+    for root in [std::env::temp_dir(), std::path::Path::new(&cfg.data_dir).join("pyi")] {
+        let Ok(rd) = std::fs::read_dir(&root) else { continue };
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let junk = is_junk_name(&name) || root.ends_with("pyi");
+            if junk && old(&e.path(), min_age_secs) {
+                let r = if e.path().is_dir() { std::fs::remove_dir_all(e.path()) } else { std::fs::remove_file(e.path()) };
+                if r.is_ok() { n += 1; }
+            }
+        }
+    }
+    if let Ok(rd) = std::fs::read_dir(std::path::Path::new(&cfg.data_dir).join("tmp")) {
+        for e in rd.flatten() {
+            if old(&e.path(), 6 * 3600) && std::fs::remove_dir_all(e.path()).is_ok() {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
 fn base(cfg: &Cfg) -> Command {
     let mut c = Command::new(&cfg.ytdlp);
+    c.env("TMPDIR", pyi_dir(cfg));
     c.arg("--no-playlist").arg("--no-warnings").arg("--no-colors").arg("--no-part");
     if let Some(ck) = cookie_file(cfg) {
         c.arg("--cookies").arg(ck);
@@ -966,5 +1009,20 @@ mod tests {
         let tsz = std::fs::metadata(&th).unwrap().len();
         assert!(tsz > 500 && tsz < 200_000, "thumbnail hajmi {tsz}");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod janitor_tests {
+    use super::*;
+
+    #[test]
+    fn junk_names() {
+        assert!(is_junk_name("_MEI4x9k2"));
+        assert!(is_junk_name("ytfifo-1-2"));
+        assert!(is_junk_name("ytbot-split-9"));
+        assert!(is_junk_name("pyro-5.db"));
+        assert!(!is_junk_name("ytbot.db"));
+        assert!(!is_junk_name("cookies.txt"));
     }
 }
