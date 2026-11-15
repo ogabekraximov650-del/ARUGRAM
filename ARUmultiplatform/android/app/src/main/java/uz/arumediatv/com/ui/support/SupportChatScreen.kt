@@ -871,6 +871,14 @@ private fun ViewerVideo(m: ChatMessage) {
         if (src == null) player.error = "Videoni ochib bo'lmadi" else player.open(src.uri, 0, true)
     }
     LaunchedEffect(player) { while (true) { delay(250); player.tick() } }
+    var waited by remember { mutableStateOf(false) }
+    var diag by remember { mutableStateOf("") }
+    LaunchedEffect(m.id, attempt) {
+        waited = false
+        delay(8000)
+        waited = true
+        while (true) { diag = uz.arumediatv.com.vd.VdApi.lastWarm; delay(1000) }
+    }
     val err = player.error
     Box(Modifier.fillMaxSize()) {
         if (err != null) {
@@ -894,7 +902,18 @@ private fun ViewerVideo(m: ChatMessage) {
                     contentAlignment = Alignment.Center,
                 ) {
                     if (!player.ready) {
-                        androidx.compose.material3.CircularProgressIndicator(color = Color.White.copy(alpha = 0.54f), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            androidx.compose.material3.CircularProgressIndicator(color = Color.White.copy(alpha = 0.54f), strokeWidth = 2.dp, modifier = Modifier.size(34.dp))
+                            // 8 soniyadan ko'p kutilsa sababi ko'rsatiladi (masalan "pending saqlanmoqda 0/3" — video hali Telegram'ga to'liq saqlanmagan).
+                            if (waited && diag.isNotEmpty()) {
+                                Spacer(Modifier.height(12.dp))
+                                Text(
+                                    if (diag.contains("pending")) "Video serverga hali to'liq saqlanmagan. Biroz kuting…" else "Video ochilmayapti",
+                                    color = Color.White.copy(alpha = 0.7f), fontSize = 13.sp, textAlign = TextAlign.Center,
+                                )
+                                Text(diag, color = Color.White.copy(alpha = 0.4f), fontSize = 10.sp, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp))
+                            }
+                        }
                     } else {
                         val a by androidx.compose.animation.core.animateFloatAsState(if (player.playing) 0f else 1f, androidx.compose.animation.core.tween(180), label = "pp")
                         Box(

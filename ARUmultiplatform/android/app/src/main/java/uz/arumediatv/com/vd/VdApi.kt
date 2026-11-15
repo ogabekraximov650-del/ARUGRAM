@@ -80,7 +80,17 @@ object VdApi {
 
     class WarmResult(val ok: Boolean, val text: String, val total: Long = 0, val pending: Boolean = false)
 
+    /** Oxirgi isitish natijasi (tashxis: video ochilmasa foydalanuvchiga sababi ko'rsatiladi). */
+    @Volatile
+    var lastWarm: String = ""
+
     fun warmDetailed(name: String, window: Long, force: Boolean = false): WarmResult {
+        val r = warmRaw(name, window, force)
+        lastWarm = r.text
+        return r
+    }
+
+    private fun warmRaw(name: String, window: Long, force: Boolean): WarmResult {
         val path = "/api/warm/vd~$name"
         val req = Request.Builder().url("$base$path?w=$window" + if (force) "&force=1" else "").build()
         val t0 = System.currentTimeMillis()
