@@ -4361,7 +4361,7 @@ async fn upsert_user(env: &Env, from: &Value) -> Result<Value> {
 //
 // Ilova Credential Manager orqali Google'dan ID token oladi, worker uni Google'ning `tokeninfo` xizmati bilan tekshiradi (imzoni Google o'zi tekshiradi)
 // va `aud` (Web Client ID), `iss`, `exp`, `email_verified` ni solishtiradi. Hisob `google_sub` bo'yicha topiladi yoki yangi yaratiladi
-// (ism/username avtomatik, Telegramdagidek). Admin huquqi Telegram ID'ga bog'liq — Google hisob hech qachon admin bo'lmaydi.
+// (yangi hisob yaratilmaydi: Google Profilda mavjud hisobga ulanadi). Admin huquqi Telegram ID'ga bog'liq — Google hisob hech qachon admin bo'lmaydi.
 const GOOGLE_WEB_CLIENT_ID: &str = "818006812529-99ospcjp0u3jqhak0ka5m5mogl3lcl38.apps.googleusercontent.com";
 
 /// ID tokenni tekshiradi; to'g'ri bo'lsa `(sub, email)`. Aks holda tushunarli xato matni.
@@ -4401,25 +4401,12 @@ fn google_claims_ok(c: &Value, now_s: i64) -> std::result::Result<(String, Strin
     Ok((sub, c["email"].as_str().unwrap_or("").to_lowercase()))
 }
 
-/// `google_sub` bo'yicha hisobni topadi (so'ngi kirish vaqtini yangilaydi) yoki yangisini yaratadi.
-async fn google_user(env: &Env, sub: &str, email: &str) -> Result<Value> {
-    let now = now_ms();
+/// `google_sub` bo'yicha FAQAT ulangan hisobni topadi (so'nggi kirish vaqtini yangilaydi). Yangi hisob YARATILMAYDI:
+/// Google avval Telegram bilan kirgan hisobga Profilda ulanishi kerak (`/api/auth/google/link`).
+async fn google_user(env: &Env, sub: &str) -> Result<Option<Value>> {
     let res = turso_exec(env, "UPDATE users_db SET last_login_at=? WHERE google_sub=? RETURNING *",
-        vec![TursoArg::int(now), TursoArg::text(sub)]).await?;
-    if let Some(u) = first_row(&res) { return Ok(u); }
-    for _ in 0..5 {
-        let (new_id, n) = next_user_slot(env).await?;
-        let res = turso_exec(env,
-            "INSERT INTO users_db (id,telegram_id,username,first_name,last_name,is_banned,created_at,last_login_at,profile_done,google_sub,email)
-             VALUES (?,NULL,?,?,'',0,?,?,1,?,?) RETURNING *",
-            vec![TursoArg::int(new_id), TursoArg::text(&format!("user_{n}")), TursoArg::text(&format!("User {n}")),
-                 TursoArg::int(now), TursoArg::int(now), TursoArg::text(sub), TursoArg::text(email)]).await;
-        match res {
-            Ok(r) => { if let Some(u) = first_row(&r) { return Ok(u); } }
-            Err(_) => continue,
-        }
-    }
-    Err(Error::RustError("Foydalanuvchi yaratib bo'lmadi".into()))
+        vec![TursoArg::int(now_ms()), TursoArg::text(sub)]).await?;
+    Ok(first_row(&res))
 }
 
 /// Ilovaga BERILADIGAN foydalanuvchi ko'rinishi.
@@ -10370,11 +10357,13 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
         (Method::Post, "/api/auth/google") => {
             let mut req = req;
             let b: Value = req.json().await.unwrap_or(json!({}));
-            let (sub, email) = match google_verify(b["id_token"].as_str().unwrap_or("")).await {
+            let (sub, _email) = match google_verify(b["id_token"].as_str().unwrap_or("")).await {
                 Ok(v) => v,
                 Err(e) => return json_resp(&json!({"error": e}), 401),
             };
-            let user = google_user(env, &sub, &email).await?;
+            let Some(user) = google_user(env, &sub).await? else {
+                return json_resp(&json!({"error": "Bu Google akkaunt hech qaysi hisobga ulanmagan. Avval Telegram bilan kiring, so'ng Profil → «Google accountni ulash»"}), 404);
+            };
             let now = now_ms();
             if let Some((until, reason)) = ban_state(&user, now) {
                 return ok_nostore(json!({"status": "banned", "message": ban_message(until, &reason, now)}));
