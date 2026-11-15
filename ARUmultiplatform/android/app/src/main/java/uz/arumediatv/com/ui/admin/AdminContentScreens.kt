@@ -1151,7 +1151,7 @@ private fun IntroPlayerCard(player: uz.arumediatv.com.ui.season.AruPlayer, initi
     }
     GlassCard(16, PaddingValues(12.dp)) {
         // Asosiy TAYYOR pleyer (`PlayerSurface` + `PlayerControls`) — qayta yozilmagan; keraksiz tugmalar (keyingi qism, qulf, ro'yxat) bo'sh qoldirilgan.
-        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(Color.Black)) {
             uz.arumediatv.com.ui.season.PlayerSurface(player, Modifier.fillMaxSize())
             uz.arumediatv.com.ui.season.PlayerControls(
                 player = player, title = jstr(initial, "epizod_name"), subtitle = "Intro vaqtini aniqlash",
@@ -1159,8 +1159,9 @@ private fun IntroPlayerCard(player: uz.arumediatv.com.ui.season.AruPlayer, initi
                 speedLabel = if (player.speed == player.speed.toInt().toFloat()) "${player.speed.toInt()}x" else "${player.speed}x",
                 onSkipIntro = {}, onPrev = {}, onNext = {}, onBack = {}, onToggleFullscreen = {}, onSettings = {}, onQuality = {},
                 onEpisodeList = {}, onToggleLock = {}, onRetry = { opened = false; err = null },
+                modifier = Modifier.fillMaxSize(),
             )
-            err?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 12.sp) }
+            err?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 12.sp, modifier = Modifier.align(Alignment.Center)) }
         }
     }
 }
