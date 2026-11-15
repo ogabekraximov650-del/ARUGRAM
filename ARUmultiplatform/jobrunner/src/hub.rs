@@ -74,7 +74,8 @@ impl Hub {
     /// `vddel_` ("fayl o'chirilgan") belgilari uchun 0 — aks holda har bir fayl "o'chirilgan" bo'lib ko'rinardi.
     /// EN: value of an unseen key: boot time for table marks; 0 for `vddel_` tombstones (otherwise every file would look deleted).
     fn base(&self, k: &str) -> i64 {
-        if k.starts_with("vddel_") { 0 } else { self.boot }
+        // Worker kalitni `t:` old qo'shimchasi bilan yuboradi (`t:vddel_<nom>`), shu sabab ikkala ko'rinish tekshiriladi.
+        if k.starts_with("vddel_") || k.starts_with("t:vddel_") { 0 } else { self.boot }
     }
 
     fn value(&self, m: &HashMap<String, i64>, k: &str) -> i64 {
@@ -164,6 +165,9 @@ mod tests {
         h.marks(&["vddel_a.jpg".into()], h.boot + 10, &[]);
         assert_eq!(h.marks(&[], 0, &["vddel_a.jpg".into()])["v"]["vddel_a.jpg"], h.boot + 10);
         assert_eq!(h.marks(&[], 0, &["vddel_b.jpg".into()])["v"]["vddel_b.jpg"], 0);
+        // Worker haqiqatda yuboradigan kalit ko'rinishi.
+        assert_eq!(h.marks(&[], 0, &["t:vddel_c.jpg".into()])["v"]["t:vddel_c.jpg"], 0);
+        assert_eq!(h.marks(&[], 0, &["t:anime_db".into()])["v"]["t:anime_db"], h.boot);
     }
 
     #[tokio::test]
