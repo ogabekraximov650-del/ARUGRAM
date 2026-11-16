@@ -1,6 +1,7 @@
 package uz.arumediatv.com.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
@@ -74,6 +75,28 @@ object TranslatorRepo {
             )
         } catch (_: Exception) {
             null
+        }
+    }
+}
+
+/**
+ * UZ: Kartalardagi tarjimon logotipi (`tr_id` -> rasm manzili). Ro'yxat bir marta (xotira/diskdagi nusxa bilan) olinadi.
+ * EN: translator logos for list cards (`tr_id` -> photo url), loaded once.
+ * RU: logotipy perevodchikov dlya kartochek, zagruzhayutsya odin raz.
+ */
+object TranslatorLogos {
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.Default)
+    private val _map = kotlinx.coroutines.flow.MutableStateFlow<Map<Long, String>>(emptyMap())
+    val map: kotlinx.coroutines.flow.StateFlow<Map<Long, String>> = _map
+    @Volatile private var started = false
+
+    fun ensure() {
+        if (started) return
+        started = true
+        scope.launch {
+            val l = TranslatorRepo.list()
+            if (l == null) { started = false; return@launch }
+            _map.value = l.filter { it.photoUrl.isNotEmpty() }.associate { it.id to it.photoUrl }
         }
     }
 }

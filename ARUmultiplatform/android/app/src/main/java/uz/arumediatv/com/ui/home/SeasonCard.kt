@@ -19,6 +19,10 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.shape.CircleShape
+import uz.arumediatv.com.data.TranslatorLogos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,9 +76,20 @@ fun SeasonCard(season: Season, onClick: () -> Unit, modifier: Modifier = Modifie
             },
         )
 
-        // Tepa belgilar: chap ustun — yosh; o'ng ustun — baho, uning ostida ko'rishlar, keyin "Pullik".
+        val logos by TranslatorLogos.map.collectAsState()
+        androidx.compose.runtime.LaunchedEffect(Unit) { TranslatorLogos.ensure() }
+        val trLogo = if (season.trId > 0) logos[season.trId].orEmpty() else ""
+        // Tepa belgilar: chap ustun — tarjimon logotipi, yosh; o'ng ustun — baho, uning ostida ko'rishlar, keyin "Pullik".
         Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-            Column {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Tarjimon logotipi (yosh belgisi o'rnida); yosh belgisi uning ostida.
+                if (trLogo.isNotEmpty()) {
+                    TgImage(
+                        url = trLogo,
+                        modifier = Modifier.size(34.dp).clip(CircleShape).border(1.5.dp, Color.White.copy(alpha = 0.6f), CircleShape).background(Color.Black.copy(alpha = 0.35f)),
+                        maxPx = 96,
+                    )
+                }
                 if (season.age > 0) {
                     val c = if (season.age >= 18) Color(0xFFEF4444) else if (season.age >= 16) AruColors.Accent2 else AruColors.Gold
                     Text(
