@@ -155,10 +155,16 @@ fn row_to_obj(cols: &[Value], row: &[Value]) -> Value {
         let t = cell["type"].as_str().unwrap_or("null");
         let val = if t == "null" {
             Value::Null
-        } else if t == "integer" || t == "float" {
-            let s = cell["value"].as_str().unwrap_or("0");
-            s.parse::<i64>().map(|n| json!(n))
-                .or_else(|_| s.parse::<f64>().map(|f| json!(f)))
+        } else if t == "float" {
+            // Hrana kasr sonni JSON RAQAM sifatida beradi (butun sonlar esa matn): avval `as_str()` o'qilsa AVG kabi kasr natijalar 0 bo'lib qolardi.
+            cell["value"].as_f64()
+                .or_else(|| cell["value"].as_str().and_then(|s| s.parse::<f64>().ok()))
+                .map(|f| json!(f))
+                .unwrap_or(Value::Null)
+        } else if t == "integer" {
+            cell["value"].as_i64()
+                .or_else(|| cell["value"].as_str().and_then(|s| s.parse::<i64>().ok()))
+                .map(|n| json!(n))
                 .unwrap_or(Value::Null)
         } else {
             json!(cell["value"].as_str().unwrap_or(""))
@@ -16357,5 +16363,29 @@ mod google_tests {
         assert!(google_claims_ok(&claims(GOOGLE_WEB_CLIENT_ID, "evil.com", 2000, "true"), 1000).is_err(), "iss noto'g'ri");
         assert!(google_claims_ok(&claims(GOOGLE_WEB_CLIENT_ID, "accounts.google.com", 900, "true"), 1000).is_err(), "muddati o'tgan");
         assert!(google_claims_ok(&claims(GOOGLE_WEB_CLIENT_ID, "accounts.google.com", 2000, "false"), 1000).is_err(), "email tasdiqlanmagan");
+    }
+}
+
+#[cfg(test)]
+mod rowobj_tests {
+    use super::*;
+
+    #[test]
+    fn float_and_integer_cells() {
+        let cols = vec![json!({"name": "n"}), json!({"name": "i"}), json!({"name": "s"}), json!({"name": "z"})];
+        let row = vec![
+            json!({"type": "float", "value": 9.25}),
+            json!({"type": "integer", "value": "42"}),
+            json!({"type": "text", "value": "salom"}),
+            json!({"type": "null"}),
+        ];
+        let o = row_to_obj(&cols, &row);
+        assert_eq!(o["n"].as_f64(), Some(9.25));
+        assert_eq!(o["i"].as_i64(), Some(42));
+        assert_eq!(o["s"].as_str(), Some("salom"));
+        assert!(o["z"].is_null());
+        // Kasr son matn ko'rinishida kelsa ham o'qiladi.
+        let o2 = row_to_obj(&cols[..1], &[json!({"type": "float", "value": "10.5"})]);
+        assert_eq!(o2["n"].as_f64(), Some(10.5));
     }
 }
