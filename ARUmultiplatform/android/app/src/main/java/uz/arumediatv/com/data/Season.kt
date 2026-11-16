@@ -30,6 +30,8 @@ data class Season(
     val status: String = "",
     /** `turi`: "FILM" / "OVA" / "TV" ... */
     val kind: String = "",
+    /** Tarjimon (`tr_id`); 0 — tarjimonsiz. */
+    val trId: Long = 0,
 ) {
     val key: String get() = "$animeId:$seasonId"
 }
@@ -72,6 +74,7 @@ fun JsonElement.toSeason(): Season? {
         free = o.flag("free"),
         status = o.text("holati").trim(),
         kind = o.text("turi").trim().uppercase(),
+        trId = o.long("tr_id"),
     )
 }
 

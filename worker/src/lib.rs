@@ -10091,6 +10091,12 @@ async fn translators_route(mut req: Request, env: &Env, origin: &str, path: &str
         }
         return json_resp(&json!({"error": "method"}), 405);
     }
+    // Tarjimon sahifasi: tarjimon + statistika (4 raqam) + animelari — bitta so'rovda (ilova "Tarjimonlar" bo'limi).
+    if let Some(idstr) = id_part.strip_suffix("/page") {
+        if method != Method::Get { return json_resp(&json!({"error": "method"}), 405); }
+        let Ok(id) = idstr.parse::<i64>() else { return err404("Topilmadi") };
+        return translator_page(env, origin, id).await;
+    }
     let Ok(id) = id_part.parse::<i64>() else { return err404("Topilmadi") };
     if method == Method::Get {
         let res = turso_exec(env, "SELECT * FROM translator_db WHERE id=?", vec![TursoArg::int(id)]).await?;
@@ -10125,6 +10131,38 @@ async fn translators_route(mut req: Request, env: &Env, origin: &str, path: &str
         return ok(json!({"success": true}));
     }
     json_resp(&json!({"error": "method"}), 405)
+}
+
+/// GET /api/translators/<id>/page: `{translator, stats:{anime, episodes, views, rating}, seasons:[...]}`.
+/// `anime` — shu tarjimonning animelari soni (anime id bo'yicha), `episodes` — ko'rinadigan qismlar, `views` — barcha ko'rishlar,
+/// `rating` — animelar o'rtacha baholarining o'rtachasi (baholanmaganlar hisobga olinmaydi). Hammasi BITTA bazaga murojaatda.
+async fn translator_page(env: &Env, origin: &str, id: i64) -> Result<Response> {
+    let own = "(SELECT id FROM anime_db WHERE translator_id=?)";
+    let a = || vec![TursoArg::int(id)];
+    let res = turso_many(env, &[
+        ("SELECT * FROM translator_db WHERE id=?", a()),
+        ("SELECT COUNT(*) AS n FROM anime_db WHERE translator_id=?", a()),
+        (&format!("SELECT COUNT(*) AS n FROM epizod_db WHERE anime_id IN {own} AND (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
+                   OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>'' OR (COALESCE(origin_video,'')<>'' AND LENGTH(COALESCE(origin_key,''))=32))"), a()),
+        (&format!("SELECT COALESCE(SUM(views_total),0) AS n FROM season_db WHERE anime_id IN {own}"), a()),
+        (&format!("SELECT AVG(r) AS n FROM (SELECT CAST(SUM(rating_sum) AS REAL)/SUM(rating_count) AS r FROM season_db WHERE anime_id IN {own} GROUP BY anime_id HAVING SUM(rating_count)>0)"), a()),
+        (&format!("SELECT * FROM season_db WHERE anime_id IN {own} ORDER BY MAX(COALESCE(last_ep_at,0), COALESCE(created_at,0)) DESC, anime_id DESC, season_id ASC LIMIT 200"), a()),
+    ]).await?;
+    let Some(tr) = first_row(&res[0]) else { return err404("Tarjimon topilmadi") };
+    let n = |i: usize| first_row(&res[i]).map(|r| jint(&r, "n")).unwrap_or(0);
+    let rating = first_row(&res[4]).and_then(|r| r["n"].as_f64().or_else(|| r["n"].as_str().and_then(|x| x.parse().ok()))).unwrap_or(0.0);
+    let cols = res[5]["cols"].as_array().cloned().unwrap_or_default();
+    let mut items: Vec<Value> = res[5]["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![]))).collect();
+    mark_free(&mut items, &free_seasons(env).await);
+    if let Some(counts) = visible_episode_counts(env).await {
+        mark_visible_counts(&mut items, &counts);
+    }
+    attach_translators(env, &mut items).await;
+    ok(json!({
+        "translator": resolve_fields(origin, tr, TRANSLATOR_URL_KEYS),
+        "stats": {"anime": n(1), "episodes": n(2), "views": n(3), "rating": (rating * 100.0).round() / 100.0},
+        "seasons": resolve_list(origin, items, SEASON_URL_KEYS),
+    }))
 }
 
 async fn season_detail(env: &Env, origin: &str, req: &Request, aid: i64, sid: i64) -> Result<Response> {

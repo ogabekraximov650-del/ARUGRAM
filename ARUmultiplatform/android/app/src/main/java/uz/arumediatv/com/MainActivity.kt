@@ -138,6 +138,7 @@ private sealed interface Page {
     data object Login : Page
     data object AddAccount : Page
     data object ChooseLogin : Page
+    data class Translator(val t: uz.arumediatv.com.data.Translator) : Page
     data object BotLogin : Page
     data object Edit : Page
     data object Sessions : Page
@@ -316,7 +317,7 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
             when (tab) {
                 0 -> HomeScreen(onOpenSeason = openSeason, onLogin = login)
                 1 -> SearchScreen(onOpenSeason = openSeason)
-                2 -> CatalogScreen(onOpenSeason = openSeason)
+                2 -> CatalogScreen(onOpenSeason = openSeason, onOpenTranslator = { push(Page.Translator(it)) })
                 3 -> LibraryScreen(onOpenSeason = openSeason, onLogin = login, onOpenDownload = { s, e, q -> push(Page.SeasonPage(s, e, q)) }, onOpenAnimeHistory = { push(Page.AnimeHistory(it)) }, onOpenAnimeDownloads = { d -> push(Page.AnimeDownloads(d.animeId, d.seasonId, d.title)) })
                 4 -> ProfileScreen(
                     onLogin = { push(Page.Login) },
@@ -365,6 +366,7 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
                         onDone = { pop() },
                         onBack = { if (!uz.arumediatv.com.data.AccountSwitcher.cancelAdd(ctx)) pop() },
                     )
+                    is Page.Translator -> uz.arumediatv.com.ui.catalog.TranslatorScreen(page.t, onBack = ::pop, onOpenSeason = openSeason)
                     Page.ChooseLogin -> uz.arumediatv.com.ui.login.AddAccountScreen(
                         onTelegram = { push(Page.BotLogin) },
                         onDone = { pop() },

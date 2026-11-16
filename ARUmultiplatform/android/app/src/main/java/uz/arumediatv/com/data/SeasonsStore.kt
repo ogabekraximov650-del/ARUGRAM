@@ -91,6 +91,7 @@ object SeasonQueries {
 /** Katalog bo'limlari (Flutter `_Tab` bilan bir xil). */
 enum class CatalogTab(val label: String) {
     ALL("Barchasi"),
+    TRANSLATORS("Tarjimonlar"),
     RATING("Reytingi baland"),
     VIEWS("Eng ko'p ko'rilgan"),
     ONGOING("Ongoing"),
@@ -101,6 +102,7 @@ enum class CatalogTab(val label: String) {
     fun pick(rows: List<Season>): List<Season> =
         when (this) {
             ALL -> rows
+            TRANSLATORS -> emptyList() // alohida ekran (`TranslatorsTab`), kartalar to'ri emas
             RATING -> rows.filter { it.ratingCount > 0 }.sortedByDescending { it.ratingAvg }
             VIEWS -> rows.filter { it.views > 0 }.sortedByDescending { it.views }
             ONGOING -> rows.filter { it.status == "Davom etmoqda" }

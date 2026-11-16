@@ -70,7 +70,7 @@ import uz.arumediatv.com.ui.theme.AruColors
  */
 @OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun CatalogScreen(onOpenSeason: (Season) -> Unit) {
+fun CatalogScreen(onOpenSeason: (Season) -> Unit, onOpenTranslator: (uz.arumediatv.com.data.Translator) -> Unit = {}) {
     val store = AppServices.seasons
     LaunchedEffect(Unit) { store.ensureLoaded() }
     val state by store.state.collectAsStateWithLifecycle()
@@ -120,6 +120,10 @@ fun CatalogScreen(onOpenSeason: (Season) -> Unit) {
             }
         }
         HorizontalPager(state = pager, modifier = Modifier.fillMaxSize(), beyondViewportPageCount = 0) { page ->
+            if (tabs[page] == CatalogTab.TRANSLATORS) {
+                TranslatorsTab(rows, onOpenTranslator, onOpenSeason)
+                return@HorizontalPager
+            }
             val list = remember(rows, page) { tabs[page].pick(rows) }
             PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = store::refresh, modifier = Modifier.fillMaxSize()) {
                 SeasonGrid(
