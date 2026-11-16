@@ -22,7 +22,6 @@
   <h1>ARUMEDIATV</h1>
   <p id="info">Qismni ilovada ochish uchun tugmani bosing.</p>
   <a id="open" class="btn" href="#">Ilovada ochish</a>
-  <a class="btn alt" href="https://arumediatv.pages.dev">Saytda ochish</a>
 </main>
 <script>
 (function () {
@@ -37,8 +36,8 @@
   // Android: o'rnatilgan ilova bo'lsa App Links o'zi ochadi (bu sahifa umuman ko'rinmaydi). Brauzerlarning ichki oynasi
   // (Telegram, Instagram) havolani ilovaga bermasa — shu tugma intent:// orqali ochadi.
   var intentUrl = "intent://" + location.host + path + "#Intent;scheme=https;package=uz.arumediatv.com;end";
-  open.href = android ? intentUrl : "https://arumediatv.pages.dev";
-  if (!android) open.textContent = "Saytda ochish";
+  if (android) { open.href = intentUrl; }
+  else { open.style.display = "none"; document.getElementById("info").textContent = "Bu havola Android ilovasi uchun. Telefoningizda oching."; }
 })();
 </script>
 </body>

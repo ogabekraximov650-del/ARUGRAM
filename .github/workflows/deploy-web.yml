@@ -7,12 +7,10 @@ name: Mini App saytini deploy qilish (arumediatv.pages.dev)
 # Kerak: CLOUDFLARE_API_TOKEN ("Cloudflare Pages: Edit" huquqi bilan) va
 # CLOUDFLARE_ACCOUNT_ID — worker deploy'dagi o'sha secret'lar.
 
+# HOZIRCHA O'CHIRILGAN (foydalanuvchi talabi): avtomatik deploy yo'q. Kerak bo'lganda GitHub Actions'da
+# "Run workflow" bilan ishga tushiriladi — Pages loyihasi yo'q bo'lsa o'zi qayta yaratiladi.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'web/**'
-      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
 
 permissions:
   contents: read

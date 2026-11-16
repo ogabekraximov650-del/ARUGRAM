@@ -7449,3 +7449,8 @@ Nima: har bir qism qatorida yuklash tugmasining chap tomonida "Ulashish" tugmasi
 Qanday: `data/DeepLink.kt` (havolani yasash/tahlil qilish, `pending` holati), `MainActivity` (`onNewIntent`, ro'yxat yuklangach va kirilgach `SeasonPage(episodeId)`; kirilmagan bo'lsa kirish so'raladi, havola saqlanadi), manifestda `intent-filter` va `launchMode=singleTask`. Sayt: `link-web/` (`_redirects`, `s.html`, `.well-known/assetlinks.json` — imzo izi `ci/release.keystore` dan), workflow `deploy-links.yml` (Pages loyihasi `arumediatvuz`, birinchi marta o'zi yaratiladi).
 Keyinroq (hozircha YO'Q): ulashishlar/ochilishlar soni, APK yuklab olish tugmasi, Google Play/App Store yo'naltirish. Ochilishlar sonini Turso'ga EMAS, Durable Object'ga yozish kerak (Turso yozuvi pul turadi).
 Tekshirish (qurilmada): havolani Telegramga yuborib bosing — ilova ochilib shu qism chiqishi kerak. Android havolani birinchi tasdiqlashi bir necha daqiqa olishi mumkin.
+
+## Mini App sayti vaqtincha o'chirildi (2026-11)
+
+`arumediatv.pages.dev` (Telegram Mini App, `web/`) foydalanuvchi talabi bilan o'chirildi: `web-offline.yml` Pages loyihasini o'chiradi, `deploy-web.yml` endi faqat qo'lda ("Run workflow") ishga tushadi (loyiha yo'q bo'lsa o'zi qayta yaratiladi). Havola saytidagi (`link-web/`) "Saytda ochish" tugmalari olib tashlandi. `worker/src/tma.rs` dagi `WEB_URL` o'zgarmadi (qayta yoqilganda ishlaydi).
+Rejada: APK ni 20 000 000 baytlik bo'laklarga bo'lib Telegram'ga (bot API) saqlash, havola sahifasida "APKni yuklab olish" tugmasi, worker bo'laklarni Cloudflare keshidan bitta fayl qilib beradi.
