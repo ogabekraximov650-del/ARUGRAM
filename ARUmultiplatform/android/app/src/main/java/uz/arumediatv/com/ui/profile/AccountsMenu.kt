@@ -2,6 +2,18 @@ package uz.arumediatv.com.ui.profile
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.foundation.border
@@ -82,33 +94,48 @@ fun AccountsCapsule(
                 onDismissRequest = { onToggle(false) },
                 properties = PopupProperties(focusable = true),
             ) {
-                // Kapsulaning o'ng-pastki burchagidan tortilgandek: eni va bo'yi BIR vaqtda, bir xil tezlikda (chiziqli) 1 s da kattalashadi.
+                // Material "container transform" ruhida: kapsula yumshoq PRUJINA bilan kattalashib oynaga aylanadi. Popup oynasi boshidanoq to'liq o'lchamda
+                // (oyna har kadrda o'lchamini o'zgartirmaydi — shuning uchun qotmaydi); faqat ko'rinadigan qism (kesish shakli) o'sadi, mazmun qayta o'lchanmaydi.
                 val prog = remember { Animatable(0f) }
-                LaunchedEffect(Unit) { prog.animateTo(1f, tween(1000, easing = LinearEasing)) }
-                val pillPx = with(density) { pillW.roundToPx() }
-                val headerPx = with(density) { 44.dp.roundToPx() }
-                val fullPx = with(density) { 290.dp.roundToPx() }
+                LaunchedEffect(Unit) {
+                    prog.animateTo(1f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = Spring.StiffnessMediumLow))
+                }
+                val pillPx = with(density) { pillW.toPx() }
+                val headerPx = with(density) { 44.dp.toPx() }
+                val rStart = with(density) { 22.dp.toPx() }
+                val rEnd = with(density) { 24.dp.toPx() }
+                val stroke = with(density) { 1.dp.toPx() }
                 Column(
                     Modifier
-                        .layout { measurable, _ ->
-                            // Ichki mazmun doim TO'LIQ o'lchamda o'lchanadi (qatorlar qayta o'ralmaydi); ko'rinadigan oyna esa o'sib boradi.
-                            val full = measurable.measure(Constraints(minWidth = fullPx, maxWidth = fullPx))
-                            val t = prog.value
-                            val w = (pillPx + (fullPx - pillPx) * t).toInt()
-                            val h = (headerPx + (full.height - headerPx) * t).toInt()
-                            layout(w, h) { full.placeRelative(0, 0) }
+                        .width(290.dp)
+                        .graphicsLayer {
+                            shape = RevealShape(prog.value.coerceIn(0f, 1f), pillPx, headerPx, rStart, rEnd)
+                            clip = true
                         }
-                        .clip(RoundedCornerShape(24.dp)).background(AruColors.Surface)
-                        .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(24.dp)),
+                        .background(AruColors.Surface)
+                        .drawWithContent {
+                            drawContent()
+                            val k = prog.value.coerceIn(0f, 1f)
+                            val w = pillPx + (size.width - pillPx) * k
+                            val h = headerPx + (size.height - headerPx) * k
+                            val r = rStart + (rEnd - rStart) * k
+                            drawRoundRect(
+                                Color.White.copy(alpha = 0.28f),
+                                topLeft = Offset(stroke / 2, stroke / 2),
+                                size = Size(w - stroke, h - stroke),
+                                cornerRadius = CornerRadius(r),
+                                style = Stroke(stroke),
+                            )
+                        },
                 ) {
                     CapsuleHeader(open = true, modifier = Modifier.clickable { onToggle(false) })
                     run {
                         Column(Modifier.requiredWidth(290.dp).padding(horizontal = 6.dp).padding(bottom = 8.dp)) {
-                            accounts.forEach { a ->
+                            accounts.forEachIndexed { idx, a ->
                                 val u = a.user
                                 val active = a.id == activeId
                                 Row(
-                                    Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                                    Modifier.fillMaxWidth().fadeIn(prog, idx).clip(RoundedCornerShape(16.dp))
                                         .background(if (active) AruColors.Accent.copy(alpha = 0.12f) else Color.Transparent)
                                         .clickable(enabled = !active) { onSwitch(a) }
                                         .padding(horizontal = 8.dp, vertical = 8.dp),
@@ -134,7 +161,7 @@ fun AccountsCapsule(
                                 }
                             }
                             Row(
-                                Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).clickable(onClick = onAdd).padding(horizontal = 8.dp, vertical = 12.dp),
+                                Modifier.fillMaxWidth().fadeIn(prog, accounts.size).clip(RoundedCornerShape(16.dp)).clickable(onClick = onAdd).padding(horizontal = 8.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Box(Modifier.size(38.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.1f)), contentAlignment = Alignment.Center) {
@@ -181,4 +208,19 @@ private fun Chevron(up: Boolean) {
         drawLine(Color.White, Offset(sw / 2, ya), Offset(w / 2, yb), sw, StrokeCap.Round)
         drawLine(Color.White, Offset(w / 2, yb), Offset(w - sw / 2, ya), sw, StrokeCap.Round)
     }
+}
+
+/** Kesish shakli: ko'rinadigan qism (eni `startW` dan to'liq enigacha, bo'yi `startH` dan to'liq bo'yigacha) `k` (0..1) bo'yicha o'sadi; burchaklar yumaloq. */
+private data class RevealShape(val k: Float, val startW: Float, val startH: Float, val rStart: Float, val rEnd: Float) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val w = startW + (size.width - startW) * k
+        val h = startH + (size.height - startH) * k
+        val r = rStart + (rEnd - rStart) * k
+        return Outline.Rounded(RoundRect(0f, 0f, w, h, CornerRadius(r)))
+    }
+}
+
+/** Qator oyna ochilib borishi bilan birin-ketin rang kirib chiqadi (qayta chizish faqat, qayta o'lchash yo'q). */
+private fun Modifier.fadeIn(prog: Animatable<Float, *>, index: Int): Modifier = graphicsLayer {
+    alpha = ((prog.value - 0.25f - index * 0.08f) / 0.4f).coerceIn(0f, 1f)
 }
