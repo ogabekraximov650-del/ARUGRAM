@@ -28,7 +28,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.layout.requiredWidth
@@ -80,20 +82,27 @@ fun AccountsCapsule(
                 onDismissRequest = { onToggle(false) },
                 properties = PopupProperties(focusable = true),
             ) {
-                val vis = remember { MutableTransitionState(false).apply { targetState = true } }
-                // Eni va bo'yi birdaniga emas, ~0,35 s da silliq kattalashadi.
+                // Kapsulaning o'ng-pastki burchagidan tortilgandek: eni va bo'yi BIR vaqtda, bir xil tezlikda (chiziqli) ~0,7 s da kattalashadi.
                 val prog = remember { Animatable(0f) }
-                LaunchedEffect(Unit) { prog.animateTo(1f, tween(350, easing = FastOutSlowInEasing)) }
+                LaunchedEffect(Unit) { prog.animateTo(1f, tween(700, easing = LinearEasing)) }
+                val pillPx = with(density) { pillW.roundToPx() }
+                val headerPx = with(density) { 44.dp.roundToPx() }
+                val fullPx = with(density) { 290.dp.roundToPx() }
                 Column(
-                    Modifier.width(lerp(pillW, 290.dp, prog.value)).clip(RoundedCornerShape(24.dp)).background(AruColors.Surface)
+                    Modifier
+                        .layout { measurable, _ ->
+                            // Ichki mazmun doim TO'LIQ o'lchamda o'lchanadi (qatorlar qayta o'ralmaydi); ko'rinadigan oyna esa o'sib boradi.
+                            val full = measurable.measure(Constraints(minWidth = fullPx, maxWidth = fullPx))
+                            val t = prog.value
+                            val w = (pillPx + (fullPx - pillPx) * t).toInt()
+                            val h = (headerPx + (full.height - headerPx) * t).toInt()
+                            layout(w, h) { full.placeRelative(0, 0) }
+                        }
+                        .clip(RoundedCornerShape(24.dp)).background(AruColors.Surface)
                         .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(24.dp)),
                 ) {
                     CapsuleHeader(open = true, modifier = Modifier.clickable { onToggle(false) })
-                    AnimatedVisibility(
-                        visibleState = vis,
-                        enter = expandVertically(tween(350, easing = FastOutSlowInEasing)) + fadeIn(tween(350)),
-                    ) {
-                        // Ichki kenglik qat'iy: karta kengayayotganda qatorlar qayta o'ralib "sakramaydi", faqat ochilib boradi.
+                    run {
                         Column(Modifier.requiredWidth(290.dp).padding(horizontal = 6.dp).padding(bottom = 8.dp)) {
                             accounts.forEach { a ->
                                 val u = a.user
