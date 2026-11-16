@@ -269,6 +269,7 @@ fun EpisodesTab(
     onPlay: (Episode, String?) -> Unit,
     onSubscribe: () -> Unit,
     onDeleted: (Episode, String) -> Unit = { _, _ -> },
+    onShare: (Episode) -> Unit = {},
 ) {
     when {
         !canWatch -> EmptyState(Icons.Filled.PlayArrow, "Qismlarni ko'rish uchun obuna kerak")
@@ -306,7 +307,7 @@ fun EpisodesTab(
                     item { ChipBtn(if (newestFirst) "⇅ Yangi" else "⇅ Eski", false) { newestFirst = !newestFirst } }
                 }
                 LazyColumn(Modifier.fillMaxSize(), state = ls, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(shown, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay, onDeleted) }
+                    items(shown, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay, onDeleted, onShare) }
                 }
             }
         }
@@ -326,7 +327,7 @@ private fun ChipBtn(text: String, on: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String?) -> Unit, onDeleted: (Episode, String) -> Unit) {
+private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String?) -> Unit, onDeleted: (Episode, String) -> Unit, onShare: (Episode) -> Unit = {}) {
     val shape = RoundedCornerShape(16.dp)
     var expanded by remember { mutableStateOf(false) }
     val dm = AppServices.downloads
@@ -388,6 +389,10 @@ private fun EpisodeTile(e: Episode, isCurrent: Boolean, onPlay: (Episode, String
                         color = AruColors.TextDim, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     )
                 }
+            }
+            // Ulashish: havola (arumediatvuz.pages.dev/s/...) — yuklash tugmasining chap tomonida.
+            Box(Modifier.size(48.dp).clip(CircleShape).clickable { onShare(e) }, contentAlignment = Alignment.Center) {
+                Icon(AruIcons.Share, null, tint = Color.White.copy(alpha = 0.6f), modifier = Modifier.size(22.dp))
             }
             // Yuklash holati: bosilsa sifatlar ochiladi (adashib katta yuklash boshlanmasin).
             Box(Modifier.size(48.dp).clip(CircleShape).clickable { expanded = !expanded }, contentAlignment = Alignment.Center) {

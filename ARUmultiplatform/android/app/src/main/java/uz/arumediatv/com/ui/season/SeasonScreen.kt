@@ -565,6 +565,7 @@ fun SeasonScreen(
                             play(e, quality = q)
                         },
                         onSubscribe = onOpenBilling,
+                        onShare = { e -> uz.arumediatv.com.data.DeepLink.share(ctx, season.name, e.number, season.animeId, season.seasonId, e.id) },
                         onDeleted = { e, q ->
                             // Hozir ijro etilayotgan sifat o'chirilsa — oqim uziladi: shu joydan qaytadan ochamiz (Flutterdagidek).
                             if (current?.id == e.id && currentUrl == e.urlFor(q)) {

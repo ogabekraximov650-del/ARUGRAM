@@ -188,7 +188,14 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT),
         )
+        uz.arumediatv.com.data.DeepLink.offer(intent)
         setContent { AruTheme { AuthGate() } }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        uz.arumediatv.com.data.DeepLink.offer(intent)
     }
 }
 
@@ -267,6 +274,23 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
         }
         lifecycleOwner.lifecycle.addObserver(ob)
         onDispose { lifecycleOwner.lifecycle.removeObserver(ob) }
+    }
+    // Havola (arumediatvuz.pages.dev/s/...) orqali kelgan: ro'yxat yuklangach va kirilgan bo'lsa shu qism ochiladi (kirilmagan bo'lsa kirish so'raladi, havola saqlanib turadi).
+    val link by uz.arumediatv.com.data.DeepLink.pending.collectAsStateWithLifecycle()
+    val seasonsState by AppServices.seasons.state.collectAsStateWithLifecycle()
+    LaunchedEffect(link, seasonsState.items, AppServices.auth.isLoggedIn) {
+        val t = link ?: return@LaunchedEffect
+        AppServices.seasons.ensureLoaded()
+        if (!AppServices.auth.isLoggedIn) { askLogin = true; return@LaunchedEffect }
+        val season = seasonsState.items.firstOrNull { it.animeId == t.animeId && it.seasonId == t.seasonId }
+        if (season != null) {
+            uz.arumediatv.com.data.DeepLink.consume()
+            stack.clear()
+            push(Page.SeasonPage(season, episodeId = t.episodeId))
+        } else if (!seasonsState.loading) {
+            uz.arumediatv.com.data.DeepLink.consume()
+            android.widget.Toast.makeText(ctx, "Havola topilmadi", android.widget.Toast.LENGTH_SHORT).show()
+        }
     }
     val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { if (!AppServices.auth.isLoggedIn) askLogin = true else push(Page.SeasonPage(it)) }
     // Kirish kerak joyda: Telegram bot orqali kirish (token -> Telegram ilovasini tanlash -> Start). Telegram hisobini ulash — Profilda.

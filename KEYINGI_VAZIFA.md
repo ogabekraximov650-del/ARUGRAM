@@ -7442,3 +7442,10 @@ Sabab: jurnal bo'lagi (`db_1_v1`) har yozuvdan keyin butun fayl bo'lib (≤1 MiB
 Nima: qism ko'rilsa `views_total` +1, tomosha vaqti qo'shiladi, baho berilsa o'rtacha va soni shu zahoti o'zgaradi — bo'lim sahifasida, qismlar ro'yxatida va katalog kartalarida. Server paketi (`SyncQueue`) avvalgidek keyin ketadi.
 Qanday: `LocalOverlay` (sof mantiq, test: `LocalOverlayTest`); `SeasonsStore.patch` kartalarni darhol yangilaydi; serverdan kelgan ro'yxat/ma'lumot ustiga hali yuborilmagan baho/ko'rish qo'yiladi (`SeasonRepository.withPending`, `SeasonsStore` overlay). `SyncQueue.putRating` endi `prev` (avvalgi baho) ham saqlaydi.
 Fayllar: `data/SeasonData.kt`, `data/SeasonsStore.kt`, `data/SyncQueue.kt`, `ui/season/SeasonScreen.kt`, `AppServices.kt`.
+
+## Qism havolalari (ulashish va havola orqali ochish)
+
+Nima: har bir qism qatorida yuklash tugmasining chap tomonida "Ulashish" tugmasi. U `https://arumediatvuz.pages.dev/s/<anime>/<bo'lim>/<qism>` havolasini ulashadi. Ilova o'rnatilgan bo'lsa havola bosilganda shu qism ochiladi (Android App Links, `autoVerify`); o'rnatilmagan bo'lsa sayt sahifasi ochiladi (`link-web/s.html`).
+Qanday: `data/DeepLink.kt` (havolani yasash/tahlil qilish, `pending` holati), `MainActivity` (`onNewIntent`, ro'yxat yuklangach va kirilgach `SeasonPage(episodeId)`; kirilmagan bo'lsa kirish so'raladi, havola saqlanadi), manifestda `intent-filter` va `launchMode=singleTask`. Sayt: `link-web/` (`_redirects`, `s.html`, `.well-known/assetlinks.json` — imzo izi `ci/release.keystore` dan), workflow `deploy-links.yml` (Pages loyihasi `arumediatvuz`, birinchi marta o'zi yaratiladi).
+Keyinroq (hozircha YO'Q): ulashishlar/ochilishlar soni, APK yuklab olish tugmasi, Google Play/App Store yo'naltirish. Ochilishlar sonini Turso'ga EMAS, Durable Object'ga yozish kerak (Turso yozuvi pul turadi).
+Tekshirish (qurilmada): havolani Telegramga yuborib bosing — ilova ochilib shu qism chiqishi kerak. Android havolani birinchi tasdiqlashi bir necha daqiqa olishi mumkin.
