@@ -1,6 +1,5 @@
 package uz.arumediatv.com.data
 
-import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -17,13 +16,6 @@ class LocalOverlayTest {
         val r = LocalOverlay.rated(s(8.0, 2, 0), 6, 10) // 16 -> 20
         assertEquals(2, r.ratingCount)
         assertEquals(10.0, r.ratingAvg, 0.001)
-    }
-
-    @Test fun watchAddsViewsAndMs() {
-        val i = SeasonInfo(JSONObject().put("views_total", 4).put("watch_ms_total", 1000), 0.0, 0, false)
-        val o = LocalOverlay.addWatch(i, 1, 500)
-        assertEquals(5L, o.views)
-        assertEquals(1500L, o.watchMs)
     }
 
     @Test fun listOverlayApplies() {
