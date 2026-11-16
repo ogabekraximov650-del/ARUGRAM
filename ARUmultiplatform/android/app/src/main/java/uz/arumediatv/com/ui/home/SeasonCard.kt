@@ -72,34 +72,31 @@ fun SeasonCard(season: Season, onClick: () -> Unit, modifier: Modifier = Modifie
             },
         )
 
-        // Tepa belgilar: 1-qator reyting (chapda) va ko'rishlar (o'ngda); 2-qator yosh (chapda) va "Pullik" (o'ngda)
-        Column(Modifier.fillMaxWidth().padding(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+        // Tepa belgilar: chap ustun — yosh; o'ng ustun — baho, uning ostida ko'rishlar, keyin "Pullik".
+        Row(Modifier.fillMaxWidth().padding(8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
+            Column {
+                if (season.age > 0) {
+                    val c = if (season.age >= 18) Color(0xFFEF4444) else if (season.age >= 16) AruColors.Accent2 else AruColors.Gold
+                    Text(
+                        "${season.age}+", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Black,
+                        modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(c.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 2.5.dp),
+                    )
+                }
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp), horizontalAlignment = Alignment.End) {
                 if (season.ratingCount > 0) {
                     Badge {
                         Icon(Icons.Filled.Star, contentDescription = null, tint = AruColors.Gold, modifier = Modifier.padding(end = 3.dp).size(12.dp))
                         Text(String.format(Locale.US, "%.1f", season.ratingAvg), color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                     }
-                } else Box {}
+                }
                 if (season.views > 0) {
                     Badge {
                         Icon(AruIcons.Visibility, contentDescription = null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.padding(end = 3.dp).size(12.dp))
                         Text(formatCompact(season.views), color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
-            }
-            if (season.age > 0 || season.free == false) {
-                Spacer(Modifier.height(6.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Top) {
-                    if (season.age > 0) {
-                        val c = if (season.age >= 18) Color(0xFFEF4444) else if (season.age >= 16) AruColors.Accent2 else AruColors.Gold
-                        Text(
-                            "${season.age}+", color = Color.White, fontSize = 10.5.sp, fontWeight = FontWeight.Black,
-                            modifier = Modifier.clip(RoundedCornerShape(7.dp)).background(c.copy(alpha = 0.92f)).border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(7.dp)).padding(horizontal = 7.dp, vertical = 2.5.dp),
-                        )
-                    } else Box {}
-                    if (season.free == false) PaidBadge()
-                }
+                if (season.free == false) PaidBadge()
             }
         }
 
