@@ -201,7 +201,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
             Tile(Icons.Filled.Settings, "Sozlamalar", onClick = { if (u == null) onBotLogin() else onSettings() })
             Divider2()
             if (u == null) {
-                Tile(Icons.AutoMirrored.Filled.Send, "Telegram orqali kirish", onClick = onBotLogin)
+                Tile(Icons.Filled.Person, "Accountga kirish", onClick = onBotLogin)
                 Divider2()
             }
             if (!tgState.authorized) {
@@ -381,7 +381,7 @@ private fun GuestCard(onLogin: () -> Unit) {
             Avatar(null, 72.dp)
             Spacer(Modifier.height(12.dp))
             Text("Mehmon", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text("Telegram hisobingiz bilan kiring", color = AruColors.TextDim, fontSize = 13.sp)
+            Text("Accountingizga kiring", color = AruColors.TextDim, fontSize = 13.sp)
             Spacer(Modifier.height(16.dp))
             Box(
                 Modifier
@@ -391,7 +391,7 @@ private fun GuestCard(onLogin: () -> Unit) {
                     .clickable(onClick = onLogin)
                     .padding(vertical = 14.dp),
                 contentAlignment = Alignment.Center,
-            ) { Text("Telegram orqali kirish", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
+            ) { Text("Accountga kirish", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp) }
         }
     }
 }

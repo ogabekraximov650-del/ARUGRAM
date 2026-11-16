@@ -137,6 +137,7 @@ private val tabs = listOf(
 private sealed interface Page {
     data object Login : Page
     data object AddAccount : Page
+    data object ChooseLogin : Page
     data object BotLogin : Page
     data object Edit : Page
     data object Sessions : Page
@@ -268,7 +269,7 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
     }
     val openSeason: (uz.arumediatv.com.data.Season) -> Unit = { if (!AppServices.auth.isLoggedIn) askLogin = true else push(Page.SeasonPage(it)) }
     // Kirish kerak joyda: Telegram bot orqali kirish (token -> Telegram ilovasini tanlash -> Start). Telegram hisobini ulash — Profilda.
-    val login = { push(Page.BotLogin) }
+    val login = { push(Page.ChooseLogin) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
     // "Account qo'shish" dan keyin ilova qayta ochilgan: kirish oynasi darhol ochiladi.
     LaunchedEffect(Unit) { if (uz.arumediatv.com.data.AccountSwitcher.consumeOpenAdd()) push(Page.AddAccount) }
@@ -291,8 +292,8 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
         androidx.compose.material3.AlertDialog(
             onDismissRequest = { askLogin = false },
             icon = { androidx.compose.material3.Icon(androidx.compose.material.icons.Icons.Filled.Lock, null, tint = AruColors.Accent) },
-            text = { androidx.compose.material3.Text("Anime ko'rish uchun avval Telegram orqali kiring.") },
-            confirmButton = { androidx.compose.material3.TextButton(onClick = { askLogin = false; push(Page.BotLogin) }) { androidx.compose.material3.Text("Telegram orqali kirish") } },
+            text = { androidx.compose.material3.Text("Anime ko'rish uchun avval accountga kiring.") },
+            confirmButton = { androidx.compose.material3.TextButton(onClick = { askLogin = false; push(Page.ChooseLogin) }) { androidx.compose.material3.Text("Accountga kirish") } },
             dismissButton = { androidx.compose.material3.TextButton(onClick = { askLogin = false }) { androidx.compose.material3.Text("Bekor qilish") } },
             containerColor = AruColors.Surface,
         )
@@ -364,7 +365,14 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
                         onDone = { pop() },
                         onBack = { if (!uz.arumediatv.com.data.AccountSwitcher.cancelAdd(ctx)) pop() },
                     )
-                    Page.BotLogin -> BotLoginScreen(onDone = { pop(); if (stack.lastOrNull() is Page.AddAccount) pop() }, onBack = ::pop)
+                    Page.ChooseLogin -> uz.arumediatv.com.ui.login.AddAccountScreen(
+                        onTelegram = { push(Page.BotLogin) },
+                        onDone = { pop() },
+                        onBack = { pop() },
+                        title = "Accountga kirish",
+                        subtitle = "Kirish usulini tanlang",
+                    )
+                    Page.BotLogin -> BotLoginScreen(onDone = { pop(); if (stack.lastOrNull() is Page.AddAccount || stack.lastOrNull() is Page.ChooseLogin) pop() }, onBack = ::pop)
                     Page.Edit -> EditProfileScreen(onBack = ::pop)
                     Page.Sessions -> SessionsScreen(onBack = ::pop)
                     Page.Settings -> SettingsScreen(onBack = ::pop)

@@ -46,7 +46,13 @@ import uz.arumediatv.com.ui.theme.AruColors
  * Bekor qilinsa avvalgi hisobga qaytiladi. Hisob almashtirish ilova ichida bo'ladi (qayta ochilmaydi).
  */
 @Composable
-fun AddAccountScreen(onTelegram: () -> Unit, onDone: () -> Unit, onBack: () -> Unit) {
+fun AddAccountScreen(
+    onTelegram: () -> Unit,
+    onDone: () -> Unit,
+    onBack: () -> Unit,
+    title: String = "Account qo'shish",
+    subtitle: String = "Yangi account uchun kirish usulini tanlang",
+) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
@@ -57,9 +63,9 @@ fun AddAccountScreen(onTelegram: () -> Unit, onDone: () -> Unit, onBack: () -> U
         Modifier.fillMaxSize().background(AruColors.Bg).padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Text("Account qo'shish", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+        Text(title, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
-        Text("Yangi account uchun kirish usulini tanlang", color = Color.White.copy(alpha = 0.55f), fontSize = 14.sp, textAlign = TextAlign.Center)
+        Text(subtitle, color = Color.White.copy(alpha = 0.55f), fontSize = 14.sp, textAlign = TextAlign.Center)
         Spacer(Modifier.height(28.dp))
         if (busy) {
             CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp, modifier = Modifier.padding(4.dp))

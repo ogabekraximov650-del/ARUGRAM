@@ -133,7 +133,7 @@ fun LoginBanner(onLogin: () -> Unit, modifier: Modifier = Modifier) {
         Icon(Icons.Filled.Person, null, tint = AruColors.Accent2, modifier = Modifier.size(24.dp))
         Spacer(Modifier.width(12.dp))
         Column(Modifier.weight(1f)) {
-            Text("Telegram orqali kiring", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            Text("Accountga kiring", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
             Text("Rasmlar va animelarni ko'rish uchun hisobingizni ulang", color = AruColors.TextDim, fontSize = 12.sp)
         }
     }
