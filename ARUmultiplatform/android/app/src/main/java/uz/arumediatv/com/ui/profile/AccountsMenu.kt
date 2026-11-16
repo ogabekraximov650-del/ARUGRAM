@@ -22,7 +22,19 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.expandVertically
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.lerp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.material3.Text
@@ -54,8 +66,14 @@ fun AccountsCapsule(
     onRemove: (SavedAccount) -> Unit,
 ) {
     val now = System.currentTimeMillis()
+    val density = LocalDensity.current
+    // Yig'ilgan kapsula eni: ochilganda shu enidan 290 dp gacha silliq kengayadi.
+    var pillW by remember { mutableStateOf(150.dp) }
     Box {
-        CapsuleHeader(open = false, modifier = Modifier.clickable { onToggle(true) })
+        CapsuleHeader(
+            open = false,
+            modifier = Modifier.onSizeChanged { pillW = with(density) { it.width.toDp() } }.clickable { onToggle(true) },
+        )
         if (expanded) {
             Popup(
                 alignment = Alignment.TopStart,
@@ -63,13 +81,20 @@ fun AccountsCapsule(
                 properties = PopupProperties(focusable = true),
             ) {
                 val vis = remember { MutableTransitionState(false).apply { targetState = true } }
+                // Eni va bo'yi birdaniga emas, ~0,35 s da silliq kattalashadi.
+                val prog = remember { Animatable(0f) }
+                LaunchedEffect(Unit) { prog.animateTo(1f, tween(350, easing = FastOutSlowInEasing)) }
                 Column(
-                    Modifier.width(290.dp).clip(RoundedCornerShape(24.dp)).background(AruColors.Surface)
+                    Modifier.width(lerp(pillW, 290.dp, prog.value)).clip(RoundedCornerShape(24.dp)).background(AruColors.Surface)
                         .border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(24.dp)),
                 ) {
                     CapsuleHeader(open = true, modifier = Modifier.clickable { onToggle(false) })
-                    AnimatedVisibility(visibleState = vis, enter = expandVertically()) {
-                        Column(Modifier.padding(horizontal = 6.dp).padding(bottom = 8.dp)) {
+                    AnimatedVisibility(
+                        visibleState = vis,
+                        enter = expandVertically(tween(350, easing = FastOutSlowInEasing)) + fadeIn(tween(350)),
+                    ) {
+                        // Ichki kenglik qat'iy: karta kengayayotganda qatorlar qayta o'ralib "sakramaydi", faqat ochilib boradi.
+                        Column(Modifier.requiredWidth(290.dp).padding(horizontal = 6.dp).padding(bottom = 8.dp)) {
                             accounts.forEach { a ->
                                 val u = a.user
                                 val active = a.id == activeId
@@ -124,7 +149,7 @@ fun AccountsCapsule(
 @Composable
 private fun CapsuleHeader(open: Boolean, modifier: Modifier = Modifier) {
     Row(
-        modifier.height(44.dp).then(if (open) Modifier.width(290.dp) else Modifier)
+        modifier.height(44.dp).then(if (open) Modifier.fillMaxWidth() else Modifier)
             .then(if (open) Modifier else Modifier.clip(RoundedCornerShape(22.dp)).border(1.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(22.dp)))
             .padding(horizontal = 18.dp),
         verticalAlignment = Alignment.CenterVertically,
