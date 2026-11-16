@@ -246,6 +246,24 @@ class AuthService(
         null
     }
 
+    /** Boshqa saqlangan hisobga o'tish (ilova ichida): sessiya va profil almashadi, hisob ro'yxatdan O'CHMAYDI. */
+    fun activate(a: SavedAccount) {
+        val u = a.user ?: return
+        sessionToken = a.session
+        _user.value = u
+        secure.putString(KEY_SESSION, a.session)
+        secure.putString(KEY_USER, a.userJson)
+        accounts.addReturn = 0L
+    }
+
+    /** Mehmon holatiga o'tish (hisob ro'yxatda qoladi): "hisob qo'shish" uchun. */
+    fun detach() {
+        sessionToken = null
+        _user.value = null
+        secure.remove(KEY_SESSION)
+        secure.remove(KEY_USER)
+    }
+
     /** Ro'yxatdagi (hozir faol bo'lmagan) hisobning sessiyasini serverda tugatadi (xato bo'lsa e'tibor berilmaydi). */
     suspend fun revokeToken(session: String) = withContext(Dispatchers.IO) {
         http.callJson("$base/api/auth/logout", "POST", bearer = session)

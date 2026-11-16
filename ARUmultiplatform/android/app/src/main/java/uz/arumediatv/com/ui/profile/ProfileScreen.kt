@@ -116,7 +116,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
     // Hisob chiqib ketgach (chiqish/o'chirish): boshqa hisob qolgan bo'lsa shunga o'tiladi (jarayon qayta ochiladi).
     fun afterAccountGone() {
         val next = auth.accounts.list.value.firstOrNull() ?: return
-        uz.arumediatv.com.data.AccountSwitcher.request(ctx, 0L, next.id)
+        uz.arumediatv.com.data.AccountSwitcher.switchTo(ctx, next.id)
     }
 
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
@@ -146,11 +146,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                 limit = auth.accounts.limit(),
                 onSwitch = { a ->
                     showAccounts = false
-                    busy = "Account almashtirilmoqda"
-                    scope.launch {
-                        withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
-                        uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, a.id)
-                    }
+                    uz.arumediatv.com.data.AccountSwitcher.switchTo(ctx, a.id)
                 },
                 onAdd = {
                     showAccounts = false
@@ -166,9 +162,8 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                             busy = null
                             onBotLogin()
                         } else {
-                            busy = "Account qo'shilmoqda"
-                            withContext(Dispatchers.IO) { AppServices.sync.flush(force = true) }
-                            uz.arumediatv.com.data.AccountSwitcher.request(ctx, auth.user.value?.id ?: 0L, 0L)
+                            busy = null
+                            uz.arumediatv.com.data.AccountSwitcher.switchTo(ctx, 0L)
                         }
                     }
                 },

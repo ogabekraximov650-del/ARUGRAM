@@ -1,9 +1,7 @@
 package uz.arumediatv.com.data
 
 import android.content.Context
-import android.os.Handler
-import android.os.Looper
-import android.os.Process
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -96,78 +94,81 @@ class AccountStore(private val secure: SecureStore) {
 }
 
 /**
- * Hisob almashtirish. Almashtirish JARAYON QAYTA ISHGA TUSHIRISH bilan bajariladi: xotiradagi hamma holat (ro'yxatlar, kesh, Telegram yadrosi)
- * eski hisobdan butunlay tozalanadi va aralashib ketishi mumkin emas.
- *
- * Tartib: (1) `request` — niyat diskka yoziladi va ilova qayta ochiladi; (2) yangi jarayon boshlanishida (`applyPending`, hech narsa ochilmasdan oldin)
- * eski hisobning shaxsiy fayllari `files/accs/<id>/` ga ko'chiriladi, yangi hisobniki joyiga qaytariladi, sessiya almashtiriladi.
- * Hamma qadam qayta ishga tushganda ham xavfsiz (manba bor bo'lsa ko'chiriladi, yo'q bo'lsa tegilmaydi).
- * Hisobga bog'liq fayllar: Telegram yadro sessiyasi (`tg`), kutubxona/chat/izoh/yuborilmagan navbat nusxalari va tomosha joylari.
+ * Hisob almashtirish ILOVA ICHIDA (qayta ochmasdan): ekran qoplamasi silliq chiqadi, hozirgi hisobning shaxsiy fayllari (kutubxona, yuborilmagan navbat,
+ * chat/izoh nusxalari) `files/accs/<id>/` ga ko'chiriladi, xotiradagi holat tozalanadi, yangi hisobniki joyiga qaytariladi va butun ekran daraxti
+ * (`epoch`) yangidan quriladi — xuddi ilova yangidan ochilgandek, lekin jarayon o'chmaydi.
+ * Telegram yadro sessiyasi (MTProto) va tomosha joylari QURILMAGA tegishli: hisoblar orasida umumiy (har hisob "Telegram orqali kirish" bilan kirgan).
  */
 object AccountSwitcher {
-    private const val PREFS = "aru_switch"
-    private const val KEY_SESSION = "session_v1"
-    private const val KEY_USER = "user_v1"
-
-    /** Almashtirish davomida butun ekran qoplamasi (yumshoq o'tish): matn — ko'rsatiladigan yozuv, `null` — yo'q. Yangi jarayonda ham boshlanishda ko'rsatiladi. */
+    /** Almashtirish davomida butun ekran qoplamasi: matn — yozuv, `null` — yo'q. */
     val switching = MutableStateFlow<String?>(null)
 
-    /** `to == 0L` — yangi hisob qo'shish (hozirgi hisob saqlanadi, ilova mehmon holatida kirish oynasi bilan ochiladi). */
-    fun request(ctx: Context, from: Long, to: Long) {
+    /** Har almashtirishda oshadi: ilova ekran daraxti shu kalit bilan qayta quriladi. */
+    val epoch = MutableStateFlow(0)
+
+    /** "Account qo'shish" dan keyin yangi daraxtda "hisob qo'shish" ekrani darhol ochiladi. */
+    @Volatile
+    private var openAdd = false
+
+    private val running = java.util.concurrent.atomic.AtomicBoolean(false)
+    private val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Main)
+
+    fun consumeOpenAdd(): Boolean = openAdd.also { openAdd = false }
+
+    /** `to == 0L` — yangi hisob qo'shish (hozirgisi saqlanadi, mehmon holati va "hisob qo'shish" ekrani); aks holda shu hisobga o'tadi. */
+    fun switchTo(ctx: Context, to: Long) {
+        if (!running.compareAndSet(false, true)) return
         val app = ctx.applicationContext
-        switching.value = if (to == 0L) "Account qo'shilmoqda" else "Account almashtirilmoqda"
-        app.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putLong("from", from).putLong("to", to).putBoolean("pending", true).commit()
-        val i = app.packageManager.getLaunchIntentForPackage(app.packageName)
-        if (i != null) {
-            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            app.startActivity(i)
-        }
-        // Yangi jarayon tizim tomonidan ochiladi; bu yerdagi so'nggi yozuvlar (SharedPreferences) tugashi uchun bir oz kutiladi.
-        Handler(Looper.getMainLooper()).postDelayed({
-            Process.killProcess(Process.myPid())
-            System.exit(0)
-        }, 900)
-    }
-
-    /** Ilova ochilishining eng boshida (`AruApplication.onCreate`, `AppServices.init` dan OLDIN). */
-    fun applyPending(ctx: Context) {
-        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        if (!p.getBoolean("pending", false)) return
-        switching.value = "Tayyorlanmoqda"
-        try {
-            val from = p.getLong("from", 0L)
-            val to = p.getLong("to", 0L)
-            val secure = SecureStore(ctx)
-            val store = AccountStore(secure)
-            if (from > 0L) move(ctx, active = true, id = from)
-            if (to > 0L && store.get(to) != null) {
-                move(ctx, active = false, id = to)
-                val a = store.get(to)!!
-                secure.putString(KEY_SESSION, a.session)
-                secure.putString(KEY_USER, a.userJson)
-                store.addReturn = 0L
-            } else {
-                // Hisob qo'shish (yoki maqsad hisob topilmadi): mehmon holati, kirish oynasi ochiladi.
-                secure.remove(KEY_SESSION)
-                secure.remove(KEY_USER)
-                if (to == 0L) {
-                    store.addReturn = from
-                    p.edit().putBoolean("open_login", true).apply()
+        scope.launch {
+            try {
+                val services = uz.arumediatv.com.AppServices
+                val auth = services.auth
+                val from = auth.user.value?.id ?: 0L
+                val target = if (to > 0L) auth.accounts.get(to) else null
+                if (to > 0L && (target == null || target.user == null)) return@launch
+                if (to > 0L && to == from) return@launch
+                switching.value = if (to == 0L) "Account qo'shilmoqda" else "Account almashtirilmoqda"
+                kotlinx.coroutines.delay(240) // qoplama to'liq chiqib bo'lsin
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    // 1) yuborilmagan o'zgarishlar serverga (tarmoq yo'q bo'lsa navbat hisob bilan birga saqlanadi)
+                    runCatching { services.sync.flush(force = true) }
+                    // 2) hozirgi hisob fayllari chetga; xotira tozalanadi; yangisiniki joyiga
+                    if (from > 0L) move(app, active = true, id = from)
+                    wipeShared(app)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { services.resetAccountMemory() }
+                    if (target != null) move(app, active = false, id = to)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { services.sync.reset() }
                 }
+                // 3) sessiya almashadi
+                if (target != null) {
+                    auth.activate(target)
+                } else {
+                    auth.detach()
+                    auth.accounts.addReturn = from
+                    openAdd = true
+                }
+                services.billing.restore()
+                epoch.value = epoch.value + 1
+                // 4) yangi hisob serverdan yangilanadi (fonda)
+                scope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                    runCatching { auth.refresh() }
+                    runCatching { services.billing.loadIfStale() }
+                }
+                kotlinx.coroutines.delay(380)
+            } finally {
+                switching.value = null
+                running.set(false)
             }
-        } catch (_: Throwable) {
-        } finally {
-            p.edit().putBoolean("pending", false).commit()
         }
     }
 
-    /** Kirish oynasini bir marta ochish kerakmi (hisob qo'shish rejimi). */
-    fun consumeOpenLogin(ctx: Context): Boolean {
-        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val v = p.getBoolean("open_login", false)
-        if (v) p.edit().putBoolean("open_login", false).apply()
-        return v
+    /** "Hisob qo'shish" bekor qilinsa: avvalgi hisobga qaytiladi (yo'q bo'lsa `false`). */
+    fun cancelAdd(ctx: Context): Boolean {
+        val auth = uz.arumediatv.com.AppServices.auth
+        val back = auth.accounts.addReturn
+        if (auth.isLoggedIn || back <= 0L || auth.accounts.get(back) == null) return false
+        switchTo(ctx, back)
+        return true
     }
 
     /** Ro'yxatdan olib tashlangan hisobning saqlangan fayllari ham o'chiriladi. */
@@ -175,29 +176,30 @@ object AccountSwitcher {
         try { File(ctx.filesDir, "accs/$id").deleteRecursively() } catch (_: Exception) {}
     }
 
+    /** Hisobga bog'liq UMUMIY keshlar: boshqa hisobning shaxsiy ma'lumoti (baho, sevimli belgisi) ko'rinib qolmasin. */
+    private fun wipeShared(ctx: Context) {
+        val re = Regex("season_\\d+_\\d+\\.json")
+        runCatching { File(ctx.filesDir, "cache").listFiles()?.filter { re.matches(it.name) }?.forEach { it.delete() } }
+    }
+
     /** `active == true`: faol joydan `accs/<id>/` ga; `false`: `accs/<id>/` dan faol joyga. */
     private fun move(ctx: Context, active: Boolean, id: Long) {
         val files = ctx.filesDir
         val stash = File(files, "accs/$id").apply { mkdirs() }
-        val prefsDir = File(ctx.dataDir, "shared_prefs")
         val cache = File(files, "cache")
-        // (faol joy, saqlash joyi)
-        val pairs = ArrayList<Pair<File, File>>()
-        pairs.add(File(files, "tg") to File(stash, "tg"))
         val names = HashSet<String>()
         names.add("library.json"); names.add("sync_queue.bin")
         cache.listFiles()?.forEach { if (it.name.startsWith("chat_") || it.name.startsWith("comments_")) names.add(it.name) }
         File(stash, "cache").listFiles()?.forEach { names.add(it.name) }
-        names.forEach { pairs.add(File(cache, it) to File(File(stash, "cache"), it)) }
-        for (n in listOf("aru_progress.xml", "aru_progress.xml.bak")) pairs.add(File(prefsDir, n) to File(File(stash, "prefs"), n))
-        for ((act, st) in pairs) {
+        for (n in names) {
+            val act = File(cache, n)
+            val st = File(File(stash, "cache"), n)
             val src = if (active) act else st
             val dst = if (active) st else act
             if (!src.exists()) continue
             dst.parentFile?.mkdirs()
             if (dst.exists()) dst.deleteRecursively()
             if (!src.renameTo(dst)) {
-                // Zaxira yo'li: nusxalab, keyin manbani o'chirish.
                 try {
                     src.copyRecursively(dst, overwrite = true)
                     src.deleteRecursively()

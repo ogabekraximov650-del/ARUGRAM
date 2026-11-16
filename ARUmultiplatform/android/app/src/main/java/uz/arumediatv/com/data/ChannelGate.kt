@@ -56,6 +56,13 @@ class ChannelGate(
     /** Pleyer ochiq turgan ekranlar soni: shu paytda kanallarga qo'shilish to'xtaydi. */
     val busy = AtomicInteger(0)
 
+    /** Hisob almashtirilganda xotiradagi ro'yxat va o'tkazib yuborilganlar tozalanadi. */
+    fun reset() {
+        listAt = 0L
+        skip.clear()
+        _state.value = GateState()
+    }
+
     private fun uid() = auth.user.value?.id ?: 0L
     private fun doneSet(): MutableSet<String> = prefs.getStringSet("done_${uid()}", emptySet())!!.toMutableSet()
     private fun pauseUntil(): Long = prefs.getLong("pause_${uid()}", 0)

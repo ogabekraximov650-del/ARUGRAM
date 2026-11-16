@@ -136,6 +136,7 @@ private val tabs = listOf(
 /** Ekranlar stegi (tab ustiga ochiladi). Tablar ostida tirik turadi — qaytganda aylantirish joyi saqlanadi. */
 private sealed interface Page {
     data object Login : Page
+    data object AddAccount : Page
     data object BotLogin : Page
     data object Edit : Page
     data object Sessions : Page
@@ -196,24 +197,20 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun AuthGate() {
     val restored by AppServices.auth.restored.collectAsStateWithLifecycle()
+    val epoch by uz.arumediatv.com.data.AccountSwitcher.epoch.collectAsStateWithLifecycle()
+    // Hisob almashtirilganda ekran daraxti qayta quriladi, lekin ochiq bo'lim (tab) saqlanadi.
+    var tabKeep by androidx.compose.runtime.remember { mutableIntStateOf(0) }
     Box(Modifier.fillMaxSize().background(AruColors.Bg)) {
         // Saqlangan hisob aniqlanmaguncha bo'sh ekran (bosh sahifa «mehmon» holatida miltillamasin).
-        if (restored) AruApp()
-        SwitchOverlay(restored)
+        if (restored) androidx.compose.runtime.key(epoch) { AruApp(tabKeep) { tabKeep = it } }
+        SwitchOverlay()
     }
 }
 
 /** Account almashtirish/qo'shishda butun ekran qoplamasi: ilova "chiqib ketgandek" emas, bir tekis ochiladi. */
 @Composable
-private fun SwitchOverlay(restored: Boolean) {
+private fun SwitchOverlay() {
     val text by uz.arumediatv.com.data.AccountSwitcher.switching.collectAsStateWithLifecycle()
-    // Yangi jarayon tayyor bo'lgach qoplama biroz turib, yumshoq yo'qoladi.
-    LaunchedEffect(restored) {
-        if (restored && uz.arumediatv.com.data.AccountSwitcher.switching.value != null) {
-            kotlinx.coroutines.delay(350)
-            uz.arumediatv.com.data.AccountSwitcher.switching.value = null
-        }
-    }
     androidx.compose.animation.AnimatedVisibility(
         visible = text != null,
         enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
@@ -238,8 +235,9 @@ private fun SwitchOverlay(restored: Boolean) {
 }
 
 @Composable
-private fun AruApp() {
-    var tab by rememberSaveable { mutableIntStateOf(0) }
+private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
+    var tab by rememberSaveable { mutableIntStateOf(initialTab) }
+    androidx.compose.runtime.SideEffect { onTab(tab) }
     val stack = remember { mutableStateListOf<Page>() }
     val snack = remember { SnackbarHostState() }
     val ctx = androidx.compose.ui.platform.LocalContext.current
@@ -273,7 +271,7 @@ private fun AruApp() {
     val login = { push(Page.BotLogin) }
     BackHandler(enabled = stack.isNotEmpty()) { pop() }
     // "Account qo'shish" dan keyin ilova qayta ochilgan: kirish oynasi darhol ochiladi.
-    LaunchedEffect(Unit) { if (uz.arumediatv.com.data.AccountSwitcher.consumeOpenLogin(ctx)) push(Page.Login) }
+    LaunchedEffect(Unit) { if (uz.arumediatv.com.data.AccountSwitcher.consumeOpenAdd()) push(Page.AddAccount) }
     // Kirilgach emoji shrifti fonda tayyorlanadi (chat va izohlarda ham Telegram emojisi ko'rinsin).
     LaunchedEffect(Unit) {
         kotlinx.coroutines.delay(4000)
@@ -359,12 +357,14 @@ private fun AruApp() {
                 when (page) {
                     Page.Login -> LoginScreen(onDone = ::pop, onClose = {
                         // "Account qo'shish" rejimida bekor qilinsa — avvalgi accountga qaytiladi.
-                        val back = AppServices.auth.accounts.addReturn
-                        if (!AppServices.auth.isLoggedIn && back > 0L && AppServices.auth.accounts.get(back) != null) {
-                            uz.arumediatv.com.data.AccountSwitcher.request(ctx, 0L, back)
-                        } else pop()
+                        pop()
                     }, onBot = { pop(); push(Page.BotLogin) })
-                    Page.BotLogin -> BotLoginScreen(onDone = ::pop, onBack = ::pop)
+                    Page.AddAccount -> uz.arumediatv.com.ui.login.AddAccountScreen(
+                        onTelegram = { push(Page.BotLogin) },
+                        onDone = { pop() },
+                        onBack = { if (!uz.arumediatv.com.data.AccountSwitcher.cancelAdd(ctx)) pop() },
+                    )
+                    Page.BotLogin -> BotLoginScreen(onDone = { pop(); if (stack.lastOrNull() is Page.AddAccount) pop() }, onBack = ::pop)
                     Page.Edit -> EditProfileScreen(onBack = ::pop)
                     Page.Sessions -> SessionsScreen(onBack = ::pop)
                     Page.Settings -> SettingsScreen(onBack = ::pop)

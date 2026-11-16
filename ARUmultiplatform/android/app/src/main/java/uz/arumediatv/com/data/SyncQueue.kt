@@ -156,6 +156,15 @@ class SyncQueue(
         flushJob?.cancel()
     }
 
+    /** Hisob almashtirilganda: faqat XOTIRA tozalanadi (fayl tegilmaydi — u hisob bilan birga ko'chiriladi), keyingi ishlatishda yangi fayldan o'qiladi. */
+    fun reset() {
+        synchronized(rows) {
+            rows.clear()
+            loaded = false
+        }
+        flushJob?.cancel()
+    }
+
     /** Ilova fonga ketganda — darhol yuboradi. */
     fun flushAsync(force: Boolean = true) {
         scope.launch { flush(force) }

@@ -65,6 +65,16 @@ object AppServices {
     lateinit var admin: AdminApi
         private set
 
+    /** Hisob almashtirilganda xotiradagi hisobga bog'liq holat tozalanadi (fayllar `AccountSwitcher` da ko'chadi). */
+    fun resetAccountMemory() {
+        library.clear()
+        myStats.clear()
+        billing.clear()
+        unread.clear()
+        packs.reset()
+        gate.reset()
+    }
+
     fun trafficOrNull(): TrafficMeter? = if (::traffic.isInitialized) traffic else null
     fun authOrNull(): AuthService? = if (::auth.isInitialized) auth else null
     lateinit var downloads: DownloadManager
