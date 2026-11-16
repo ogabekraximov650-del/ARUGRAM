@@ -10141,7 +10141,7 @@ async fn translators_route(mut req: Request, env: &Env, origin: &str, path: &str
 
 /// GET /api/translators/<id>/page: `{translator, stats:{anime, episodes, views, rating}, seasons:[...]}`.
 /// `anime` — shu tarjimonning animelari soni (anime id bo'yicha), `episodes` — ko'rinadigan qismlar, `views` — barcha ko'rishlar,
-/// `rating` — animelar o'rtacha baholarining o'rtachasi (baholanmaganlar hisobga olinmaydi). Hammasi BITTA bazaga murojaatda.
+/// `rating` — UMUMIY o'rtacha: barcha animelarga berilgan barcha baholar yig'indisi / baholar soni (anime bahosi kabi; ko'p baholangan anime ko'proq ta'sir qiladi; baholanmagan bo'lsa 0). Hammasi BITTA bazaga murojaatda.
 async fn translator_page(env: &Env, origin: &str, id: i64) -> Result<Response> {
     let own = "(SELECT id FROM anime_db WHERE translator_id=?)";
     let a = || vec![TursoArg::int(id)];
@@ -10151,7 +10151,7 @@ async fn translator_page(env: &Env, origin: &str, id: i64) -> Result<Response> {
         (&format!("SELECT COUNT(*) AS n FROM epizod_db WHERE anime_id IN {own} AND (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
                    OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>'' OR (COALESCE(origin_video,'')<>'' AND LENGTH(COALESCE(origin_key,''))=32))"), a()),
         (&format!("SELECT COALESCE(SUM(views_total),0) AS n FROM season_db WHERE anime_id IN {own}"), a()),
-        (&format!("SELECT AVG(r) AS n FROM (SELECT CAST(SUM(rating_sum) AS REAL)/SUM(rating_count) AS r FROM season_db WHERE anime_id IN {own} GROUP BY anime_id HAVING SUM(rating_count)>0)"), a()),
+        (&format!("SELECT CASE WHEN SUM(rating_count)>0 THEN CAST(SUM(rating_sum) AS REAL)/SUM(rating_count) END AS n FROM season_db WHERE anime_id IN {own}"), a()),
         (&format!("SELECT * FROM season_db WHERE anime_id IN {own} ORDER BY MAX(COALESCE(last_ep_at,0), COALESCE(created_at,0)) DESC, anime_id DESC, season_id ASC LIMIT 200"), a()),
     ]).await?;
     let Some(tr) = first_row(&res[0]) else { return err404("Tarjimon topilmadi") };
