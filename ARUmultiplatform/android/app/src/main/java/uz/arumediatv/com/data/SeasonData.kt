@@ -120,6 +120,7 @@ class SeasonRepository(
     private val auth: AuthService,
     private val sync: () -> SyncQueue,
     private val library: () -> LibraryStore,
+    private val seasonsStore: () -> SeasonsStore? = { null },
     private val client: OkHttpClient = Http.client,
     private val base: String = BuildConfig.API_BASE,
 ) {
@@ -221,6 +222,11 @@ class SeasonRepository(
         sync().pendingRatings()[k]?.let { stars ->
             if (stars != out.myStars) out = withStars(out, stars)
         }
+        // Hali yuborilmagan ko'rish va tomosha vaqti (diskda xom server nusxasi turadi, shuning uchun ikki marta sanalmaydi).
+        val h = sync().pendingHistory().filter { it.animeId == a && it.seasonId == s && !it.deleted }
+        val v = h.count { it.newView }.toLong()
+        val ms = h.sumOf { it.watchedMs }
+        if (v > 0 || ms > 0) out = LocalOverlay.addWatch(out, v, ms)
         return out
     }
 
@@ -247,7 +253,8 @@ class SeasonRepository(
     fun rate(a: Long, s: Long, stars: Int, current: SeasonInfo): SeasonInfo {
         val next = withStars(current, stars)
         write(key(a, s), next.toJson().toString())
-        sync().putRating(a, s, stars)
+        sync().putRating(a, s, stars, current.myStars)
+        seasonsStore()?.patch(a, s) { LocalOverlay.rated(it, current.myStars, stars) }
         return next
     }
 
@@ -257,6 +264,41 @@ class SeasonRepository(
         sync().putFavorite(season.animeId, season.seasonId, on)
         library().applyFavorite(season, on)
         return next
+    }
+}
+
+/**
+ * UZ: Qurilmadagi o'zgarish DARHOL ko'rinadi (ko'rish, tomosha vaqti, baho); server paketi keyin ketadi.
+ * EN: local changes show instantly (views, watch time, rating); the server batch follows later.
+ * RU: локальные изменения видны сразу; пакет на сервер уходит позже.
+ */
+object LocalOverlay {
+    fun addWatch(i: SeasonInfo, dViews: Long, dMs: Long): SeasonInfo {
+        val season = JSONObject(i.season.toString())
+        season.put("views_total", i.views + dViews)
+        season.put("watch_ms_total", i.watchMs + dMs)
+        return SeasonInfo(season, i.rating, i.myStars, i.isFav)
+    }
+
+    /** Ro'yxat kartasi: baho o'zgargach o'rtacha va soni (eski baho ayiriladi, yangisi qo'shiladi). */
+    fun rated(s: Season, prev: Int, stars: Int): Season {
+        val sum = Math.round(s.ratingAvg * s.ratingCount) - prev + stars
+        val count = s.ratingCount + if (prev > 0) 0 else 1
+        return s.copy(ratingAvg = if (count <= 0) 0.0 else sum.toDouble() / count, ratingCount = count)
+    }
+
+    fun viewed(s: Season, dViews: Long): Season = if (dViews == 0L) s else s.copy(views = s.views + dViews)
+
+    /** Serverdan kelgan ro'yxat ustiga hali yuborilmagan baho va ko'rishlar. */
+    fun list(items: List<Season>, ratings: Map<String, Pair<Int, Int>>, history: List<SyncQueue.PendingHistory>): List<Season> {
+        if (ratings.isEmpty() && history.none { it.newView && !it.deleted }) return items
+        val views = history.filter { it.newView && !it.deleted }.groupingBy { "${it.animeId}:${it.seasonId}" }.eachCount()
+        return items.map { s ->
+            var out = s
+            ratings[s.key]?.let { (p, n) -> out = rated(out, p, n) }
+            views[s.key]?.let { out = viewed(out, it.toLong()) }
+            out
+        }
     }
 }
 

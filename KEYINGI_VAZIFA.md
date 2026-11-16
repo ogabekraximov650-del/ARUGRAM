@@ -7436,3 +7436,9 @@ Sabab: jurnal bo'lagi (`db_1_v1`) har yozuvdan keyin butun fayl bo'lib (≤1 MiB
 - Tarjimon sahifasi: tepada o'rtada logotip (96 dp), nom, tavsif ("HAQIDA" yozuvisiz — foydalanuvchi talabi), 4 oyna bir qatorda (jami anime — `anime_id` bo'yicha, ko'rinadigan qismlar, jami ko'rishlar, UMUMIY o'rtacha baho: barcha baholar yig'indisi / baholar soni — anime bahosi kabi, 2026-11-16 da 'o'rtachaning o'rtachasi'dan o'zgartirilgan), pastda animelari (kartalar to'ri).
 - Server: `GET /api/translators/<id>/page` (`translator_page`, `worker/src/lib.rs`): tarjimon + `stats` + `seasons` BITTA `turso_many` da. Ro'yxat: `GET /api/translators` (avvaldan bor, ilova telefonda `cache/translators.json` ga nusxalaydi).
 - Sinov: `TranslatorsTest` (`latestAnime`).
+
+## Qurilmadagi o'zgarish darhol ko'rinadi (ko'rish, baho, tomosha vaqti)
+
+Nima: qism ko'rilsa `views_total` +1, tomosha vaqti qo'shiladi, baho berilsa o'rtacha va soni shu zahoti o'zgaradi — bo'lim sahifasida, qismlar ro'yxatida va katalog kartalarida. Server paketi (`SyncQueue`) avvalgidek keyin ketadi.
+Qanday: `LocalOverlay` (sof mantiq, test: `LocalOverlayTest`); `SeasonsStore.patch` kartalarni darhol yangilaydi; serverdan kelgan ro'yxat/ma'lumot ustiga hali yuborilmagan baho/ko'rish qo'yiladi (`SeasonRepository.withPending`, `SeasonsStore` overlay). `SyncQueue.putRating` endi `prev` (avvalgi baho) ham saqlaydi.
+Fayllar: `data/SeasonData.kt`, `data/SeasonsStore.kt`, `data/SyncQueue.kt`, `ui/season/SeasonScreen.kt`, `AppServices.kt`.

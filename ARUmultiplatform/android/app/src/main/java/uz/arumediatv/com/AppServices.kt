@@ -9,6 +9,7 @@ import uz.arumediatv.com.data.LibraryStore
 import uz.arumediatv.com.data.MyStatsStore
 import uz.arumediatv.com.data.SyncQueue
 import uz.arumediatv.com.data.BillingStore
+import uz.arumediatv.com.data.LocalOverlay
 import uz.arumediatv.com.data.SeasonRepository
 import uz.arumediatv.com.data.WatchProgress
 import uz.arumediatv.com.data.PublicRepository
@@ -118,12 +119,12 @@ object AppServices {
         }
         telegram = TelegramService(ctx, auth, secure)
         images = ImageStore(ctx, telegram)
-        seasons = SeasonsStore(SeasonsRepository(ctx))
+        seasons = SeasonsStore(SeasonsRepository(ctx)) { sx -> LocalOverlay.list(sx, sync.pendingRatingChanges(), sync.pendingHistory()) }
         library = LibraryStore(ctx, auth)
         sync = SyncQueue(ctx, auth)
         myStats = MyStatsStore(ctx, auth)
         billing = BillingStore(ctx, auth)
-        seasonData = SeasonRepository(ctx, auth, { sync }, { library })
+        seasonData = SeasonRepository(ctx, auth, { sync }, { library }, { seasons })
         progress = WatchProgress(ctx)
         publicData = PublicRepository(ctx, auth)
         videoCache = VideoCache(ctx)

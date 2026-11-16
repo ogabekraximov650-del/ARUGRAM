@@ -22,7 +22,7 @@ data class SeasonsState(
 )
 
 /** Bo'limlar ro'yxatining YAGONA manbasi: Bosh sahifa, Qidiruv va Katalog bir xil ro'yxatni ko'radi (Flutter'dagi `SeasonsRepo` kabi). */
-class SeasonsStore(private val repo: SeasonsRepository) {
+class SeasonsStore(private val repo: SeasonsRepository, private val overlay: (List<Season>) -> List<Season> = { it }) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Mutex()
     private val _state = MutableStateFlow(SeasonsState())
@@ -35,9 +35,16 @@ class SeasonsStore(private val repo: SeasonsRepository) {
         if (started) return
         started = true
         scope.launch {
-            repo.cached()?.let { c -> _state.update { it.copy(items = c, loading = false) } }
+            repo.cached()?.let { c -> _state.update { it.copy(items = safeOverlay(c), loading = false) } }
             fetch(force = false, refreshing = false)
         }
+    }
+
+    private fun safeOverlay(l: List<Season>): List<Season> = try { overlay(l) } catch (_: Exception) { l }
+
+    /** UZ: qurilmadagi o'zgarish (baho, ko'rish) ro'yxat kartasida DARHOL ko'rinadi. EN: instant local change on list cards. */
+    fun patch(animeId: Long, seasonId: Long, f: (Season) -> Season) {
+        _state.update { st -> st.copy(items = st.items.map { if (it.animeId == animeId && it.seasonId == seasonId) f(it) else it }) }
     }
 
     /** Jonli yangilanish: ro'yxat serverdan jimgina (aylanuvchi belgisiz) qayta olinadi. */
@@ -59,7 +66,7 @@ class SeasonsStore(private val repo: SeasonsRepository) {
             val r = repo.fetch(force, live)
             _state.update { s ->
                 when (r) {
-                    is FetchResult.Fresh -> s.copy(items = r.items, loading = false, refreshing = false, offline = false, error = null)
+                    is FetchResult.Fresh -> s.copy(items = safeOverlay(r.items), loading = false, refreshing = false, offline = false, error = null)
                     FetchResult.NotModified -> s.copy(loading = false, refreshing = false, offline = false, error = null)
                     is FetchResult.Failed -> s.copy(loading = false, refreshing = false, offline = true, error = r.message)
                 }

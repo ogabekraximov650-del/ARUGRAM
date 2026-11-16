@@ -71,6 +71,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.Episode
+import uz.arumediatv.com.data.LocalOverlay
 import uz.arumediatv.com.data.HistoryItem
 import uz.arumediatv.com.data.PlaySource
 import uz.arumediatv.com.data.Season
@@ -99,6 +100,9 @@ private class HistoryDraft(
     var durationMs: Long = 0,
     var lastStamp: String = "",
     var lastSyncStamp: String = "",
+    /** Ekranda allaqachon hisobga olingan ko'rish va tomosha vaqti (qurilmada darhol ko'rinishi uchun). */
+    var viewNoted: Boolean = false,
+    var msNoted: Long = 0,
 )
 
 /**
@@ -176,6 +180,18 @@ fun SeasonScreen(
         }
         if (stamp == d.lastStamp) return
         d.lastStamp = stamp
+        // UZ: ko'rish (+1) va tomosha vaqti shu zahoti ekranda; baho/ko'rish ro'yxatlari ham. EN: instant local counters.
+        val dv = if (d.newView && !d.viewNoted) 1L else 0L
+        val dm = (d.watchedMs - d.msNoted).coerceAtLeast(0)
+        if (dv > 0 || dm >= 5_000) {
+            if (dv > 0) d.viewNoted = true
+            d.msNoted = d.watchedMs
+            info = info?.let { LocalOverlay.addWatch(it, dv, dm) }
+            if (dv > 0) {
+                episodes = episodes.map { e -> if (e.id == d.epId) e.copy(views = e.views + 1, watchMs = e.watchMs + dm) else e }
+                AppServices.seasons.patch(d.animeId, d.seasonId) { LocalOverlay.viewed(it, 1) }
+            } else episodes = episodes.map { e -> if (e.id == d.epId) e.copy(watchMs = e.watchMs + dm) else e }
+        }
         // Ro'yxatda (Kutubxona > Tarix) darhol ko'rinadi va telefon xotirasiga yoziladi — server paketini kutmaydi.
         sorted.firstOrNull { it.id == d.epId }?.let { ep ->
             AppServices.library.applyHistory(
@@ -219,7 +235,7 @@ fun SeasonScreen(
                 saveProgress()
                 flushHistory()
                 workerRetried = false
-                draft = HistoryDraft(season.animeId, season.seasonId, ep.id, url, ep.qualityOf(url), hist?.watchedMs ?: 0)
+                draft = HistoryDraft(season.animeId, season.seasonId, ep.id, url, ep.qualityOf(url), hist?.watchedMs ?: 0).also { it.msNoted = it.watchedMs }
                 skippedRanges.clear()
             }
             progressUrl = ""

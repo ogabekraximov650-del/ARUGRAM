@@ -70,13 +70,13 @@ class SyncQueue(
     }
 
     /** Hali yuborilmagan tomosha tarixi yozuvlari (`deleted` — tarixdan yashirilgan). */
-    data class PendingHistory(val animeId: Long, val seasonId: Long, val epizodId: Long, val deleted: Boolean)
+    data class PendingHistory(val animeId: Long, val seasonId: Long, val epizodId: Long, val deleted: Boolean, val newView: Boolean = false, val watchedMs: Long = 0)
 
     fun pendingHistory(): List<PendingHistory> = synchronized(rows) {
         load()
         rows.filter { it.optString("kind") == Kind.HISTORY }.mapNotNull {
             val d = it.optJSONObject("data") ?: return@mapNotNull null
-            PendingHistory(d.optLong("anime_id"), d.optLong("season_id"), d.optLong("epizod_id"), d.optBoolean("deleted") || it.optString("op") == "delete")
+            PendingHistory(d.optLong("anime_id"), d.optLong("season_id"), d.optLong("epizod_id"), d.optBoolean("deleted") || it.optString("op") == "delete", d.optBoolean("new_view"), d.optLong("watched_ms"))
         }
     }
 
@@ -114,9 +114,24 @@ class SyncQueue(
         put(Kind.FAVORITE, "f:$animeId:$seasonId", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("on", on).put("updated_at", now()))
     }
 
-    fun putRating(animeId: Long, seasonId: Long, stars: Int) {
+    fun putRating(animeId: Long, seasonId: Long, stars: Int, prev: Int = 0) {
         if (animeId <= 0 || stars !in 1..10) return
-        put(Kind.RATING, "r:$animeId:$seasonId", JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("stars", stars).put("updated_at", now()))
+        val key = "r:$animeId:$seasonId"
+        // UZ/EN: `prev` — avvalgi baho (mahalliy ro'yxat reytingini to'g'ri hisoblash uchun); navbatdagi eski yozuvniki saqlanadi.
+        val oldPrev = synchronized(rows) {
+            load()
+            rows.firstOrNull { it.optString("key") == key }?.optJSONObject("data")?.takeIf { it.has("prev") }?.optInt("prev")
+        }
+        put(Kind.RATING, key, JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("stars", stars).put("prev", oldPrev ?: prev).put("updated_at", now()))
+    }
+
+    /** Hali yuborilmagan baholar: `kalit -> (avvalgi, yangi)`. */
+    fun pendingRatingChanges(): Map<String, Pair<Int, Int>> = synchronized(rows) {
+        load()
+        rows.filter { it.optString("kind") == Kind.RATING }.associate {
+            val d = it.optJSONObject("data")
+            "${d?.optLong("anime_id")}:${d?.optLong("season_id")}" to Pair(d?.optInt("prev") ?: 0, d?.optInt("stars") ?: 0)
+        }
     }
 
     /** Tarixdan yashirish (serverda yozuv o'chirilmaydi, faqat belgilanadi). */
