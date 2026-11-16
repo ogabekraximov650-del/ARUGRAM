@@ -163,20 +163,8 @@ class LibraryStore(
     }
 
     /** Server ro'yxatiga hali yuborilmagan tarix o'zgarishlarini qo'llaydi: yashirilganlar olinadi, yangi ko'rilganlar mahalliy (yangiroq) holati bilan ko'rsatiladi. */
-    private fun overlayHistory(server: List<HistoryItem>, local: List<HistoryItem>): List<HistoryItem> {
-        val pend = uz.arumediatv.com.AppServices.sync.pendingHistory()
-        if (pend.isEmpty()) return server
-        val out = server.toMutableList()
-        for (p in pend) {
-            val same: (HistoryItem) -> Boolean = { it.animeId == p.animeId && it.seasonId == p.seasonId && it.epizodId == p.epizodId }
-            if (p.deleted) { out.removeAll(same); continue }
-            val mine = local.firstOrNull(same) ?: continue
-            val i = out.indexOfFirst(same)
-            if (i >= 0) out.removeAt(i)
-            out.add(0, mine)
-        }
-        return out.sortedByDescending { it.updatedAt }
-    }
+    private fun overlayHistory(server: List<HistoryItem>, local: List<HistoryItem>): List<HistoryItem> =
+        mergeHistory(server, local, uz.arumediatv.com.AppServices.sync.pendingHistory(), System.currentTimeMillis())
 
     /** Pleyerda qism ko'rildi: tarix ro'yxati serverga yuborilishini kutmasdan darhol yangilanadi (yuborish keyin, bitta paket bilan). */
     fun applyHistory(item: HistoryItem) {
@@ -221,6 +209,33 @@ class LibraryStore(
 
     companion object {
         private const val FRESH_MS = 60_000L
+
+        /**
+         * Server tarixi + telefondagi nusxa: telefondagisi serverniki(dan) YANGI bo'lsa (hali paket bilan yuborilmagan: pleyerda ko'rilgan joy, vaqt, kadr) ustidan
+         * yozilmaydi; serverda yo'q lekin 15 daqiqadan yangi yozuv saqlanadi; yuborilmagan o'chirishlar qo'llanadi.
+         * Ilgari server javobi (eski) pleyerdan chiqishdan oldin kelsa, yuborish navbatida hali yozuv yo'q bo'lgani uchun yangi joy o'chib ketardi.
+         */
+        fun mergeHistory(server: List<HistoryItem>, local: List<HistoryItem>, pend: List<SyncQueue.PendingHistory>, now: Long): List<HistoryItem> {
+            val same: (HistoryItem, HistoryItem) -> Boolean = { a, b -> a.animeId == b.animeId && a.seasonId == b.seasonId && a.epizodId == b.epizodId }
+            val out = server.toMutableList()
+            val fresh = now - 15 * 60_000L
+            for (l in local) {
+                val i = out.indexOfFirst { same(it, l) }
+                if (i >= 0) {
+                    if (l.updatedAt > out[i].updatedAt) out[i] = l.copy(views = maxOf(l.views, out[i].views), thumbUrl = l.thumbUrl.ifBlank { out[i].thumbUrl })
+                } else if (l.updatedAt > fresh) {
+                    out.add(l)
+                }
+            }
+            for (p in pend) {
+                if (p.deleted) { out.removeAll { it.animeId == p.animeId && it.seasonId == p.seasonId && it.epizodId == p.epizodId }; continue }
+                val mine = local.firstOrNull { it.animeId == p.animeId && it.seasonId == p.seasonId && it.epizodId == p.epizodId } ?: continue
+                val i = out.indexOfFirst { same(it, mine) }
+                if (i >= 0) out.removeAt(i)
+                out.add(0, mine)
+            }
+            return out.sortedByDescending { it.updatedAt }
+        }
 
         private fun favoritesJson(l: List<Season>): JSONObject {
             val arr = org.json.JSONArray()
