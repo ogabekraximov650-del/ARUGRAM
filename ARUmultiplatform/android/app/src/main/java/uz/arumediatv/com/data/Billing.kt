@@ -2,6 +2,12 @@ package uz.arumediatv.com.data
 
 import android.content.Context
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,6 +55,21 @@ class BillingStore(
     private val prefs = context.getSharedPreferences("aru_billing", Context.MODE_PRIVATE)
     private val _state = MutableStateFlow(BillingState())
     val state: StateFlow<BillingState> = _state.asStateFlow()
+
+    // Hisob o'zgarishi bilan (ilova ochilishi, yangi kirish, hisob almashtirish) obuna va balans DARHOL ko'rinadi: avval telefondagi nusxa, keyin (eskirgan bo'lsa) serverdan.
+    // Ilgari faqat ilova ochilganda `restore` chaqirilardi (hisob yangilanishini kutib), yangi kirgan hisobda esa "Obuna olish" sahifasi ochilmaguncha obuna ko'rinmasdi.
+    init {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            auth.user.map { it?.id ?: 0L }.distinctUntilChanged().collectLatest { uid ->
+                if (uid != 0L) {
+                    restore()
+                    loadIfStale()
+                } else {
+                    clear()
+                }
+            }
+        }
+    }
 
     /** Diskdagi oxirgi ma'lum holat (tarmoqsiz). Hisob o'zgarganda ham chaqiriladi. */
     fun restore() {
