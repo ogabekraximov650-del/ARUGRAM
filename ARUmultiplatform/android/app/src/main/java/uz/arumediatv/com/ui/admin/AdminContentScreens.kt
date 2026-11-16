@@ -445,7 +445,7 @@ fun AdminAnimeEditScreen(initial: JSONObject?, translatorId: Long, onBack: () ->
             busy = true; error = null
             scope.launch {
                 val b = JSONObject().put("photo_url", photo).put("name", name).put("davlat", davlat).put("studiya", studiya).put("janri", janri).put("tavsif", tavsif).put("translator_id", trId)
-                val r = if (initial == null) api.post("/api/anime", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/anime/${initial.optLong("id")}", "PUT", b) }
+                val r = if (initial == null) api.post("/api/anime", b) else api.put("/api/anime/${initial.optLong("id")}", b)
                 busy = false
                 if (r.ok) onDone() else error = "Xato: ${api.errorOf(r, "Saqlashda xato")}"
             }
@@ -544,7 +544,7 @@ fun AdminTranslatorEditScreen(initial: JSONObject?, onBack: () -> Unit, onDone: 
             busy = true; error = null
             scope.launch {
                 val b = JSONObject().put("photo_url", photo).put("name", name.trim()).put("bio", bio.trim())
-                val r = if (initial == null) api.post("/api/translators", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/translators/${initial.optLong("id")}", "PUT", b) }
+                val r = if (initial == null) api.post("/api/translators", b) else api.put("/api/translators/${initial.optLong("id")}", b)
                 busy = false
                 if (r.ok) onDone() else error = "Xato: ${api.errorOf(r, "Saqlashda xato")}"
             }
@@ -681,7 +681,7 @@ fun AdminSeasonEditScreen(animeId: Long, initial: JSONObject?, onBack: () -> Uni
                 val b = JSONObject().put("anime_id", animeId).put("bolim_id", bolim.toIntOrNull() ?: 0).put("photo_url", photo).put("nomi", nomi).put("studio", studio)
                     .put("yili", yili).put("janrlar", JSONArray(g)).put("janri", g.joinToString(", ")).put("turi", turi).put("holati", holati)
                     .put("tavsif", tavsif).put("davlat", davlat.trim()).put("rejissyor", rejissyor.trim()).put("yosh", yosh.trim().toIntOrNull() ?: 0)
-                val r = if (initial == null) api.post("/api/seasons", b) else withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/seasons/$animeId/${initial.optLong("season_id")}", "PUT", b) }
+                val r = if (initial == null) api.post("/api/seasons", b) else api.put("/api/seasons/$animeId/${initial.optLong("season_id")}", b)
                 busy = false
                 if (r.ok) onDone() else error = "Xato: ${api.errorOf(r, "Saqlashda xato")}"
             }
@@ -1073,7 +1073,7 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
                 val b = JSONObject().put("anime_id", animeId).put("season_id", seasonId).put("epizod_number", number.toIntOrNull() ?: 0).put("epizod_name", name)
                 qs.forEach { q -> b.put("url_${q.label}", q.url).put("size_${q.label}", q.size).put("key_${q.label}", q.key) }
                 intro.forEachIndexed { i, s -> b.put("intro_${i + 1}", normalizeIntro(s.value)) }
-                val r = if (initial != null) withContext(Dispatchers.IO) { uz.arumediatv.com.data.Http.client.callJson("${uz.arumediatv.com.BuildConfig.API_BASE}/api/epizods/$animeId/$seasonId/$epId", "PUT", b) } else api.post("/api/epizods", b)
+                val r = if (initial != null) api.put("/api/epizods/$animeId/$seasonId/$epId", b) else api.post("/api/epizods", b)
                 if (r.ok) {
                     if (originNew && origin.isNotEmpty()) {
                         val id = if (epId > 0) epId else r.json?.optLong("epizod_id") ?: 0L

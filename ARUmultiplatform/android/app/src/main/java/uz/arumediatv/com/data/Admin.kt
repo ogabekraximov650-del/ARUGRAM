@@ -20,6 +20,8 @@ class AdminApi(private val auth: AuthService, private val client: OkHttpClient =
 
     suspend fun get(path: String): ApiResult = withContext(Dispatchers.IO) { client.callJson("$base$path", bearer = token) }
     suspend fun post(path: String, body: JSONObject = JSONObject()): ApiResult = withContext(Dispatchers.IO) { client.callJson("$base$path", "POST", body, token) }
+    /** Tahrirlash (PUT): Bearer bilan. Ilgari tahrir so'rovlari sessiyasiz ketib "unauthorized" bo'lardi. */
+    suspend fun put(path: String, body: JSONObject = JSONObject()): ApiResult = withContext(Dispatchers.IO) { client.callJson("$base$path", "PUT", body, token) }
     suspend fun delete(path: String): ApiResult = withContext(Dispatchers.IO) { client.callJson("$base$path", "DELETE", bearer = token) }
 
     fun errorOf(r: ApiResult, fallback: String): String = r.error ?: if (r.code == 0) "Internet yo'q" else if (r.code == 403) "Bu bo'lim faqat admin uchun" else "$fallback (${r.code})"
