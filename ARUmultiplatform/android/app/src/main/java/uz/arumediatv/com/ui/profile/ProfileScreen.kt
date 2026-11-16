@@ -103,9 +103,13 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
         if (user != null) AppServices.myStats.load()
     }
 
+    // Telegram yadro sessiyasi va rasm keshi QURILMAGA tegishli (hamma hisoblar uchun umumiy): faqat ENG SO'NGGI hisob chiqqanda tozalanadi.
+    // Aks holda boshqa hisobning profil rasmi va keshdagi rasmlar yo'qolib qolardi.
     suspend fun wipeLocal() {
-        tg.logout(); runCatching { uz.arumediatv.com.AppServices.tgStickers.clear() }
-        AppServices.images.clearDisk()
+        if (auth.accounts.list.value.isEmpty()) {
+            tg.logout(); runCatching { uz.arumediatv.com.AppServices.tgStickers.clear() }
+            AppServices.images.clearDisk()
+        }
         AppServices.library.clear()
         AppServices.myStats.clear()
         AppServices.sync.clear()
@@ -113,8 +117,9 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
         AppServices.unread.clear()
     }
 
-    // Hisob chiqib ketgach (chiqish/o'chirish): boshqa hisob qolgan bo'lsa shunga o'tiladi (jarayon qayta ochiladi).
-    fun afterAccountGone() {
+    // Hisob chiqib ketgach (chiqish/o'chirish): fayllari o'chiriladi, boshqa hisob qolgan bo'lsa shunga ilova ichida o'tiladi.
+    fun afterAccountGone(goneId: Long = 0L) {
+        if (goneId > 0L) uz.arumediatv.com.data.AccountSwitcher.forget(ctx, goneId)
         val next = auth.accounts.list.value.firstOrNull() ?: return
         uz.arumediatv.com.data.AccountSwitcher.switchTo(ctx, next.id)
     }
@@ -265,11 +270,12 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                                 busy = null
                                 unsavedWarn = true
                             } else {
+                                val goneId = auth.user.value?.id ?: 0L
                                 auth.logout()
                                 wipeLocal()
                                 busy = null
                                 confirmLogout = false
-                                afterAccountGone()
+                                afterAccountGone(goneId)
                             }
                         }
                     },
@@ -289,9 +295,10 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                     unsavedWarn = false
                     confirmLogout = false
                     scope.launch {
+                        val goneId = auth.user.value?.id ?: 0L
                         auth.logout()
                         wipeLocal()
-                        afterAccountGone()
+                        afterAccountGone(goneId)
                     }
                 }) { Text("Baribir chiqish", color = Color(0xFFF87171)) }
             },
@@ -321,8 +328,9 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
                     deleteStep = 0
                     busy = "Ma'lumotlar tozalanmoqda"
                     scope.launch {
+                        val goneId = auth.user.value?.id ?: 0L
                         val err = auth.deleteAccount()
-                        if (err == null) { wipeLocal(); busy = null; afterAccountGone() } else { error = err; busy = null }
+                        if (err == null) { wipeLocal(); busy = null; afterAccountGone(goneId) } else { error = err; busy = null }
                     }
                 }) { Text("Ha, o'chirilsin", color = Color(0xFFF87171)) }
             },
