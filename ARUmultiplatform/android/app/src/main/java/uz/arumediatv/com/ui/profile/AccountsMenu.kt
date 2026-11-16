@@ -82,9 +82,9 @@ fun AccountsCapsule(
                 onDismissRequest = { onToggle(false) },
                 properties = PopupProperties(focusable = true),
             ) {
-                // Kapsulaning o'ng-pastki burchagidan tortilgandek: eni va bo'yi BIR vaqtda, bir xil tezlikda (chiziqli) ~0,7 s da kattalashadi.
+                // Kapsulaning o'ng-pastki burchagidan tortilgandek: eni va bo'yi BIR vaqtda, bir xil tezlikda (chiziqli) 1 s da kattalashadi.
                 val prog = remember { Animatable(0f) }
-                LaunchedEffect(Unit) { prog.animateTo(1f, tween(700, easing = LinearEasing)) }
+                LaunchedEffect(Unit) { prog.animateTo(1f, tween(1000, easing = LinearEasing)) }
                 val pillPx = with(density) { pillW.roundToPx() }
                 val headerPx = with(density) { 44.dp.roundToPx() }
                 val fullPx = with(density) { 290.dp.roundToPx() }
