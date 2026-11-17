@@ -7483,11 +7483,3 @@ O'zgarish: worker Ample'ga 1 KB dan katta `/v2/pipeline` so'rovlarini Brotli 6 b
 Xavfsizlik avvalgidek: yangi `tgstore-jr` har javobga `x-req-br: 1` (va `x-req-gzip: 1`) qo'shadi; worker faqat shu sarlavhani ko'rgandan keyin siqadi, eski server sarlavha bermaydi. Server `415` desa belgi o'chadi va so'rov siqilmasdan qayta yuboriladi. Turso'ga HECH QACHON siqilmaydi.
 Ample tomoni (`ample-rs/src/main.rs`): `decode_request` endi `br` ni ham ochadi (gzip ham qoladi), chegara 64 MiB.
 Eslatma: `Content-Encoding: br` so'rovlarini faqat yangi `tgstore-jr` ochadi — Ample'ni eski binarga qaytarsangiz, worker'ni qayta deploy qiling (belgi ishlayotgan izolyatlarda `true` qolishi mumkin).
-
-## Reklama (AdMob): "reklama ko'r — 60 daqiqa ko'r"
-
-Nima: obunasiz foydalanuvchi pullik bo'limni ochmoqchi bo'lsa "Obuna kerak" ekranida "Reklama ko'rish — 60 daqiqa" tugmasi chiqadi. Mukofotli reklama (AdMob rewarded) OXIRIGACHA ko'rilsa, shu hisob 60 daqiqa davomida istalgan animeni ko'radi (tepada qolgan vaqt belgisi ⏱ m:ss). 60 daqiqa tugagach pleyer pauzaga qo'yiladi (joy saqlanadi) va yana reklama/obuna so'raladi. Obunali foydalanuvchi va bepul bo'limlarga reklama ko'rsatilmaydi.
-Qanday: `data/AdAccess.kt` (ruxsat: `grantedAt`, hisob bo'yicha SharedPreferences, soat orqaga surilsa ruxsat o'chadi; sof mantiq `AdAccessTest`), `data/RewardedAds.kt` (SDK, oldindan yuklash, ko'rsatish), `ui/season/SeasonScreen.kt` (`canWatch` ga `adActive`, pauza, tugma, vaqt belgisi), `AruApplication.kt` (SDK ishga tushishi), `build.gradle.kts` + manifest (`APPLICATION_ID` meta-data, `play-services-ads`), `android-native.yml` (Secret'lar).
-Identifikatorlar: CI Secret'lar `ADMOB_APP_ID` (ca-app-pub-...~...) va `ADMOB_REWARDED_ID` (ca-app-pub-.../...). Bo'sh bo'lsa Google'ning rasmiy SINOV ID'lari ishlatiladi — test reklama chiqadi, PUL TUSHMAYDI. Haqiqiy ID'larni AdMob panelidan olib GitHub Secret'ga yozing (`BuildConfig.ADMOB_TEST` ilovada sinov rejimini ko'rsatadi).
-Cheklov: ruxsat faqat ilovada (server tekshirmaydi — video ma'lumoti hozir ham obunadan qat'i nazar beriladi). Server tomondan tekshirish (AdMob SSV) keyingi bosqich.
-Ogohlantirish: AdMob/Yandex kontentga huquq talab qiladi; huquq aniq bo'lmasa hisob bloklanishi mumkin.
