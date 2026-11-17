@@ -313,12 +313,12 @@ private fun LinkTile(l: PayLink, now: Long, open: (String) -> Boolean, say: (Str
 @Composable
 private fun HistoryPage() {
     val st by AppServices.billing.state.collectAsStateWithLifecycle()
-    // Ikki tugma: "To'ldirish" (balans to'ldirishlar) va "Qo'shilgan muddat" (obuna sotib olish va reklama orqali qo'shilgan vaqt).
+    // Ikki tugma: "To'ldirish" (balans to'ldirishlar) va "Obuna" (obuna sotib olish va reklama orqali qo'shilgan vaqt).
     var tab by rememberSaveable { mutableIntStateOf(0) }
     val list = remember(st.history, tab) { if (tab == 0) st.history.filter { it.isTopUp } else st.history.filter { !it.isTopUp } }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            listOf("To'ldirish", "Qo'shilgan muddat").forEachIndexed { i, label ->
+            listOf("To'ldirish", "Obuna").forEachIndexed { i, label ->
                 val on = tab == i
                 val shape = RoundedCornerShape(14.dp)
                 Box(
