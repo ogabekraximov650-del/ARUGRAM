@@ -23,6 +23,11 @@
         android:name=".AruApplication"
         android:theme="@style/Theme.ARUMEDIATV">
 
+        <!-- AdMob ilova identifikatori (build.gradle.kts: ADMOB_APP_ID Secret, bo'lmasa Google sinov identifikatori) -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}" />
+
         <!-- Yozishma hujjatlarini (yangi tizimdan ochilgan vaqtinchalik fayl) tashqi ilovada ochish uchun. -->
         <provider
             android:name="androidx.core.content.FileProvider"
