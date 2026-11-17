@@ -47,7 +47,6 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import uz.arumediatv.com.AppServices
-import uz.arumediatv.com.data.GoogleSignIn
 import uz.arumediatv.com.data.LoginStatus
 import uz.arumediatv.com.data.TgLoginStep
 import uz.arumediatv.com.ui.theme.AruColors
@@ -373,18 +372,9 @@ fun LoginScreen(onDone: () -> Unit, onClose: () -> Unit, onBot: () -> Unit = {})
             }
             if (step == Step.PHONE && !busy) {
                 Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                // "Google bilan kirish" bu ekrandan olib tashlandi (foydalanuvchi talabi); Google bilan kirish kirish tanlash ekranida qoladi.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
                     Text("QR orqali kirish", color = AruColors.Accent2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { error = null; step = Step.QR })
-                    Text("Google bilan kirish", color = AruColors.Accent2, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable {
-                        error = null
-                        busy = true
-                        scope.launch {
-                            val r = GoogleSignIn.idToken(ctx)
-                            val err = r.second ?: auth.loginWithGoogle(r.first.orEmpty())
-                            busy = false
-                            if (err == null) onDone() else if (r.first != null || r.second != "") error = err
-                        }
-                    })
                 }
             }
             if ((step == Step.CODE || step == Step.PASSWORD) && !busy) {
