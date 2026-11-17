@@ -1056,7 +1056,7 @@ fun AdminEpisodeEditScreen(animeId: Long, seasonId: Long, initial: JSONObject?, 
         Spacer(Modifier.height(8.dp))
 
         // ── Pleyer: intro maydonlari TEPASIDA (vaqtni aniqlab, pastdagi ⏱ bilan yozish uchun) ──
-        IntroPlayerCard(introPlayer, initial)
+        IntroPlayerCard(introPlayer, initial, intro)
         Spacer(Modifier.height(12.dp))
 
         // ── O'tkazib yuboriladigan joylar ──
@@ -1134,18 +1134,31 @@ private fun StampBtn(onClick: () -> Unit) {
     }
 }
 
+private fun Context.adminActivity(): android.app.Activity? {
+    var c: Context? = this
+    while (c is android.content.ContextWrapper) { if (c is android.app.Activity) return c; c = c.baseContext }
+    return null
+}
+
 /**
  * Intro vaqtini aniqlash uchun pleyer (qism tahrirlash oynasining tepasida): asosiy tayyor pleyer, mavjud eng yaxshi sifat ochiladi;
  * pastdagi intro qatorlarida ⏱ bosilsa hozirgi vaqt (m:ss) shu maydonga yoziladi. Video yo'q (yangi qism) bo'lsa pleyer ko'rsatilmaydi.
+ * Hamma tugma ishlaydi: sozlamalar (sifat, tezlik), to'liq ekran (gorizontal), "Introni o'tkazish" (maydonlardagi vaqtlar bo'yicha, yozilgan zahoti), HQ.
  */
 @Composable
-private fun IntroPlayerCard(player: uz.arumediatv.com.ui.season.AruPlayer, initial: JSONObject?) {
+private fun IntroPlayerCard(player: uz.arumediatv.com.ui.season.AruPlayer, initial: JSONObject?, intro: List<androidx.compose.runtime.MutableState<String>>) {
+    val ctx = LocalContext.current
     val best = remember(initial) {
         listOf("1080p", "720p", "480p", "360p").map { jstr(initial, "url_$it") }.firstOrNull { it.isNotEmpty() && it != jstr(initial, "origin_video") }
             ?: jstr(initial, "origin_video")
     }
     var err by remember { mutableStateOf<String?>(null) }
     var opened by remember { mutableStateOf(false) }
+    var curUrl by remember(best) { mutableStateOf(best) }
+    var full by remember { mutableStateOf(false) }
+    var showSettings by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val ep = remember(initial) { initial?.let { runCatching { Episode.from(it) }.getOrNull() } }
     if (best.isEmpty()) {
         GlassCard(16, PaddingValues(14.dp)) {
             Text("Intro vaqtini aniqlash uchun avval video yuklang — shu yerda pleyer chiqadi.", color = Color(0x8CFFFFFF), fontSize = 12.sp)
@@ -1164,20 +1177,93 @@ private fun IntroPlayerCard(player: uz.arumediatv.com.ui.season.AruPlayer, initi
             player.tick()
         }
     }
+    // Maydonlardagi hozirgi intro vaqtlari (yozilgan zahoti hisobga olinadi).
+    val ranges = (0 until 5).mapNotNull { r ->
+        val a = Episode.introMs(intro[r * 2].value)
+        val b = Episode.introMs(intro[r * 2 + 1].value)
+        if (a > 0 && b > a) a..b else null
+    }
+    val introActive = ranges.any { player.positionMs in it }
+    val speedLabel = if (player.speed == player.speed.toInt().toFloat()) "${player.speed.toInt()}x" else "${player.speed}x"
+
+    // To'liq ekran: gorizontal + tizim panellari yashirin (bitta pleyer sirti: to'liq ekranda ichki sirt olib tashlanadi).
+    androidx.compose.runtime.DisposableEffect(full) {
+        val act = ctx.adminActivity()
+        if (full && act != null) act.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        onDispose { if (act != null) act.requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
+    }
+
+    @Composable
+    fun Controls(fs: Boolean) {
+        uz.arumediatv.com.ui.season.PlayerControls(
+            player = player, title = jstr(initial, "epizod_name"), subtitle = "Intro vaqtini aniqlash",
+            fullscreen = fs, locked = false, hasPrev = false, hasNext = false, introActive = introActive,
+            speedLabel = speedLabel,
+            onSkipIntro = { ranges.firstOrNull { player.positionMs in it }?.let { player.seekTo(it.last) } },
+            onPrev = {}, onNext = {},
+            onBack = { full = false },
+            onToggleFullscreen = { full = !full },
+            onSettings = { showSettings = true },
+            onQuality = { showSettings = true },
+            onEpisodeList = {}, onToggleLock = {}, onRetry = { opened = false; err = null },
+            modifier = Modifier.fillMaxSize(),
+        )
+    }
+
     GlassCard(16, PaddingValues(12.dp)) {
         // Asosiy TAYYOR pleyer (`PlayerSurface` + `PlayerControls`) — qayta yozilmagan; keraksiz tugmalar (keyingi qism, qulf, ro'yxat) bo'sh qoldirilgan.
         Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(Color.Black)) {
-            uz.arumediatv.com.ui.season.PlayerSurface(player, Modifier.fillMaxSize())
-            uz.arumediatv.com.ui.season.PlayerControls(
-                player = player, title = jstr(initial, "epizod_name"), subtitle = "Intro vaqtini aniqlash",
-                fullscreen = false, locked = false, hasPrev = false, hasNext = false, introActive = false,
-                speedLabel = if (player.speed == player.speed.toInt().toFloat()) "${player.speed.toInt()}x" else "${player.speed}x",
-                onSkipIntro = {}, onPrev = {}, onNext = {}, onBack = {}, onToggleFullscreen = {}, onSettings = {}, onQuality = {},
-                onEpisodeList = {}, onToggleLock = {}, onRetry = { opened = false; err = null },
-                modifier = Modifier.fillMaxSize(),
-            )
-            err?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 12.sp, modifier = Modifier.align(Alignment.Center)) }
+            if (!full) {
+                uz.arumediatv.com.ui.season.PlayerSurface(player, Modifier.fillMaxSize())
+                Controls(false)
+                err?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 12.sp, modifier = Modifier.align(Alignment.Center)) }
+            }
         }
+    }
+
+    if (full) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { full = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+        ) {
+            val dw = (androidx.compose.ui.platform.LocalView.current.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window
+            androidx.compose.runtime.SideEffect {
+                dw?.let {
+                    androidx.core.view.WindowCompat.setDecorFitsSystemWindows(it, false)
+                    androidx.core.view.WindowCompat.getInsetsController(it, it.decorView).apply {
+                        hide(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+                        systemBarsBehavior = androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                    }
+                }
+            }
+            Box(Modifier.fillMaxSize().background(Color.Black)) {
+                uz.arumediatv.com.ui.season.PlayerSurface(player, Modifier.fillMaxSize())
+                Controls(true)
+                err?.let { Text(it, color = Color(0xFFFF8A80), fontSize = 12.sp, modifier = Modifier.align(Alignment.Center)) }
+            }
+        }
+    }
+
+    if (showSettings) {
+        uz.arumediatv.com.ui.season.PlayerSettingsSheet(
+            episode = ep, currentUrl = curUrl, speed = player.speed, autoNext = false, autoSkipIntro = false, sleepEndAt = 0L,
+            onQuality = { q ->
+                val u = ep?.urls?.get(q).orEmpty()
+                if (u.isNotEmpty() && u != curUrl) {
+                    val pos = player.positionMs
+                    val wasPlaying = player.playing
+                    curUrl = u
+                    scope.launch {
+                        val src = uz.arumediatv.com.data.PlaySource.resolve(u, AppServices.telegram)
+                        if (src == null) err = "Videoni ochib bo'lmadi" else { err = null; player.open(src.uri, pos, wasPlaying) }
+                    }
+                }
+            },
+            onSpeed = { player.changeSpeed(it) },
+            onAutoNext = {}, onAutoSkip = {}, onSleep = {},
+            onDismiss = { showSettings = false },
+            compact = true,
+        )
     }
 }
 

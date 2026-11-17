@@ -563,6 +563,8 @@ fun PlayerSettingsSheet(
     onSleep: (Int) -> Unit,
     onDismiss: () -> Unit,
     onDeleted: (Episode, String) -> Unit = { _, _ -> },
+    /** Admin ko'rik pleyeri: faqat sifat va tezlik (yuklab olish, avto va uyqu taymeri yashirin). */
+    compact: Boolean = false,
 ) {
     val dm = AppServices.downloads
     val sheetOwner = remember { Any() }
@@ -582,7 +584,7 @@ fun PlayerSettingsSheet(
                     }
                 }
             }
-            if (episode != null && episode.qualities.isNotEmpty()) {
+            if (!compact && episode != null && episode.qualities.isNotEmpty()) {
                 SheetTitle("Yuklab olish")
                 episode.qualities.forEach { q -> QualityRow(episode, q, { onQuality(q); onDismiss() }, { onDeleted(episode, q) }) }
             }
@@ -590,13 +592,15 @@ fun PlayerSettingsSheet(
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f).forEach { v -> Chip(if (v == 1f) "Oddiy" else "${v}x", speed == v) { onSpeed(v) } }
             }
-            SheetTitle("Avtomatik")
-            ToggleRow("Keyingi qismni avto ochish", autoNext, onAutoNext)
-            ToggleRow("Introni avto o'tkazish", autoSkipIntro, onAutoSkip)
-            SheetTitle("Uyqu taymeri" + if (sleepEndAt > 0) " · ${((sleepEndAt - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} daqiqa qoldi" else "")
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Chip("O'chiq", sleepEndAt <= 0) { onSleep(0) }
-                listOf(15, 30, 45, 60, 90).forEach { m -> Chip("$m daqiqa", false) { onSleep(m); onDismiss() } }
+            if (!compact) {
+                SheetTitle("Avtomatik")
+                ToggleRow("Keyingi qismni avto ochish", autoNext, onAutoNext)
+                ToggleRow("Introni avto o'tkazish", autoSkipIntro, onAutoSkip)
+                SheetTitle("Uyqu taymeri" + if (sleepEndAt > 0) " · ${((sleepEndAt - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} daqiqa qoldi" else "")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Chip("O'chiq", sleepEndAt <= 0) { onSleep(0) }
+                    listOf(15, 30, 45, 60, 90).forEach { m -> Chip("$m daqiqa", false) { onSleep(m); onDismiss() } }
+                }
             }
         }
     }
