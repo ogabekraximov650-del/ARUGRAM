@@ -7510,3 +7510,9 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 - **Reklama vaqti:** `AdAccess` endi "muddat tugash vaqti" (`until`) saqlaydi: har reklama muddatga +1 soat qo'shadi (faol bo'lsa ustiga, bo'lmasa hozirdan). Vaqt telefonda, hisob bo'yicha; serverdagi obunaga yozilmaydi. Soat orqaga surilsa muddat o'chadi.
 - **Profil:** "Obuna olish va Balans to'ldirish" tagida "Bepul tomosha qilish uchun reklama ko'rish" tugmasi (`ProfileScreen.AdButton`), qolgan vaqt ko'rsatiladi.
 - Fayllar: `data/AdAccess.kt`, `AdAccessTest.kt`, `ui/profile/ProfileScreen.kt`, `ui/season/SeasonScreen.kt`, `AppServices.kt`, `AuthService.kt`, `SyncQueue.kt`.
+
+## Reklama vaqti bazada: obuna muddatiga +1 soat, ruxsatsiz pleyer ochilmaydi (2026-11-17)
+
+- **Server:** yangi `POST /api/billing/ad-reward` (`billing_ad_reward`, `worker/src/lib.rs`): `subs_db.expires_at = MAX(joriy, hozir) + 1 soat`, shuning uchun reklama bitta qurilmada ko'rilsa boshqasida ham ishlaydi. Suiiste'molga qarshi: so'rovlar orasida kamida 25 soniya, sutkada eng ko'pi 24 ta (`billing_log`, `kind='ad'`). `GET /api/billing` tarixidan `kind='ad'` yozuvlari chiqarib tashlanadi (to'lov tarixida ko'rinmaydi).
+- **Ilova:** mahalliy `AdAccess` olib tashlandi; `BillingStore.adReward()` serverga yozadi va muddatni yangilaydi. Pleyer faqat `billing.until > hozir` bo'lsa ochiladi (bepul bo'lim ham reklama/obunasiz ochilmaydi; `play()` ham tekshiradi). Anime bosilganda "Anime ko'rish uchun reklama ko'rishingiz yoki obuna sotib olishingiz kerak" ekrani chiqadi.
+- **Ochiq xavf:** reklamaning haqiqatan ko'rilganini AdMob server tomondan tasdiqlashi (SSV) hali yo'q — o'zgartirilgan ilova so'rovni qo'lda yuborishi mumkin (limit bilan cheklangan). Obuna faol bo'lsa (reklama bilan ham) balansdan yangi obuna olib bo'lmaydi (eski qoida).

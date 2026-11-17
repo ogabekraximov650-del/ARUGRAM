@@ -108,7 +108,7 @@ class BillingStore(
             .map { PayLink(it.optString("order_id"), it.optLong("amount"), it.optString("pay_url"), it.optLong("expires_at")) }
             .filter { it.url.isNotEmpty() }
         val hist = j.optJSONArray("history")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
-            .map { BillingEntry(it.optString("kind"), it.optLong("amount"), it.optInt("days"), it.optString("note"), it.optLong("created_at")) }
+            .filter { it.optString("kind") != "ad" }.map { BillingEntry(it.optString("kind"), it.optLong("amount"), it.optInt("days"), it.optString("note"), it.optLong("created_at")) }
         val bal = j.optLong("balance")
         val until = j.optLong("subscription_until")
         auth.user.value?.id?.let { uid -> prefs.edit().putLong("bal_$uid", bal).putLong("until_$uid", until).putLong("at_$uid", System.currentTimeMillis()).apply(); auth.accounts.setSub(uid, until) }
@@ -133,6 +133,21 @@ class BillingStore(
         val paid = r.json?.optString("status") == "paid"
         if (paid) load(force = true)
         paid to null
+    }
+
+    /** Reklama oxirigacha ko'rildi: server obuna muddatiga 1 soat qo'shadi (bazada — boshqa qurilmada ham ishlaydi). `null` — qo'shildi; aks holda xato matni. */
+    suspend fun adReward(): String? = withContext(Dispatchers.IO) {
+        val token = auth.sessionToken ?: return@withContext "Avval hisobga kiring"
+        val r = client.callJson("$base/api/billing/ad-reward", "POST", JSONObject(), token)
+        if (!r.ok) return@withContext r.error ?: if (r.code == 0) "Internet yo'q — vaqt qo'shilmadi, qayta urinib ko'ring" else "Vaqt qo'shilmadi (${r.code})"
+        val until = r.json?.optLong("subscription_until") ?: 0L
+        val uid = auth.user.value?.id ?: 0L
+        if (until > 0 && uid != 0L) {
+            prefs.edit().putLong("until_$uid", until).apply()
+            auth.accounts.setSub(uid, until)
+            _state.update { it.copy(until = until) }
+        }
+        null
     }
 
     /** `null` — obuna olindi; aks holda xato matni. */

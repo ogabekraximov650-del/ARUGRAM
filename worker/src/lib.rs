@@ -6894,6 +6894,55 @@ async fn billing_webhook(mut req: Request, env: &Env) -> Result<Response> {
     ok_nostore(json!({"ok": true, "credited": added}))
 }
 
+/// POST /api/billing/ad-reward — reklama oxirigacha ko'rilgach obuna muddatiga 1 soat qo'shiladi.
+///
+/// UZ: muddat BAZADA (`subs_db`) cho'ziladi, shuning uchun bitta qurilmada reklama ko'rilsa, shu hisobning boshqa qurilmasida ham ishlaydi.
+/// Obuna faol bo'lsa — uning ustiga, bo'lmasa hozirdan boshlab. Suiiste'mol: ketma-ket so'rovlar orasida kamida 25 soniya va sutkada eng ko'pi 24 marta
+/// (24 soat). Reklamaning haqiqatan ko'rilganini AdMob server tomondan tasdiqlashi (SSV) keyinroq qo'shiladi.
+/// EN: extends the subscription end time in the DB by one hour per rewarded ad (works across devices); rate-limited.
+/// RU: prodlevaet srok podpiski v baze na 1 chas za reklamu (rabotaet na vsekh ustroystvakh); est limit chastoty.
+async fn billing_ad_reward(req: Request, env: &Env) -> Result<Response> {
+    let Some(u) = session_user(env, &bearer(&req)).await? else {
+        return json_resp(&json!({"error": "unauthorized"}), 401);
+    };
+    let me = u["id"].as_i64().unwrap_or(0);
+    let now = now_ms();
+    let day_ago = now - 86_400_000;
+    let recent = turso_exec(env,
+        "SELECT COUNT(*) AS n, COALESCE(MAX(created_at),0) AS last FROM billing_log
+          WHERE user_id=? AND kind='ad' AND created_at>?",
+        vec![TursoArg::int(me), TursoArg::int(day_ago)]).await?;
+    let row = first_row(&recent).unwrap_or(json!({}));
+    let n = row["n"].as_i64().unwrap_or(0);
+    let last = row["last"].as_i64().unwrap_or(0);
+    if n >= AD_REWARD_PER_DAY {
+        return json_resp(&json!({"error": "Bugungi reklama limiti tugadi. Ertaga qayta urinib ko'ring."}), 429);
+    }
+    if now - last < AD_REWARD_MIN_GAP_MS {
+        return json_resp(&json!({"error": "Juda tez. Reklamani oxirigacha ko'ring."}), 429);
+    }
+    let up = turso_exec(env,
+        "INSERT INTO subs_db (user_id,expires_at) VALUES (?,?)
+          ON CONFLICT(user_id) DO UPDATE SET expires_at=MAX(COALESCE(expires_at,0),?)+?
+          RETURNING expires_at",
+        vec![
+            TursoArg::int(me), TursoArg::int(now + AD_REWARD_MS),
+            TursoArg::int(now), TursoArg::int(AD_REWARD_MS),
+        ]).await?;
+    let until = first_row(&up).and_then(|r| r["expires_at"].as_i64()).unwrap_or(now + AD_REWARD_MS);
+    let _ = turso_exec(env,
+        "INSERT INTO billing_log (id,user_id,kind,amount,days,note,created_at) VALUES (?,?,'ad',0,0,?,?)",
+        vec![
+            TursoArg::text(&format!("a{me}-{now}")), TursoArg::int(me),
+            TursoArg::text("Reklama: +1 soat"), TursoArg::int(now),
+        ]).await;
+    ok_nostore(json!({"ok": true, "subscription_until": until}))
+}
+
+const AD_REWARD_MS: i64 = 3_600_000;
+const AD_REWARD_MIN_GAP_MS: i64 = 25_000;
+const AD_REWARD_PER_DAY: i64 = 24;
+
 /// POST /api/billing/subscribe — balansdan obuna sotib olish.
 async fn billing_subscribe(mut req: Request, env: &Env) -> Result<Response> {
     let Some(u) = session_user(env, &bearer(&req)).await? else {
@@ -9672,7 +9721,7 @@ async fn billing_state(req: Request, env: &Env) -> Result<Response> {
            ORDER BY created_at DESC LIMIT 20",
          vec![TursoArg::int(me), TursoArg::int(now)]),
         ("SELECT kind,amount,days,note,created_at FROM billing_log
-           WHERE user_id=? ORDER BY created_at DESC LIMIT 100",
+           WHERE user_id=? AND kind<>'ad' ORDER BY created_at DESC LIMIT 100",
          vec![TursoArg::int(me)]),
         // ── MUDDATI O'TGAN HAVOLA BAZADAN O'CHADI ────────
         //
@@ -15600,6 +15649,9 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
     if path == "/api/billing/subscribe" && method == Method::Post {
         return billing_subscribe(req, &env).await;
+    }
+    if path == "/api/billing/ad-reward" && method == Method::Post {
+        return billing_ad_reward(req, &env).await;
     }
     // Webhook — tezcheck.uz chaqiradi, foydalanuvchi emas. Shu
     // sabab bu yerda sessiya tekshirilmaydi: haqiqiyligini IMZO

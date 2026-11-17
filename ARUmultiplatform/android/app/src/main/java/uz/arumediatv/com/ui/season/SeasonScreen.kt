@@ -126,20 +126,19 @@ fun SeasonScreen(
     val scope = rememberCoroutineScope()
     val repo = AppServices.seasonData
     val billing by AppServices.billing.state.collectAsStateWithLifecycle()
-    // ── Reklama orqali ruxsat: mukofotli reklama oxirigacha ko'rilsa ko'rish muddatiga 1 soat qo'shiladi; tugagach pleyer pauzaga qo'yiladi ──
-    val me by AppServices.auth.user.collectAsStateWithLifecycle()
-    val adUntil by uz.arumediatv.com.data.AdAccess.until.collectAsStateWithLifecycle()
+    // ── Ruxsat: obuna (yoki reklama orqali BAZADA qo'shilgan 1 soat) faol bo'lishi kerak; boshqasi pleyerni ochmaydi ──
+    // Muddat serverda (`subs_db`), shuning uchun reklama bitta qurilmada ko'rilsa boshqasida ham ishlaydi.
     var adNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(me?.id) { uz.arumediatv.com.data.AdAccess.load(ctx, me?.id ?: 0L) }
-    LaunchedEffect(adUntil) {
+    LaunchedEffect(billing.until) {
+        val day = 24 * 60 * 60_000L
         while (true) {
             adNow = System.currentTimeMillis()
-            if (!uz.arumediatv.com.data.AdAccess.active(adUntil, adNow)) break
-            delay(1000)
+            val left = billing.until - adNow
+            if (left <= 0) break
+            delay(if (left <= day) 1000L else minOf(left - day + 1, 60_000L))
         }
     }
-    val adActive = uz.arumediatv.com.data.AdAccess.active(adUntil, adNow)
-    val adLeftMs = uz.arumediatv.com.data.AdAccess.remainingMs(adUntil, adNow)
+    val adLeftMs = (billing.until - adNow).coerceAtLeast(0)
     var adBusy by remember { mutableStateOf(false) }
     var adMsg by remember { mutableStateOf<String?>(null) }
     val watchAd: () -> Unit = {
@@ -150,12 +149,12 @@ fun SeasonScreen(
             adMsg = null
             uz.arumediatv.com.data.RewardedAds.show(
                 act,
-                onReward = { uz.arumediatv.com.data.AdAccess.grant(ctx, me?.id ?: 0L); adBusy = false; adMsg = null },
+                onReward = { scope.launch { adMsg = AppServices.billing.adReward(); adBusy = false } },
                 onFail = { adMsg = it; adBusy = false },
             )
         }
     }
-    val canWatch = billing.active || season.free == true || adActive
+    val canWatch = billing.until > adNow
     // Pleyer ochiq paytda orqa fonda kadr yaratish to'xtaydi (tarmoq faqat videoniki).
     DisposableEffect(Unit) {
         AppServices.playerBusy.incrementAndGet()
@@ -163,7 +162,7 @@ fun SeasonScreen(
     }
 
     val player = remember { AruPlayer(ctx) }
-    // Reklama ruxsati tugadi (obuna ham, bepul bo'lim ham emas): ijro pauzaga qo'yiladi, joy saqlanadi.
+    // Ruxsat tugadi: ijro pauzaga qo'yiladi, joy saqlanadi.
     LaunchedEffect(canWatch) { if (!canWatch) { player.pause(); uz.arumediatv.com.data.RewardedAds.ensureInit(ctx) } }
     var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
     var loadingEps by remember { mutableStateOf(true) }
@@ -238,6 +237,7 @@ fun SeasonScreen(
     }
 
     fun play(ep: Episode, quality: String? = null, resumeAt: Long? = null, resumePlaying: Boolean = true, preferWorker: Boolean = false) {
+        if (!canWatch) return
         scope.launch {
             val hist = AppServices.library.state.value.history.firstOrNull { it.animeId == season.animeId && it.seasonId == season.seasonId && it.epizodId == ep.id }
             val epKey = "${season.animeId}:${season.seasonId}:${ep.id}"
@@ -469,7 +469,7 @@ fun SeasonScreen(
     val collapsed = commentsExpanded && pager.currentPage == 3 && !fullscreen
 
     if (!canWatch) {
-        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, adBusy = adBusy, adMsg = adMsg, adExpired = adUntil > 0, adReady = uz.arumediatv.com.data.RewardedAds.ready())
+        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, adBusy = adBusy, adMsg = adMsg, adExpired = billing.until > 0, adReady = uz.arumediatv.com.data.RewardedAds.ready())
     } else
     Column(Modifier.fillMaxSize().background(AruColors.Bg).then(if (fullscreen) Modifier else Modifier.statusBarsPadding())) {
         if (!fullscreen && !collapsed) {
@@ -484,12 +484,12 @@ fun SeasonScreen(
                     "${season.sectionNo.takeIf { it > 0 } ?: 1}-bo'lim  ${season.name}", color = Color.White, fontSize = 17.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
                 )
-                if (adActive && !billing.active && season.free != true) {
+                if (canWatch && adLeftMs in 1..(24 * 60 * 60_000L)) {
                     Spacer(Modifier.width(8.dp))
                     val m = adLeftMs / 60_000
                     val sec = (adLeftMs / 1000) % 60
                     Text(
-                        "⏱ %d:%02d".format(m, sec), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        "⏱ %d:%02d:%02d".format(m / 60, m % 60, sec), color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
                         modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(AruColors.Accent.copy(alpha = 0.85f)).padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
@@ -712,11 +712,11 @@ private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit, onWatch
                 contentAlignment = Alignment.Center,
             ) { Icon(AruIcons.WorkspacePremium, null, tint = AruColors.AccentTint, modifier = Modifier.size(44.dp)) }
             Spacer(Modifier.height(22.dp))
-            Text("Obuna kerak", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+            Text("Reklama yoki obuna kerak", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.height(10.dp))
             Text(
-                if (adExpired) "Reklama orqali qo'shilgan vaqt tugadi. Davom etish uchun yana reklama ko'ring yoki obuna oling. Ko'rilgan joyingiz saqlangan."
-                else "Anime ko'rish uchun obuna bo'lishi kerak. Yoki qisqa reklamani oxirigacha ko'ring — ko'rish muddatiga 1 soat qo'shiladi.",
+                if (adExpired) "Ko'rish muddatingiz tugadi. Anime ko'rish uchun reklama ko'rishingiz yoki obuna sotib olishingiz kerak. Ko'rilgan joyingiz saqlangan."
+                else "Anime ko'rish uchun reklama ko'rishingiz yoki obuna sotib olishingiz kerak. Reklamani oxirigacha ko'rsangiz, ko'rish muddatingizga 1 soat qo'shiladi.",
                 color = Color.White.copy(alpha = 0.62f), fontSize = 13.5.sp, lineHeight = 21.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
