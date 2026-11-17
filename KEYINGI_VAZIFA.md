@@ -7468,3 +7468,11 @@ Nima: `tgstore-jr` (`ARUmultiplatform/ample-rs`) JSON javoblarini siqadi: mijoz 
 Nega 6: Ample serverida haqiqiy jurnal (~300 KB JSON) bilan o'lchandi — gzip 6: 28 186 bayt/3 ms; Brotli 5: 22 616/3 ms; Brotli 6: 22 419/4 ms; Brotli 7: 22 303/7 ms; Brotli 8: 22 216/11 ms; Brotli 9: 22 171/18 ms; Brotli 11: ~18 900/384 ms. Server 1 CPU — 7+ ko'p vaqt olib kam foyda beradi, 11 juda sekin.
 Fayllar: `ample-rs/src/main.rs` (`compress_body`, `handle` o'rami, 4 ta test), `ample-rs/Cargo.toml` (`brotli`).
 Eslatma: Ample trafikni siqilgan baytlar bo'yicha sanashi tasdiqlanmagan — Ample panelida oldin/keyin solishtiring.
+
+## Worker -> Ample so'rovlari gzip 9 bilan siqiladi
+
+Nima: worker Ample'ga `/v2/pipeline` so'rovlarini (1 KB dan katta tana) `Content-Encoding: gzip` bilan, gzip 9 da siqib yuboradi (`worker/src/lib.rs`: `pipeline_post`, `gzip9`; `turso_exec`/`turso_batch`/`turso_many` shu orqali). Turso'ga HECH QACHON siqilmaydi (faqat `AMPLE_URL` manziliga).
+Xavfsizlik: eski Ample serveri gzip tanani JSON deb o'qib, yozuvni JIMGINA tashlab yuborardi. Shu sabab ruxsat avval bilinadi: yangi `tgstore-jr` HAR javobga `x-req-gzip: 1` qo'shadi; worker faqat shu sarlavhani ko'rgandan keyin siqa boshlaydi (izolyat xotirasida belgi). Eski server sarlavha bermaydi — worker siqmaydi. Server `415` desa belgi o'chadi va so'rov siqilmasdan qayta yuboriladi.
+Server (`ample-rs/src/main.rs`): `decode_request` (gzip, chegara 64 MiB, noma'lum kodlash yoki buzuq gzip — 415), `handle` o'rami, testlar.
+Tartib: avval Ample'dagi `tgstore-jr` yangilanadi (qayta joylash), siqish o'sha paytdan boshlanadi; worker oldin deploy bo'lsa ham zarar yo'q.
+Eslatma: Ample eski binarga qaytarilsa, ishlayotgan izolyatlarda belgi bir muddat `true` qolishi mumkin — qaytarishdan keyin worker'ni qayta deploy qiling.

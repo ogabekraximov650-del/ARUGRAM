@@ -678,6 +678,55 @@ fn db_endpoint(env: &Env, sqls: &[&str]) -> Result<(String, String)> {
     Ok((env.secret("TURSO_URL")?.to_string(), env.secret("TURSO_TOKEN")?.to_string()))
 }
 
+thread_local! {
+    /// UZ: Ample yangi (so'rov gzip'ini ochadigan) versiyada ekani — javobda `x-req-gzip` sarlavhasi ko'ringandan keyin `true`. Eski server gzip tanasini JSON deb o'qib, yozuvni jimgina tashlab yuborardi, shuning uchun
+    ///     avval ruxsat bilinadi, keyin siqiladi. EN: set once an Ample response carries `x-req-gzip` (old servers would misread gzip bodies). RU: flag stavitsya posle zagolovka `x-req-gzip`.
+    static AMPLE_GZ: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// UZ: gzip 9 (foydalanuvchi talabi). EN: gzip level 9. RU: gzip uroven 9.
+fn gzip9(data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+    let mut e = flate2::write::GzEncoder::new(Vec::with_capacity(data.len() / 4 + 32), flate2::Compression::best());
+    let _ = e.write_all(data);
+    e.finish().unwrap_or_default()
+}
+
+/// UZ: bazaga `/v2/pipeline` so'rovi. Ample'ga (1 KB dan katta tana) gzip 9 bilan siqib yuboriladi; Turso'ga hech qachon siqilmaydi.
+///     Server `415` desa (siqilgan tanani ochmadi) — belgi o'chadi va shu so'rov siqilmasdan qayta yuboriladi (415 da yozuv bajarilmagan bo'ladi).
+/// EN: POSTs a pipeline request; bodies over 1 KB go to Ample gzip-9 compressed (never to Turso); on 415 the flag is cleared and the request is resent plain.
+/// RU: POST pipeline; k Ample >1 KB otpravlyaetsya gzip-9; pri 415 povtor bez szhatiya.
+async fn pipeline_post(env: &Env, url: &str, token: &str, body: String) -> Result<Response> {
+    let ample = env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default();
+    let is_ample = !ample.is_empty() && url.trim_end_matches('/') == ample.trim_end_matches('/');
+    let mut gz = is_ample && body.len() >= 1024 && AMPLE_GZ.with(|f| f.get());
+    loop {
+        let mut h = Headers::new();
+        h.set("Authorization", &format!("Bearer {token}"))?;
+        h.set("Content-Type", "application/json")?;
+        let payload: worker::wasm_bindgen::JsValue = if gz {
+            h.set("Content-Encoding", "gzip")?;
+            worker::js_sys::Uint8Array::from(&gzip9(body.as_bytes())[..]).into()
+        } else {
+            body.clone().into()
+        };
+        let req = Request::new_with_init(
+            &format!("{url}/v2/pipeline"),
+            RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(payload)),
+        )?;
+        let resp = Fetch::Request(req).send().await?;
+        if is_ample && resp.headers().get("x-req-gzip").ok().flatten().is_some() {
+            AMPLE_GZ.with(|f| f.set(true));
+        }
+        if gz && resp.status_code() == 415 {
+            AMPLE_GZ.with(|f| f.set(false));
+            gz = false;
+            continue;
+        }
+        return Ok(resp);
+    }
+}
+
 async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> {
     let (url, token) = db_endpoint(env, &[sql])?;
     let body = json!({
@@ -686,15 +735,7 @@ async fn turso_exec(env: &Env, sql: &str, args: Vec<TursoArg>) -> Result<Value> 
             {"type": "close"}
         ]
     });
-    let mut h = Headers::new();
-    h.set("Authorization", &format!("Bearer {token}"))?;
-    h.set("Content-Type", "application/json")?;
-    let req = Request::new_with_init(
-        &format!("{url}/v2/pipeline"),
-        RequestInit::new().with_method(Method::Post).with_headers(h)
-            .with_body(Some(body.to_string().into())),
-    )?;
-    let mut resp = Fetch::Request(req).send().await?;
+    let mut resp = pipeline_post(env, &url, &token, body.to_string()).await?;
     let data: Value = resp.json().await?;
     let r = &data["results"][0];
     if r["type"] == "error" {
@@ -713,15 +754,7 @@ async fn turso_batch(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<()> {
         json!({"type": "execute", "stmt": {"sql": sql, "args": args}})
     }).collect();
     reqs.push(json!({"type": "close"}));
-    let mut h = Headers::new();
-    h.set("Authorization", &format!("Bearer {token}"))?;
-    h.set("Content-Type", "application/json")?;
-    let req = Request::new_with_init(
-        &format!("{url}/v2/pipeline"),
-        RequestInit::new().with_method(Method::Post).with_headers(h)
-            .with_body(Some(json!({"requests": reqs}).to_string().into())),
-    )?;
-    let mut r = Fetch::Request(req).send().await?;
+    let mut r = pipeline_post(env, &url, &token, json!({"requests": reqs}).to_string()).await?;
 
     // ── HAR BIR BUYRUQ NATIJASI TEKSHIRILADI ──────────────────
     //
@@ -762,15 +795,7 @@ async fn turso_many(env: &Env, stmts: &[(&str, Vec<TursoArg>)]) -> Result<Vec<Va
         json!({"type": "execute", "stmt": {"sql": sql, "args": args}})
     }).collect();
     reqs.push(json!({"type": "close"}));
-    let mut h = Headers::new();
-    h.set("Authorization", &format!("Bearer {token}"))?;
-    h.set("Content-Type", "application/json")?;
-    let req = Request::new_with_init(
-        &format!("{url}/v2/pipeline"),
-        RequestInit::new().with_method(Method::Post).with_headers(h)
-            .with_body(Some(json!({"requests": reqs}).to_string().into())),
-    )?;
-    let mut r = Fetch::Request(req).send().await?;
+    let mut r = pipeline_post(env, &url, &token, json!({"requests": reqs}).to_string()).await?;
     let d: Value = r.json().await.unwrap_or(json!({}));
     let mut out = Vec::with_capacity(stmts.len());
     if let Some(list) = d["results"].as_array() {
@@ -16404,5 +16429,21 @@ mod rowobj_tests {
         // Kasr son matn ko'rinishida kelsa ham o'qiladi.
         let o2 = row_to_obj(&cols[..1], &[json!({"type": "float", "value": "10.5"})]);
         assert_eq!(o2["n"].as_f64(), Some(10.5));
+    }
+}
+
+#[cfg(test)]
+mod gzip_tests {
+    use super::gzip9;
+    use std::io::Read;
+
+    #[test]
+    fn gzip9_round_trip_and_smaller() {
+        let data = br#"{"type":"execute","stmt":{"sql":"INSERT INTO epizod_db (anime_id,season_id) VALUES (?,?)","args":[{"type":"integer","value":"1"}]}},"#.repeat(60);
+        let z = gzip9(&data);
+        assert!(z.len() < data.len() / 4, "siqilmadi: {} -> {}", data.len(), z.len());
+        let mut back = Vec::new();
+        flate2::read::GzDecoder::new(&z[..]).read_to_end(&mut back).unwrap();
+        assert_eq!(back, data);
     }
 }

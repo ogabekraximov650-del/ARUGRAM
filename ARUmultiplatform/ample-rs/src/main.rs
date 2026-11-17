@@ -65,7 +65,38 @@ pub(crate) fn compress_body(accept: &str, body: &[u8]) -> Option<(&'static str, 
     None
 }
 
+/// UZ: gzip bilan kelgan so'rov tanasini ochadi (worker Ample'ga so'rovlarni gzip 9 bilan siqib yuboradi). Hajm chegarasi 64 MiB (zip-bomba himoyasi). Noma'lum kodlash yoki buzuq gzip — `Err`.
+/// EN: decodes a gzip request body (worker sends gzip-9 requests); capped at 64 MiB (zip-bomb guard); unknown encodings or corrupt gzip are errors.
+/// RU: raspakovyvaet gzip-telo zaprosa; limit 64 MiB; neizvestnoe kodirovanie ili povrezhdenie — oshibka.
+pub(crate) fn decode_request(enc: &str, body: &[u8]) -> Result<Vec<u8>, &'static str> {
+    use std::io::Read;
+    const CAP: u64 = 64 * 1024 * 1024;
+    match enc.trim().to_ascii_lowercase().as_str() {
+        "" | "identity" => Ok(body.to_vec()),
+        "gzip" | "x-gzip" => {
+            let mut out = Vec::new();
+            let n = flate2::read::GzDecoder::new(body).take(CAP + 1).read_to_end(&mut out).map_err(|_| "bad gzip")?;
+            if n as u64 > CAP { return Err("too large"); }
+            Ok(out)
+        }
+        _ => Err("unsupported content-encoding"),
+    }
+}
+
+/// UZ: tashqi kirish: so'rov tanasi gzip bo'lsa ochiladi; HAR javobga `x-req-gzip: 1` qo'shiladi (worker shu belgi bo'yicha gzip so'rov yuborishni boshlaydi — eski server bu belgini bermaydi).
+/// EN: entry point: decodes gzip bodies; every response carries `x-req-gzip: 1` (the worker starts gzip requests only after seeing it).
+/// RU: vhod: raspakovka gzip; kazhdyj otvet imeet `x-req-gzip: 1`.
 async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
+    let enc = headers.get("content-encoding").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let mut resp = match decode_request(&enc, &body) {
+        Ok(b) => handle_resp(State(app), method, uri, headers, Bytes::from(b)).await,
+        Err(why) => json_resp(415, json!({"message": why})),
+    };
+    resp.headers_mut().insert("x-req-gzip", axum::http::HeaderValue::from_static("1"));
+    resp
+}
+
+async fn handle_resp(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
     let accept = headers.get("accept-encoding").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
     let resp = handle_inner(State(app), method, uri, headers, body).await;
     if accept.is_empty() { return resp; }
@@ -216,6 +247,38 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.expect("port band");
     log(&format!("tgstore-jr (rust) listening {}", port));
     axum::serve(listener, router).await.unwrap();
+}
+
+#[cfg(test)]
+mod request_gzip_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn gz(data: &[u8]) -> Vec<u8> {
+        let mut e = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+        e.write_all(data).unwrap();
+        e.finish().unwrap()
+    }
+
+    #[test]
+    fn plain_and_identity_pass_through() {
+        assert_eq!(decode_request("", b"abc").unwrap(), b"abc");
+        assert_eq!(decode_request("identity", b"abc").unwrap(), b"abc");
+    }
+
+    #[test]
+    fn gzip_body_is_decoded() {
+        let data = br#"{"requests":[{"type":"execute"}]}"#.repeat(100);
+        assert_eq!(decode_request("gzip", &gz(&data)).unwrap(), data);
+        assert_eq!(decode_request(" GZIP ", &gz(&data)).unwrap(), data);
+    }
+
+    #[test]
+    fn broken_or_unknown_encoding_is_rejected() {
+        assert!(decode_request("gzip", b"not gzip at all").is_err());
+        assert!(decode_request("br", b"abc").is_err());
+        assert!(decode_request("deflate", b"abc").is_err());
+    }
 }
 
 #[cfg(test)]
