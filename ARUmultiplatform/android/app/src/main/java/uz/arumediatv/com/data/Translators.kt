@@ -60,22 +60,37 @@ object TranslatorRepo {
         c ?: runCatching { file().takeIf { it.exists() }?.readText()?.let(::parseList) }.getOrNull()
     }
 
+    private val pages = java.util.concurrent.ConcurrentHashMap<Long, TranslatorPage>()
+
+    private fun pageFile(id: Long) = File(File(AppServices.appContext.filesDir, "cache").apply { mkdirs() }, "translator_page_$id.json")
+
+    private fun parsePage(text: String): TranslatorPage? = try {
+        val j = JSONObject(text)
+        val s = j.optJSONObject("stats")
+        val seasons = Json { ignoreUnknownKeys = true; isLenient = true }
+            .parseToJsonElement((j.optJSONArray("seasons") ?: JSONArray()).toString()).jsonArray.mapNotNull { it.toSeason() }
+        TranslatorPage(
+            translator = parse(j.getJSONObject("translator")),
+            stats = TranslatorStats(s?.optInt("anime") ?: 0, s?.optInt("episodes") ?: 0, s?.optLong("views") ?: 0L, s?.optDouble("rating") ?: 0.0),
+            seasons = seasons,
+        )
+    } catch (_: Exception) {
+        null
+    }
+
+    /** UZ: oldingi ochilishdan qolgan sahifa (xotira yoki disk) — ekran darhol to'ladi, yangisi fonda keladi. EN: last known page, shown instantly. */
+    suspend fun cachedPage(id: Long): TranslatorPage? = withContext(Dispatchers.IO) {
+        pages[id] ?: runCatching { pageFile(id).takeIf { it.exists() }?.readText()?.let(::parsePage) }.getOrNull()?.also { pages[id] = it }
+    }
+
+    /** Serverdan yangi sahifa; muvaffaqiyatli bo'lsa xotira va diskka saqlanadi. `null` — tarmoq xatosi (eskisi `cachedPage` da). */
     suspend fun page(id: Long): TranslatorPage? = withContext(Dispatchers.IO) {
         val (code, text) = Http.client.callText("${BuildConfig.API_BASE}/api/translators/$id/page")
         if (code != 200) return@withContext null
-        try {
-            val j = JSONObject(text)
-            val s = j.optJSONObject("stats")
-            val seasons = Json { ignoreUnknownKeys = true; isLenient = true }
-                .parseToJsonElement((j.optJSONArray("seasons") ?: JSONArray()).toString()).jsonArray.mapNotNull { it.toSeason() }
-            TranslatorPage(
-                translator = parse(j.getJSONObject("translator")),
-                stats = TranslatorStats(s?.optInt("anime") ?: 0, s?.optInt("episodes") ?: 0, s?.optLong("views") ?: 0L, s?.optDouble("rating") ?: 0.0),
-                seasons = seasons,
-            )
-        } catch (_: Exception) {
-            null
-        }
+        val p = parsePage(text) ?: return@withContext null
+        pages[id] = p
+        runCatching { pageFile(id).writeText(text) }
+        p
     }
 }
 

@@ -159,7 +159,10 @@ fun TranslatorScreen(translator: Translator, onBack: () -> Unit, onOpenSeason: (
     var page by remember { mutableStateOf<TranslatorPage?>(null) }
     var failed by remember { mutableStateOf(false) }
     LaunchedEffect(translator.id) {
-        page = TranslatorRepo.page(translator.id)
+        // Avval oxirgi saqlangan nusxa (darhol), keyin serverdan yangisi (jimgina almashadi).
+        TranslatorRepo.cachedPage(translator.id)?.let { page = it }
+        val fresh = TranslatorRepo.page(translator.id)
+        if (fresh != null) page = fresh
         failed = page == null
     }
     val t = page?.translator ?: translator
