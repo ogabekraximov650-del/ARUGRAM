@@ -165,6 +165,21 @@ private object AdminListCache {
     fun write(ctx: Context, key: String, text: String) { runCatching { file(ctx, key).writeText(text) } }
 }
 
+/**
+ * UZ: Ro'yxat joyini eslab qoladi. Tahrirlash ekranidan qaytganda (tarjimon / anime / bo'lim / qismlar ro'yxati) ro'yxat tepaga sakramaydi — qaysi joydan kirgan bo'lsangiz shu joydan chiqasiz.
+ * EN: remembers the list position per screen so that returning from an edit screen does not jump to the top.
+ * RU: zapominaet poziciyu spiska, chtoby posle vozvrata iz redaktora spisok ne prygal naverkh.
+ */
+private val keptListPos = HashMap<String, Pair<Int, Int>>()
+
+@Composable
+private fun rememberKeptListState(key: String): androidx.compose.foundation.lazy.LazyListState {
+    val (i, o) = keptListPos[key] ?: (0 to 0)
+    val st = androidx.compose.foundation.lazy.rememberLazyListState(i, o)
+    DisposableEffect(key) { onDispose { keptListPos[key] = st.firstVisibleItemIndex to st.firstVisibleItemScrollOffset } }
+    return st
+}
+
 private fun parseRows(text: String): List<JSONObject> = try { val a = JSONArray(text); (0 until a.length()).mapNotNull { a.optJSONObject(it) } } catch (_: Exception) { emptyList() }
 
 private val glassRow = RoundedCornerShape(18.dp)
@@ -275,7 +290,7 @@ fun AdminAnimeScreen(translator: JSONObject, onBack: () -> Unit, onOpenAnime: (J
                 Button(onClick = { scope.launch { load() } }, colors = ButtonDefaults.buttonColors(containerColor = AruColors.Accent, contentColor = Color.White)) { Text("Qayta urinish") }
             }
             items.isEmpty() -> MgmtEmpty(AruIcons.Movie, "Bu tarjimonda hali anime yo'q", "Pastdagi + tugmasi bilan qo'shing")
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), state = rememberKeptListState("anime:$trId"), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(items, key = { it.optLong("id") }) { a ->
                     Row(Modifier.fillMaxWidth().clip(glassRow).background(AruColors.Card).border(1.dp, AruColors.Border, glassRow).clickable { onOpenAnime(a) }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         MgmtPhoto(a.optString("photo_url"), 76, 14, 228)
@@ -486,7 +501,7 @@ fun AdminTranslatorsScreen(onBack: () -> Unit, onOpen: (JSONObject) -> Unit, onE
                 Button(onClick = { scope.launch { load() } }, colors = ButtonDefaults.buttonColors(containerColor = AruColors.Accent, contentColor = Color.White)) { Text("Qayta urinish") }
             }
             items.isEmpty() -> MgmtEmpty(AruIcons.Translate, "Hali tarjimon qo'shilmagan", "Pastdagi + tugmasi bilan qo'shing")
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), state = rememberKeptListState("translators"), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(items, key = { it.optLong("id") }) { t ->
                     val real = t.optLong("id") > 0
                     Row(Modifier.fillMaxWidth().clip(glassRow).background(AruColors.Card).border(1.dp, AruColors.Border, glassRow).clickable { onOpen(t) }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -587,7 +602,7 @@ fun AdminSeasonsScreen(anime: JSONObject, onBack: () -> Unit, onOpenSeason: (JSO
             loading -> MgmtLoading()
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xB3FFFFFF), fontSize = 14.sp) }
             items.isEmpty() -> MgmtEmpty(AruIcons.VideoLibrary, "Hali bo'lim qo'shilmagan", "Pastdagi + tugmasi orqali qo'sh")
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), state = rememberKeptListState("seasons:$animeId"), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(items, key = { it.optLong("season_id") }) { s ->
                     val bolim = s.optInt("bolim_id").takeIf { it > 0 } ?: s.optInt("season_id")
                     Row(Modifier.fillMaxWidth().clip(glassRow).background(AruColors.Card).border(1.dp, AruColors.Border, glassRow).clickable { onOpenSeason(s) }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -753,7 +768,7 @@ fun AdminEpisodesScreen(anime: JSONObject, season: JSONObject, onBack: () -> Uni
             loading -> MgmtLoading()
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xB3FFFFFF), fontSize = 14.sp) }
             items.isEmpty() -> MgmtEmpty(AruIcons.PlayCircleOutline, "Hali epizod qo'shilmagan", "Pastdagi + tugmasi orqali qo'sh")
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), state = rememberKeptListState("eps:$animeId:$seasonId"), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(items, key = { it.optLong("epizod_id") }) { e ->
                     val num = if (e.has("epizod_number")) e.optInt("epizod_number").toString() else "?"
                     val name = e.optString("epizod_name").takeIf { it != "null" }.orEmpty()
