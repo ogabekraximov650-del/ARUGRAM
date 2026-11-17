@@ -7454,3 +7454,10 @@ Tekshirish (qurilmada): havolani Telegramga yuborib bosing — ilova ochilib shu
 
 `arumediatv.pages.dev` (Telegram Mini App, `web/`) foydalanuvchi talabi bilan o'chirildi: `web-offline.yml` Pages loyihasini o'chiradi, `deploy-web.yml` endi faqat qo'lda ("Run workflow") ishga tushadi (loyiha yo'q bo'lsa o'zi qayta yaratiladi). Havola saytidagi (`link-web/`) "Saytda ochish" tugmalari olib tashlandi. `worker/src/tma.rs` dagi `WEB_URL` o'zgarmadi (qayta yoqilganda ishlaydi).
 Rejada: APK ni 20 000 000 baytlik bo'laklarga bo'lib Telegram'ga (bot API) saqlash, havola sahifasida "APKni yuklab olish" tugmasi, worker bo'laklarni Cloudflare keshidan bitta fayl qilib beradi.
+
+## Kodlash boti: tez-tez bosilganda xavfsiz (atomik qism qo'shish)
+
+Muammo: "Anibla orqali" qism tugmalari tez bosilsa, `encbot_register` ID ni `MAX(epizod_id)+1` bilan alohida so'rovda hisoblardi — ikki parallel so'rov bir ID oladi, ikkinchisi PRIMARY KEY xatosi bilan "Qism qo'shib bo'lmadi" berardi; bir raqam ikki marta ham qo'shilishi mumkin edi.
+Tuzatish: yangi qism BITTA `INSERT ... SELECT ... WHERE NOT EXISTS ... RETURNING epizod_id` bilan (ID va "bu raqam yo'q" sharti atomik); agar shu raqamni boshqa so'rov hozirgina qo'shgan bo'lsa — u "bor qism" yo'liga (almashtirish) o'tadi. Anibla oqimida har bosishga bitta xabar (avval ikkita edi) — Telegram chatga xabar chegarasi.
+Qolgan cheklov: `anibla_nav` (tanlangan anime/fasl) bitta umumiy yozuv — ikki admin bir vaqtda ishlasa bir-birining tanlovini almashtiradi. Navbat tartibi tez bosishda kafolatlanmaydi (Telegram webhook'lari parallel).
+Fayllar: `worker/src/lib.rs` (`encbot_register`), `worker/src/anibla.rs` (`start`).

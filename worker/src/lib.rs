@@ -13470,10 +13470,45 @@ pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &
     let ov_name = if ch_msg > 0 { origin } else { "" };
 
     // Qism bormi (raqami bo'yicha).
-    let old = turso_exec(env,
-        "SELECT * FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_number=? LIMIT 1",
-        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(n)]).await
-        .ok().and_then(|r| first_row(&r));
+    let find = || async {
+        turso_exec(env,
+            "SELECT * FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_number=? LIMIT 1",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(n)]).await
+            .ok().and_then(|r| first_row(&r))
+    };
+    let mut old = find().await;
+    // UZ: Yangi qism ATOMIK qo'shiladi: ID (`eng kattasi + 1`) va "shu raqam yo'q" sharti BITTA so'rovda — tugmalar tez-tez bosilsa ham
+    //     ikki qism bir ID ni olmaydi (avval "baza xatosi" chiqardi) va bir raqam ikki marta qo'shilmaydi.
+    // EN: new episodes are inserted atomically (ID and the "number not present" check in ONE statement), so rapid taps neither collide on the ID nor duplicate a number.
+    // RU: novyj epizod dobavlyaetsya atomarno (ID i proverka nomera v odnom zaprose).
+    let mut fresh_id: Option<i64> = None;
+    if old.is_none() {
+        let ins = turso_exec(env,
+            "INSERT INTO epizod_db (anime_id,season_id,epizod_id,epizod_number,epizod_name,
+                url_360p,size_360p,key_360p,url_480p,size_480p,key_480p,
+                url_720p,size_720p,key_720p,url_1080p,size_1080p,key_1080p,
+                intro_1,intro_2,intro_3,intro_4,intro_5,intro_6,intro_7,intro_8,intro_9,intro_10,
+                created_at,origin_video,origin_key,origin_size,origin_height)
+              SELECT ?,?,(SELECT COALESCE(MAX(epizod_id),0)+1 FROM epizod_db),?,'','',0,'','',0,'','',0,'','',0,'','','','','','','','','','','',?,?,'',?,?
+              WHERE NOT EXISTS (SELECT 1 FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_number=?)
+              RETURNING epizod_id",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(n),
+                 TursoArg::int(now), TursoArg::text(ov_name), TursoArg::int(size), TursoArg::int(height),
+                 TursoArg::int(a), TursoArg::int(s), TursoArg::int(n)]).await;
+        match ins {
+            Err(_) => return "\u{274C} Qism qo'shib bo'lmadi (baza xatosi).".into(),
+            Ok(r) => fresh_id = first_row(&r).map(|x| jint(&x, "epizod_id")).filter(|e| *e > 0),
+        }
+        if fresh_id.is_some() {
+            let _ = turso_exec(env,
+                "UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
+                   WHERE anime_id=? AND season_id=?",
+                vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(a), TursoArg::int(s)]).await;
+        } else {
+            // Shu raqamni boshqa so'rov hozirgina qo'shib qo'ygan — endi u "bor qism" (almashtirish yo'li).
+            old = find().await;
+        }
+    }
     let replaced = old.is_some();
     let e = match &old {
         Some(ep) => {
@@ -13501,28 +13536,10 @@ pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &
             }
             e
         }
-        None => {
-            let Ok(e) = next_epizod_id(env).await else {
-                return "\u{274C} Baza xatosi.".into();
-            };
-            let r = turso_batch(env, &[
-                ("INSERT INTO epizod_db (anime_id,season_id,epizod_id,epizod_number,epizod_name,
-                    url_360p,size_360p,key_360p,url_480p,size_480p,key_480p,
-                    url_720p,size_720p,key_720p,url_1080p,size_1080p,key_1080p,
-                    intro_1,intro_2,intro_3,intro_4,intro_5,intro_6,intro_7,intro_8,intro_9,intro_10,
-                    created_at,origin_video,origin_key,origin_size,origin_height)
-                  VALUES (?,?,?,?,'','',0,'','',0,'','',0,'','',0,'','','','','','','','','','','',?,?,'',?,?)",
-                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(n),
-                      TursoArg::int(now), TursoArg::text(ov_name), TursoArg::int(size), TursoArg::int(height)]),
-                ("UPDATE season_db SET epizod_count=(SELECT COUNT(*) FROM epizod_db WHERE anime_id=? AND season_id=?)
-                   WHERE anime_id=? AND season_id=?",
-                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(a), TursoArg::int(s)]),
-            ]).await;
-            if r.is_err() {
-                return "\u{274C} Qism qo'shib bo'lmadi (baza xatosi).".into();
-            }
-            e
-        }
+        None => match fresh_id {
+            Some(e) => e,
+            None => return "\u{274C} Baza xatosi.".into(),
+        },
     };
     // Navbat: bor ish (ishlayotgan bo'lsa ham) yangisiga almashadi —
     // eski run'ning keyingi yozuvlari 409 bilan rad etiladi.

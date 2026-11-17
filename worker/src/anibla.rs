@@ -1832,8 +1832,9 @@ async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &
                 format!("\u{2705} {} \u{2014} {n}-qism. Kodlash run'i videoni saytdan yuklab, darhol H.265 da kodlaydi \
                          (Telegram'ga asl video yuklanmaydi).", html_escape(label))
             } else { "\u{26A0}\u{FE0F} Qo'shilmadi \u{2014} sababi pastda.".to_string() };
-            let _ = encbot_api(env, "editMessageText", edit(line)).await;
-            encbot_send(env, chat, &res, None).await;
+            // UZ: bitta xabar (avval ikkita edi): tugmalar tez bosilganda Telegram'ning chatga xabar chegarasiga urilmaslik uchun.
+            // EN: one message instead of two, to stay under Telegram's per-chat message rate limit on rapid taps.
+            let _ = encbot_api(env, "editMessageText", edit(format!("{line}\n\n{}", html_escape(&res)))).await;
             return;
         }
     }
