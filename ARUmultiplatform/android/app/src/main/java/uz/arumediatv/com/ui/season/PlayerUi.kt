@@ -277,15 +277,16 @@ fun PlayerControls(
         if (leftAccum > 0) SeekBadge(leftAccum, true, Modifier.align(androidx.compose.ui.BiasAlignment(-0.5f, 0f)))
         if (rightAccum > 0) SeekBadge(rightAccum, false, Modifier.align(androidx.compose.ui.BiasAlignment(0.5f, 0f)))
 
-        // Intro o'tkazish
+        // Intro o'tkazish: chap yuqori chetda, apelsin rangda. To'liq ekranda tepa qator (orqaga/nom) ko'ringanda uning ostiga tushadi.
         if (introActive && !locked) {
             Text(
                 "Introni o'tkazish ›",
-                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 14.dp + edge, bottom = if (showAll) (if (fullscreen) 120.dp else 40.dp) else 16.dp)
-                    .clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.65f))
+                    .align(Alignment.TopStart)
+                    .then(if (fullscreen) Modifier.statusBarsPadding() else Modifier)
+                    .padding(start = 14.dp + edge, top = if (fullscreen && showAll) 64.dp else 12.dp)
+                    .clip(RoundedCornerShape(12.dp)).background(AruColors.Accent)
                     .clickable(onClick = onSkipIntro).padding(horizontal = 14.dp, vertical = 9.dp),
             )
         }
