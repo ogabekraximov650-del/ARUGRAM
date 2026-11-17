@@ -65,7 +65,7 @@ pub(crate) fn compress_body(accept: &str, body: &[u8]) -> Option<(&'static str, 
     None
 }
 
-/// UZ: gzip bilan kelgan so'rov tanasini ochadi (worker Ample'ga so'rovlarni gzip 9 bilan siqib yuboradi). Hajm chegarasi 64 MiB (zip-bomba himoyasi). Noma'lum kodlash yoki buzuq gzip — `Err`.
+/// UZ: gzip yoki Brotli bilan kelgan so'rov tanasini ochadi (worker Ample'ga so'rovlarni Brotli 6 bilan siqib yuboradi; gzip ham qabul qilinadi). Hajm chegarasi 64 MiB (zip-bomba himoyasi). Noma'lum kodlash yoki buzuq gzip — `Err`.
 /// EN: decodes a gzip request body (worker sends gzip-9 requests); capped at 64 MiB (zip-bomb guard); unknown encodings or corrupt gzip are errors.
 /// RU: raspakovyvaet gzip-telo zaprosa; limit 64 MiB; neizvestnoe kodirovanie ili povrezhdenie — oshibka.
 pub(crate) fn decode_request(enc: &str, body: &[u8]) -> Result<Vec<u8>, &'static str> {
@@ -79,11 +79,17 @@ pub(crate) fn decode_request(enc: &str, body: &[u8]) -> Result<Vec<u8>, &'static
             if n as u64 > CAP { return Err("too large"); }
             Ok(out)
         }
+        "br" => {
+            let mut out = Vec::new();
+            let n = brotli::Decompressor::new(body, 4096).take(CAP + 1).read_to_end(&mut out).map_err(|_| "bad brotli")?;
+            if n as u64 > CAP { return Err("too large"); }
+            Ok(out)
+        }
         _ => Err("unsupported content-encoding"),
     }
 }
 
-/// UZ: tashqi kirish: so'rov tanasi gzip bo'lsa ochiladi; HAR javobga `x-req-gzip: 1` qo'shiladi (worker shu belgi bo'yicha gzip so'rov yuborishni boshlaydi — eski server bu belgini bermaydi).
+/// UZ: tashqi kirish: so'rov tanasi gzip bo'lsa ochiladi; HAR javobga `x-req-gzip: 1` va `x-req-br: 1` qo'shiladi (worker shu belgi bo'yicha siqilgan so'rov yuborishni boshlaydi — eski server bu belgilarni bermaydi).
 /// EN: entry point: decodes gzip bodies; every response carries `x-req-gzip: 1` (the worker starts gzip requests only after seeing it).
 /// RU: vhod: raspakovka gzip; kazhdyj otvet imeet `x-req-gzip: 1`.
 async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
@@ -93,6 +99,7 @@ async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: 
         Err(why) => json_resp(415, json!({"message": why})),
     };
     resp.headers_mut().insert("x-req-gzip", axum::http::HeaderValue::from_static("1"));
+    resp.headers_mut().insert("x-req-br", axum::http::HeaderValue::from_static("1"));
     resp
 }
 
@@ -274,9 +281,21 @@ mod request_gzip_tests {
     }
 
     #[test]
+    fn brotli_body_is_decoded() {
+        let data = br#"{"requests":[{"type":"execute"}]}"#.repeat(100);
+        let mut out = Vec::new();
+        {
+            let mut w = brotli::CompressorWriter::new(&mut out, 4096, 6, 22);
+            w.write_all(&data).unwrap();
+            w.flush().unwrap();
+        }
+        assert_eq!(decode_request("br", &out).unwrap(), data);
+    }
+
+    #[test]
     fn broken_or_unknown_encoding_is_rejected() {
         assert!(decode_request("gzip", b"not gzip at all").is_err());
-        assert!(decode_request("br", b"abc").is_err());
+        assert!(decode_request("br", b"\x00\x01 not brotli \xff").is_err());
         assert!(decode_request("deflate", b"abc").is_err());
     }
 }

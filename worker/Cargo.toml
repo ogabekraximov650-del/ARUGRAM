@@ -9,8 +9,8 @@ crate-type = ["cdylib"]
 [dependencies]
 # Cloudflare Workers Rust SDK — worker-build talab qiladigan versiya
 worker = "0.9.0"
-# Ample'ga yuboriladigan so'rovlarni gzip bilan siqish (sof Rust, WASM'ga mos).
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Ample'ga yuboriladigan so'rovlarni Brotli 6 bilan siqish (sof Rust, WASM'ga mos).
+brotli = { version = "8", default-features = false, features = ["std"] }
 # Oqim ichida (sanovchi quvurda) fon vazifasini boshlash uchun
 wasm-bindgen-futures = "0.4"
 # `vd::warm`: joriy bo'lak oqayotganda keyingisining ulanishini parallel ochish (`join`).

@@ -7476,3 +7476,10 @@ Xavfsizlik: eski Ample serveri gzip tanani JSON deb o'qib, yozuvni JIMGINA tashl
 Server (`ample-rs/src/main.rs`): `decode_request` (gzip, chegara 64 MiB, noma'lum kodlash yoki buzuq gzip — 415), `handle` o'rami, testlar.
 Tartib: avval Ample'dagi `tgstore-jr` yangilanadi (qayta joylash), siqish o'sha paytdan boshlanadi; worker oldin deploy bo'lsa ham zarar yo'q.
 Eslatma: Ample eski binarga qaytarilsa, ishlayotgan izolyatlarda belgi bir muddat `true` qolishi mumkin — qaytarishdan keyin worker'ni qayta deploy qiling.
+
+## Worker -> Ample so'rovlari endi Brotli 6 bilan (gzip 9 o'rniga)
+
+O'zgarish: worker Ample'ga 1 KB dan katta `/v2/pipeline` so'rovlarini Brotli 6 bilan siqadi (`worker/src/lib.rs`: `brotli6`, `pipeline_post`, belgi `AMPLE_BR`); avvalgi gzip 9 olib tashlandi. Sabab: Ample serverida o'lchov — Brotli 6: 23 673 bayt/4,7 ms, gzip 9: 28 303 bayt/5,0 ms (16% kichik, biroz tezroq). Cloudflare `CompressionStream` Brotli'ni bilmaydi, shuning uchun sof Rust `brotli` kutubxonasi WASM'ga yig'iladi.
+Xavfsizlik avvalgidek: yangi `tgstore-jr` har javobga `x-req-br: 1` (va `x-req-gzip: 1`) qo'shadi; worker faqat shu sarlavhani ko'rgandan keyin siqadi, eski server sarlavha bermaydi. Server `415` desa belgi o'chadi va so'rov siqilmasdan qayta yuboriladi. Turso'ga HECH QACHON siqilmaydi.
+Ample tomoni (`ample-rs/src/main.rs`): `decode_request` endi `br` ni ham ochadi (gzip ham qoladi), chegara 64 MiB.
+Eslatma: `Content-Encoding: br` so'rovlarini faqat yangi `tgstore-jr` ochadi — Ample'ni eski binarga qaytarsangiz, worker'ni qayta deploy qiling (belgi ishlayotgan izolyatlarda `true` qolishi mumkin).
