@@ -9,13 +9,12 @@ val ciVersionCode = (System.getenv("VERSION_CODE") ?: "1").toIntOrNull() ?: 1
 val ciKeystore = System.getenv("KS_FILE") ?: "${rootDir}/../../ci/release.keystore"
 val ciStorePass = System.getenv("KS_PASS")?.takeIf { it.isNotBlank() } ?: "arumedia"
 
-// AdMob (reklama): foydalanuvchining HAQIQIY identifikatorlari (ular APK ichida ochiq turadi, sir emas). CI'da `ADMOB_APP_ID` / `ADMOB_REWARDED_ID` Secret'lari
-// bo'lsa ular ustun turadi (masalan, Google'ning SINOV ID'lari bilan sinash uchun: ca-app-pub-3940256099942544~3347511713 va .../5224354917).
+// AdMob (reklama). CI'da `ADMOB_APP_ID` va `ADMOB_REWARDED_ID` GitHub Secret'lardan keladi; bo'lmasa Google'ning RASMIY SINOV identifikatorlari ishlatiladi
+// (test reklama ko'rsatiladi, pul tushmaydi). Haqiqiy identifikatorlarni AdMob panelidan olib, shu ikki Secret'ga yozing.
 val testAdmobApp = "ca-app-pub-3940256099942544~3347511713"
-val prodAdmobApp = "ca-app-pub-8901205768474122~2994428955"
-val prodAdmobRewarded = "ca-app-pub-8901205768474122/4115938931"
-val admobApp = System.getenv("ADMOB_APP_ID")?.takeIf { it.isNotBlank() } ?: prodAdmobApp
-val admobRewarded = System.getenv("ADMOB_REWARDED_ID")?.takeIf { it.isNotBlank() } ?: prodAdmobRewarded
+val testAdmobRewarded = "ca-app-pub-3940256099942544/5224354917"
+val admobApp = System.getenv("ADMOB_APP_ID")?.takeIf { it.isNotBlank() } ?: testAdmobApp
+val admobRewarded = System.getenv("ADMOB_REWARDED_ID")?.takeIf { it.isNotBlank() } ?: testAdmobRewarded
 
 // `-PonlyAbi=armeabi-v7a` — faqat 32 bitli APK (CI'da "Admin 32 bit" uchun); bo'lmasa 32+64 bit.
 val onlyAbi = (project.findProperty("onlyAbi") as String?)?.takeIf { it.isNotBlank() }

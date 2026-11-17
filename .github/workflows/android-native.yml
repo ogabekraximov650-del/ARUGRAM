@@ -28,7 +28,7 @@ jobs:
         working-directory: ARUmultiplatform/android
     env:
       VERSION_CODE: ${{ github.run_number }}
-      # AdMob: Secret bo'sh bo'lsa build.gradle.kts dagi haqiqiy identifikatorlar ishlatiladi (Secret — sinov ID'si bilan almashtirish uchun).
+      # AdMob: bo'sh bo'lsa Google'ning rasmiy SINOV identifikatorlari ishlatiladi (test reklama, pul tushmaydi).
       ADMOB_APP_ID: ${{ secrets.ADMOB_APP_ID }}
       ADMOB_REWARDED_ID: ${{ secrets.ADMOB_REWARDED_ID }}
 
