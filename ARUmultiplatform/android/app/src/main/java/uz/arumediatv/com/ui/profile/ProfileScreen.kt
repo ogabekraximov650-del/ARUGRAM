@@ -476,11 +476,18 @@ private fun AdButton() {
     val st by AppServices.billing.state.collectAsStateWithLifecycle()
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { uz.arumediatv.com.data.RewardedAds.ensureInit(ctx) }
+    // Obuna (yoki reklama vaqti) tugaguncha yangi reklama ko'rib bo'lmaydi: muddat tugagan zahoti tugma yana ochiladi.
+    LaunchedEffect(st.until) {
+        now = System.currentTimeMillis()
+        if (st.until > now) { kotlinx.coroutines.delay(st.until - now + 200); now = System.currentTimeMillis() }
+    }
+    val locked = st.until > now
     val shape = RoundedCornerShape(18.dp)
     Row(
-        Modifier.fillMaxWidth().clip(shape).background(Color.White.copy(alpha = if (busy) 0.05f else 0.09f)).border(1.dp, AruColors.Accent.copy(alpha = 0.55f), shape)
-            .clickable(enabled = !busy) {
+        Modifier.fillMaxWidth().clip(shape).background(Color.White.copy(alpha = if (busy || locked) 0.04f else 0.09f)).border(1.dp, AruColors.Accent.copy(alpha = if (locked) 0.25f else 0.55f), shape)
+            .clickable(enabled = !busy && !locked) {
                 var a: android.content.Context? = ctx
                 while (a is android.content.ContextWrapper && a !is android.app.Activity) a = a.baseContext
                 val act = a as? android.app.Activity
@@ -500,7 +507,7 @@ private fun AdButton() {
         Column(Modifier.weight(1f)) {
             Text(if (busy) "Reklama ochilmoqda..." else "Bepul tomosha qilish uchun reklama ko'rish", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2)
             Text(
-                msg ?: "Reklamani oxirigacha ko'ring — obuna muddatiga 1 soat qo'shiladi",
+                msg ?: if (locked) "Obuna yoki vaqt tugaguncha reklama ko'rib bo'lmaydi" else "Reklamani oxirigacha ko'ring — obuna muddatiga 1 soat qo'shiladi",
                 color = if (msg != null) Color(0xFFFF8A80) else Color.White.copy(alpha = 0.7f), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp),
             )
         }

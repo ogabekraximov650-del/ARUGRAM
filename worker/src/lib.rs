@@ -6897,7 +6897,7 @@ async fn billing_webhook(mut req: Request, env: &Env) -> Result<Response> {
 /// POST /api/billing/ad-reward — reklama oxirigacha ko'rilgach obuna muddatiga 1 soat qo'shiladi.
 ///
 /// UZ: muddat BAZADA (`subs_db`) cho'ziladi, shuning uchun bitta qurilmada reklama ko'rilsa, shu hisobning boshqa qurilmasida ham ishlaydi.
-/// Obuna faol bo'lsa — uning ustiga, bo'lmasa hozirdan boshlab. Suiiste'mol: ketma-ket so'rovlar orasida kamida 25 soniya va sutkada eng ko'pi 24 marta
+/// Faqat obuna/vaqt TUGAGANDAN keyin (faol bo'lsa 409). Suiiste'mol: ketma-ket so'rovlar orasida kamida 25 soniya va sutkada eng ko'pi 24 marta
 /// (24 soat). Reklamaning haqiqatan ko'rilganini AdMob server tomondan tasdiqlashi (SSV) keyinroq qo'shiladi.
 /// EN: extends the subscription end time in the DB by one hour per rewarded ad (works across devices); rate-limited.
 /// RU: prodlevaet srok podpiski v baze na 1 chas za reklamu (rabotaet na vsekh ustroystvakh); est limit chastoty.
@@ -6908,6 +6908,14 @@ async fn billing_ad_reward(req: Request, env: &Env) -> Result<Response> {
     let me = u["id"].as_i64().unwrap_or(0);
     let now = now_ms();
     let day_ago = now - 86_400_000;
+    // Obuna (yoki oldingi reklama vaqti) tugaguncha yangi reklama vaqti berilmaydi.
+    let cur = sub_until(env, me).await;
+    if cur > now {
+        return json_resp(&json!({
+            "error": "Obuna yoki ko'rish vaqti tugaguncha reklama ko'rib bo'lmaydi.",
+            "subscription_until": cur,
+        }), 409);
+    }
     let recent = turso_exec(env,
         "SELECT COUNT(*) AS n, COALESCE(MAX(created_at),0) AS last FROM billing_log
           WHERE user_id=? AND kind='ad' AND created_at>?",

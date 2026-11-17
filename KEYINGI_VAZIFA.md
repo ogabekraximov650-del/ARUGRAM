@@ -7516,3 +7516,8 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 - **Server:** yangi `POST /api/billing/ad-reward` (`billing_ad_reward`, `worker/src/lib.rs`): `subs_db.expires_at = MAX(joriy, hozir) + 1 soat`, shuning uchun reklama bitta qurilmada ko'rilsa boshqasida ham ishlaydi. Suiiste'molga qarshi: so'rovlar orasida kamida 25 soniya, sutkada eng ko'pi 24 ta (`billing_log`, `kind='ad'`). `GET /api/billing` tarixidan `kind='ad'` yozuvlari chiqarib tashlanadi (to'lov tarixida ko'rinmaydi).
 - **Ilova:** mahalliy `AdAccess` olib tashlandi; `BillingStore.adReward()` serverga yozadi va muddatni yangilaydi. Pleyer faqat `billing.until > hozir` bo'lsa ochiladi (bepul bo'lim ham reklama/obunasiz ochilmaydi; `play()` ham tekshiradi). Anime bosilganda "Anime ko'rish uchun reklama ko'rishingiz yoki obuna sotib olishingiz kerak" ekrani chiqadi.
 - **Ochiq xavf:** reklamaning haqiqatan ko'rilganini AdMob server tomondan tasdiqlashi (SSV) hali yo'q — o'zgartirilgan ilova so'rovni qo'lda yuborishi mumkin (limit bilan cheklangan). Obuna faol bo'lsa (reklama bilan ham) balansdan yangi obuna olib bo'lmaydi (eski qoida).
+
+## Reklama faqat vaqt tugagach; to'liq ekranda ogohlantirish (2026-11-17)
+
+- `billing_ad_reward` endi obuna/vaqt faol bo'lsa 409 qaytaradi (reklama vaqti yig'ilmaydi, faqat tugagach 1 soat beriladi). Profildagi reklama tugmasi muddat tugaguncha o'chiq turadi va tugagan zahoti ochiladi (`ProfileScreen.AdButton`).
+- "Reklama yoki obuna kerak" ekrani to'liq ekran (gorizontal) holatida ham to'g'ri chiqadi: kontent siljiydi, belgi yashiriladi, status paneli tagiga kirmaydi (`SubRequiredScreen(fullscreen)`).

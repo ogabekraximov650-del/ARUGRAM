@@ -469,7 +469,7 @@ fun SeasonScreen(
     val collapsed = commentsExpanded && pager.currentPage == 3 && !fullscreen
 
     if (!canWatch) {
-        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, adBusy = adBusy, adMsg = adMsg, adExpired = billing.until > 0, adReady = uz.arumediatv.com.data.RewardedAds.ready())
+        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, fullscreen = fullscreen, adBusy = adBusy, adMsg = adMsg, adExpired = billing.until > 0, adReady = uz.arumediatv.com.data.RewardedAds.ready())
     } else
     Column(Modifier.fillMaxSize().background(AruColors.Bg).then(if (fullscreen) Modifier else Modifier.statusBarsPadding())) {
         if (!fullscreen && !collapsed) {
@@ -700,18 +700,19 @@ private fun RowScope.NavBtn(icon: androidx.compose.ui.graphics.vector.ImageVecto
 
 /** "Obuna kerak" to'liq ekrani (Flutter `_SubRequiredScreen`). */
 @Composable
-private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit, onWatchAd: () -> Unit, adBusy: Boolean, adMsg: String?, adExpired: Boolean, adReady: Boolean) {
+private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit, onWatchAd: () -> Unit, fullscreen: Boolean, adBusy: Boolean, adMsg: String?, adExpired: Boolean, adReady: Boolean) {
     val scope = androidx.compose.runtime.rememberCoroutineScope()
-    Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding()) {
+    // To'liq ekran (gorizontal) holatida ham ko'rinadi: kontent siljiydi, panelga tegmaydi, belgi kichrayadi.
+    Column(Modifier.fillMaxSize().background(AruColors.Bg).then(if (fullscreen) Modifier else Modifier.statusBarsPadding())) {
         Box(Modifier.padding(start = 12.dp, top = 8.dp).clip(CircleShape).clickable(onClick = onBack).padding(10.dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
         }
-        Column(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Box(
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = if (fullscreen) 64.dp else 24.dp, vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            if (!fullscreen) Box(
                 Modifier.size(88.dp).clip(CircleShape).background(Brush.linearGradient(listOf(AruColors.Gold, AruColors.Accent2))),
                 contentAlignment = Alignment.Center,
             ) { Icon(AruIcons.WorkspacePremium, null, tint = AruColors.AccentTint, modifier = Modifier.size(44.dp)) }
-            Spacer(Modifier.height(22.dp))
+            if (!fullscreen) Spacer(Modifier.height(22.dp))
             Text("Reklama yoki obuna kerak", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.height(10.dp))
             Text(
