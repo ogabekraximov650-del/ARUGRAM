@@ -26,23 +26,11 @@ object RewardedAds {
     @Volatile var lastError: String = ""
         private set
 
-    @Volatile private var started = false
-
-    /**
-     * UZ: SDK ilova ochilganda EMAS, birinchi kerak bo'lganda (obuna so'raladigan ekran) fonda ishga tushadi — reklama kutubxonasi ilovaning ochilishiga hech qachon xalaqit bermasin.
-     * EN: the SDK starts lazily on first need (the subscription-required screen), never at app launch, so ads can never block startup.
-     * RU: SDK zapuskaetsya lenivo, a ne pri starte prilozheniya.
-     */
-    fun ensureInit(ctx: Context) {
-        if (started) return
-        started = true
+    /** Ilova ochilganda: SDK fonda ishga tushadi, keyin birinchi reklama yuklanadi. */
+    fun init(ctx: Context) {
         val app = ctx.applicationContext
         Thread {
-            try {
-                MobileAds.initialize(app) { main.post { preload(app) } }
-            } catch (e: Throwable) {
-                lastError = e.message.orEmpty()
-            }
+            runCatching { MobileAds.initialize(app) { main.post { preload(app) } } }
         }.start()
     }
 

@@ -170,7 +170,7 @@ fun SeasonScreen(
 
     val player = remember { AruPlayer(ctx) }
     // Reklama ruxsati tugadi (obuna ham, bepul bo'lim ham emas): ijro pauzaga qo'yiladi, joy saqlanadi.
-    LaunchedEffect(canWatch) { if (!canWatch) { player.pause(); uz.arumediatv.com.data.RewardedAds.ensureInit(ctx) } }
+    LaunchedEffect(canWatch) { if (!canWatch) player.pause() }
     var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
     var loadingEps by remember { mutableStateOf(true) }
     var seasons by remember { mutableStateOf<List<Season>>(emptyList()) }

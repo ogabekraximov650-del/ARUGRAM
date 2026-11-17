@@ -20,6 +20,7 @@ class AruApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         AppServices.init(this)
+        uz.arumediatv.com.data.RewardedAds.init(this)
         scope.launch {
             AppServices.auth.restore()
             AppServices.billing.restore()
