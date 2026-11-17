@@ -33,7 +33,6 @@ class AruApplication : Application() {
             prev?.uncaughtException(t, e)
         }
         AppServices.init(this)
-        uz.arumediatv.com.data.RewardedAds.init(this)
         scope.launch {
             AppServices.auth.restore()
             AppServices.billing.restore()
