@@ -249,7 +249,6 @@ private fun InfoRow(label: String, value: String) {
 
 // ══════════════════════════ QISMLAR ══════════════════════════
 
-private const val RANGE = 50
 
 private fun clockMs(ms: Long): String {
     val t = (ms / 1000).coerceAtLeast(0)
@@ -276,54 +275,21 @@ fun EpisodesTab(
         loading && episodes.isEmpty() -> LoadingBox()
         episodes.isEmpty() -> EmptyState(Icons.Filled.PlayArrow, "Qismlar topilmadi")
         else -> {
-            val asc = remember(episodes) { episodes.sortedBy { it.number } }
-            var newestFirst by rememberSaveable { mutableStateOf(true) }
-            val chunks = remember(asc) { asc.chunked(RANGE) }
-            val curChunk = remember(asc, currentId) { chunks.indexOfFirst { c -> c.any { it.id == currentId } }.coerceAtLeast(0) }
-            var chunk by rememberSaveable { mutableStateOf(-1) }
-            // Qism almashganda (pastdagi tugmalar yoki avto) tegishli oraliq o'zi tanlanadi.
-            androidx.compose.runtime.LaunchedEffect(currentId, chunks.size) { chunk = curChunk }
-            val sel = if (chunks.size > 1) chunk.coerceIn(0, chunks.size - 1) else 0
-            val shown = remember(chunks, sel, newestFirst) {
-                val l = chunks.getOrElse(sel) { asc }
-                if (newestFirst) l.asReversed() else l
-            }
+            // UZ: HAMMA qismlar bitta ro'yxatda (50 talab bo'lish va "Yangi/Eski" tugmasi yo'q): 1-qism pastda, oxirgi qism tepada.
+            // EN: one list with all episodes (no 50-chunks, no sort toggle): episode 1 at the bottom, the latest on top.
+            val shown = remember(episodes) { episodes.sortedBy { it.number }.asReversed() }
             val ls = androidx.compose.foundation.lazy.rememberLazyListState()
             androidx.compose.runtime.LaunchedEffect(currentId, shown) {
                 val i = shown.indexOfFirst { it.id == currentId }
                 if (i >= 0) ls.animateScrollToItem((i - 1).coerceAtLeast(0))
             }
             Column(Modifier.fillMaxSize()) {
-                androidx.compose.foundation.lazy.LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.padding(bottom = 8.dp),
-                ) {
-                    if (chunks.size > 1) {
-                        items(chunks.size) { i ->
-                            val c = chunks[i]
-                            ChipBtn("${c.first().number}–${c.last().number}", i == sel) { chunk = i }
-                        }
-                    }
-                    item { ChipBtn(if (newestFirst) "⇅ Yangi" else "⇅ Eski", false) { newestFirst = !newestFirst } }
-                }
                 LazyColumn(Modifier.fillMaxSize(), state = ls, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     items(shown, key = { it.id }) { e -> EpisodeTile(e, e.id == currentId, onPlay, onDeleted, onShare) }
                 }
             }
         }
     }
-}
-
-@Composable
-private fun ChipBtn(text: String, on: Boolean, onClick: () -> Unit) {
-    val sh = RoundedCornerShape(20.dp)
-    Box(
-        Modifier.height(40.dp).clip(sh)
-            .background(if (on) AruColors.AccentTint else AruColors.Card)
-            .border(1.dp, if (on) AruColors.Accent else AruColors.Border, sh)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp),
-        contentAlignment = Alignment.Center,
-    ) { Text(text, color = if (on) AruColors.Accent2 else Color.White.copy(alpha = 0.8f), fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1) }
 }
 
 @Composable
