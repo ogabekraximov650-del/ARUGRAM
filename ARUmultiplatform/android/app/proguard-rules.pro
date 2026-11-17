@@ -35,3 +35,10 @@
 # AGP 9: standart fayl endi "-dontoptimize" ni o'z ichiga olmaydi; avvalgi xatti-harakatni saqlash uchun (R8 optimizatsiyasini yoqish alohida, sinab ko'rib qilinadi).
 # AGP 9: the default file no longer carries -dontoptimize; keep the previous behaviour (enabling R8 optimization is a separate, tested step).
 -dontoptimize
+
+# AdMob (Google Mobile Ads SDK): R8 ishga tushirish komponenti (`MobileAdsInitProvider`) va reklama sinflarini kesib tashlamasin (release'da ilova ochilmay qolgan edi).
+# AdMob: keep the init provider and ad classes so R8 cannot strip them (the release build crashed on launch).
+-keep class com.google.android.gms.ads.** { *; }
+-keep class com.google.android.gms.internal.ads.** { *; }
+-dontwarn com.google.android.gms.ads.**
+-dontwarn com.google.android.gms.internal.ads.**

@@ -17,11 +17,14 @@ class AruApplication : Application() {
         else if (level >= TRIM_MEMORY_RUNNING_LOW) AppServices.images.trim(false)
     }
 
-    override fun onCreate() {
-        super.onCreate()
-        // UZ: Kotlin/Java halokatlari ham `last_crash.txt` ga yoziladi — keyingi ochilishda sababi ko'rsatiladi (Rust halokatlari bilan bir joyda). Ilova ochilmay yopilsa ham iz qoladi.
-        // EN: Kotlin/Java crashes are also written to `last_crash.txt` and shown on the next launch.
-        // RU: Java/Kotlin-padeniya takzhe pishutsya v `last_crash.txt`.
+    /**
+     * UZ: halokat yozuvchisi ENG ERTA nuqtada (`attachBaseContext`) o'rnatiladi — kutubxonalarning ishga tushish komponentlari (masalan AdMob `MobileAdsInitProvider`) `onCreate` dan OLDIN ishga tushadi,
+     * `onCreate` da o'rnatilsa ularning halokati yozilmay qolardi. Kotlin/Java halokatlari `last_crash.txt` ga va Download papkasiga yoziladi.
+     * EN: the crash logger is installed at the earliest point so provider-init crashes (e.g. AdMob) are captured too.
+     * RU: zapis padeniy ustanavlivaetsya v `attachBaseContext`, do provajderov bibliotek.
+     */
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
         val prev = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { t, e ->
             try {
@@ -32,6 +35,10 @@ class AruApplication : Application() {
             }
             prev?.uncaughtException(t, e)
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
         AppServices.init(this)
         scope.launch {
             AppServices.auth.restore()

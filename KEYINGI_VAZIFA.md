@@ -7492,3 +7492,8 @@ Qayta qo'shish rejasi: avval sabab aniqlanadi (`AruApplication` endi Kotlin/Java
 ## Halokat hisoboti Yuklashlar (Download) papkasiga ham saqlanadi
 
 `AruApplication` Kotlin/Java halokatini `last_crash.txt` (keyingi ochilishda ko'rsatiladi) bilan birga telefonning **Download** papkasiga ham yozadi: `arumediatv_xato_<sana_vaqt>.txt` (versiya, qurilma, Android, stack). Android 10+ da MediaStore orqali, ruxsat so'ralmaydi; eski Android'da `Android/data/uz.arumediatv.com/files/Download`. Maqsad: ilova ochilmay yopilsa ham fayl menejeridan topib yuborish mumkin bo'lsin.
+
+## Reklama (AdMob) qayta qo'shildi — R8 qoidalari bilan (2026-11-17)
+
+Oldingi AdMob build ilovani ochilmay qoldirgan edi (build 188 — reklamasiz — ishladi). Internet qidiruvi bo'yicha eng ehtimoliy sabab: R8 (`isMinifyEnabled = true`) AdMob'ning `MobileAdsInitProvider` va boshqa sinflarini kesib tashlaydi. Tuzatish: `proguard-rules.pro` ga `-keep class com.google.android.gms.ads.** { *; }` va `...internal.ads.**` qoidalari qo'shildi; halokat yozuvchisi `attachBaseContext` ga ko'chirildi (ContentProvider halokatlari ham `last_crash.txt` va Download papkasiga yoziladi). SDK avvalgidek faqat obuna so'raladigan ekranda ishga tushadi (`RewardedAds.ensureInit`).
+Agar yana ochilmasa: Download papkasidagi `arumediatv_xato_*.txt` aniq sababni ko'rsatadi; keyingi qadam — vaqtincha `isMinifyEnabled=false` bilan sinash (R8 aybdorligini isbotlash) yoki AdMob versiyasini o'zgartirish.
