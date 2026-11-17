@@ -7502,3 +7502,11 @@ Agar yana ochilmasa: Download papkasidagi `arumediatv_xato_*.txt` aniq sababni k
 
 Build 189 halokat hisoboti (foydalanuvchi telefoni, Xiaomi, Android 10): `Unable to get provider androidx.startup.InitializationProvider ... Failed to create an instance of androidx.work.impl.WorkDatabase` (`WorkManagerInitializer` -> Room). AdMob kutubxonasi WorkManager va Room'ni olib keladi; `androidx.startup` ularni ilova ochilishida ishga tushiradi; Room `WorkDatabase_Impl` ni nomi bo'yicha yaratadi, R8 esa uning konstruktorini kesib tashlagan. Tuzatish: `proguard-rules.pro` ga `androidx.startup/work/room/sqlite` uchun keep qoidalari; CI'da `apkanalyzer` bilan `WorkDatabase_Impl` APK ichida borligi chop etiladi (log'da "== R8: WorkDatabase_Impl").
 Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvider halokati ham Download papkasidagi `arumediatv_xato_*.txt` ga tushdi — aynan shu sabab topildi.
+
+## Majburiy kanal tizimi olib tashlandi; profilga reklama tugmasi, reklama vaqti yig'iladi (2026-11-17)
+
+- **Nima:** Android ilovadan `ChannelGate` (majburiy kanallarga avtomatik qo'shilish, ruxsat ekranlari, Sozlamalardagi "Kanallarga avtomatik obuna" tugmasi, `chanConsent` maydoni) butunlay olib tashlandi. Bepul bo'lim (`season.free == true`) endi hech qanday shartsiz ochiladi. Pleyer ochiq paytda kadr yaratishni to'xtatadigan hisoblagich `AppServices.playerBusy` ga ko'chdi.
+- **Server:** o'zgarmadi — settings paketi endi faqat `hidden_stats` yuboradi, worker `chan_consent` yo'q bo'lsa tegmaydi (`worker/src/lib.rs`, `(Some(h), None)`).
+- **Reklama vaqti:** `AdAccess` endi "muddat tugash vaqti" (`until`) saqlaydi: har reklama muddatga +1 soat qo'shadi (faol bo'lsa ustiga, bo'lmasa hozirdan). Vaqt telefonda, hisob bo'yicha; serverdagi obunaga yozilmaydi. Soat orqaga surilsa muddat o'chadi.
+- **Profil:** "Obuna olish va Balans to'ldirish" tagida "Bepul tomosha qilish uchun reklama ko'rish" tugmasi (`ProfileScreen.AdButton`), qolgan vaqt ko'rsatiladi.
+- Fayllar: `data/AdAccess.kt`, `AdAccessTest.kt`, `ui/profile/ProfileScreen.kt`, `ui/season/SeasonScreen.kt`, `AppServices.kt`, `AuthService.kt`, `SyncQueue.kt`.

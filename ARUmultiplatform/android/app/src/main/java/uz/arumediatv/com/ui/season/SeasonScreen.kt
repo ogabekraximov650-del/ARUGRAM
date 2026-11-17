@@ -126,22 +126,20 @@ fun SeasonScreen(
     val scope = rememberCoroutineScope()
     val repo = AppServices.seasonData
     val billing by AppServices.billing.state.collectAsStateWithLifecycle()
-    val gate by AppServices.gate.state.collectAsStateWithLifecycle()
-    val needsConsent = !billing.active && season.free == true && gate.needsConsent
-    // ── Reklama orqali ruxsat: mukofotli reklama oxirigacha ko'rilsa 60 daqiqa istalgan anime; tugagach pleyer pauzaga qo'yiladi ──
+    // ── Reklama orqali ruxsat: mukofotli reklama oxirigacha ko'rilsa ko'rish muddatiga 1 soat qo'shiladi; tugagach pleyer pauzaga qo'yiladi ──
     val me by AppServices.auth.user.collectAsStateWithLifecycle()
-    val adGrantedAt by uz.arumediatv.com.data.AdAccess.grantedAt.collectAsStateWithLifecycle()
+    val adUntil by uz.arumediatv.com.data.AdAccess.until.collectAsStateWithLifecycle()
     var adNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(me?.id) { uz.arumediatv.com.data.AdAccess.load(ctx, me?.id ?: 0L) }
-    LaunchedEffect(adGrantedAt) {
+    LaunchedEffect(adUntil) {
         while (true) {
             adNow = System.currentTimeMillis()
-            if (!uz.arumediatv.com.data.AdAccess.active(adGrantedAt, adNow)) break
+            if (!uz.arumediatv.com.data.AdAccess.active(adUntil, adNow)) break
             delay(1000)
         }
     }
-    val adActive = uz.arumediatv.com.data.AdAccess.active(adGrantedAt, adNow)
-    val adLeftMs = uz.arumediatv.com.data.AdAccess.remainingMs(adGrantedAt, adNow)
+    val adActive = uz.arumediatv.com.data.AdAccess.active(adUntil, adNow)
+    val adLeftMs = uz.arumediatv.com.data.AdAccess.remainingMs(adUntil, adNow)
     var adBusy by remember { mutableStateOf(false) }
     var adMsg by remember { mutableStateOf<String?>(null) }
     val watchAd: () -> Unit = {
@@ -157,15 +155,11 @@ fun SeasonScreen(
             )
         }
     }
-    val canWatch = billing.active || (season.free == true && !gate.needsConsent) || adActive
-    LaunchedEffect(Unit) {
-        AppServices.gate.sync()
-        AppServices.gate.refresh()
-    }
-    // Pleyer ochiq paytda orqa fonda kanallarga qo'shilish to'xtaydi (tarmoq faqat videoniki).
+    val canWatch = billing.active || season.free == true || adActive
+    // Pleyer ochiq paytda orqa fonda kadr yaratish to'xtaydi (tarmoq faqat videoniki).
     DisposableEffect(Unit) {
-        AppServices.gate.busy.incrementAndGet()
-        onDispose { AppServices.gate.busy.decrementAndGet() }
+        AppServices.playerBusy.incrementAndGet()
+        onDispose { AppServices.playerBusy.decrementAndGet() }
     }
 
     val player = remember { AruPlayer(ctx) }
@@ -474,10 +468,8 @@ fun SeasonScreen(
     // Izohlar to'liq ekranga yoyilganda tepadagi hamma narsa (nom, pleyer, tablar) yig'iladi.
     val collapsed = commentsExpanded && pager.currentPage == 3 && !fullscreen
 
-    if (needsConsent) {
-        ConsentScreen(gate.channels.orEmpty(), loading = gate.channels == null, onBack = onBack, onGrant = { AppServices.gate.grant() }, onBilling = onOpenBilling)
-    } else if (!canWatch) {
-        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, adBusy = adBusy, adMsg = adMsg, adExpired = adGrantedAt > 0, adReady = uz.arumediatv.com.data.RewardedAds.ready())
+    if (!canWatch) {
+        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, adBusy = adBusy, adMsg = adMsg, adExpired = adUntil > 0, adReady = uz.arumediatv.com.data.RewardedAds.ready())
     } else
     Column(Modifier.fillMaxSize().background(AruColors.Bg).then(if (fullscreen) Modifier else Modifier.statusBarsPadding())) {
         if (!fullscreen && !collapsed) {
@@ -506,9 +498,7 @@ fun SeasonScreen(
         // ── Video ──
         val box = if (fullscreen) Modifier.fillMaxSize() else Modifier.padding(horizontal = 16.dp).fillMaxWidth().aspectRatio(16f / 9f).clip(RoundedCornerShape(16.dp))
         if (!collapsed) Box(box.background(Color.Black)) {
-            if (needsConsent) {
-                ConsentRequired(gate.channels.orEmpty(), onBack = onBack, onGrant = { AppServices.gate.grant() })
-            } else if (!canWatch) {
+            if (!canWatch) {
                 SubRequired(onBack = onBack, onBilling = onOpenBilling)
             } else {
                 PlayerSurface(player, Modifier.fillMaxSize())
@@ -681,30 +671,6 @@ private fun SubRequired(onBack: () -> Unit, onBilling: () -> Unit) {
     }
 }
 
-/** Bepul bo'lim: majburiy kanallarga avtomatik qo'shilishga ruxsat so'raladi (Sozlamalarda o'chirish mumkin). */
-@Composable
-private fun ConsentRequired(channels: List<uz.arumediatv.com.data.GateChannel>, onBack: () -> Unit, onGrant: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Text("Bepul ko'rish", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            "Bu bo'lim bepul. Buning uchun ilova Telegram hisobingiz bilan ${if (channels.isEmpty()) "majburiy" else "${channels.size} ta"} kanalga qo'shiladi.",
-            color = Color.White.copy(alpha = 0.7f), fontSize = 12.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-        )
-        Spacer(Modifier.height(12.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text(
-                "Orqaga", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.12f)).clickable(onClick = onBack).padding(horizontal = 18.dp, vertical = 10.dp),
-            )
-            Text(
-                "Ruxsat berish", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(AruColors.Accent).clickable(onClick = onGrant).padding(horizontal = 18.dp, vertical = 10.dp),
-            )
-        }
-    }
-}
-
 @Composable
 private fun NowStat(icon: androidx.compose.ui.graphics.vector.ImageVector, text: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -749,8 +715,8 @@ private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit, onWatch
             Text("Obuna kerak", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             Spacer(Modifier.height(10.dp))
             Text(
-                if (adExpired) "Reklama orqali berilgan 60 daqiqa tugadi. Davom etish uchun yana reklama ko'ring yoki obuna oling. Ko'rilgan joyingiz saqlangan."
-                else "Anime ko'rish uchun obuna bo'lishi kerak. Yoki qisqa reklamani oxirigacha ko'ring — 60 daqiqa davomida istalgan animeni ko'ra olasiz.",
+                if (adExpired) "Reklama orqali qo'shilgan vaqt tugadi. Davom etish uchun yana reklama ko'ring yoki obuna oling. Ko'rilgan joyingiz saqlangan."
+                else "Anime ko'rish uchun obuna bo'lishi kerak. Yoki qisqa reklamani oxirigacha ko'ring — ko'rish muddatiga 1 soat qo'shiladi.",
                 color = Color.White.copy(alpha = 0.62f), fontSize = 13.5.sp, lineHeight = 21.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
             Spacer(Modifier.height(24.dp))
@@ -758,7 +724,7 @@ private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit, onWatch
                 Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp)).background(Color.White.copy(alpha = if (adBusy) 0.06f else 0.14f)).clickable(enabled = !adBusy, onClick = onWatchAd),
                 contentAlignment = Alignment.Center,
             ) {
-                Text(if (adBusy) "Reklama ochilmoqda..." else "Reklama ko'rish — 60 daqiqa", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
+                Text(if (adBusy) "Reklama ochilmoqda..." else "Reklama ko'rish — +1 soat", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
             }
             if (adMsg != null) {
                 Spacer(Modifier.height(8.dp))
@@ -776,43 +742,6 @@ private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit, onWatch
         }
     }
 }
-
-/** Bepul bo'lim: majburiy kanallarga avtomatik qo'shilish ruxsati (Flutter `_ChannelConsentScreen`). */
-@Composable
-private fun ConsentScreen(channels: List<uz.arumediatv.com.data.GateChannel>, loading: Boolean, onBack: () -> Unit, onGrant: () -> Unit, onBilling: () -> Unit) {
-    val muted = Color.White.copy(alpha = 0.62f)
-    Column(Modifier.fillMaxSize().background(AruColors.Bg).statusBarsPadding()) {
-        Box(Modifier.padding(start = 12.dp, top = 8.dp).clip(CircleShape).clickable(onClick = onBack).padding(10.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Orqaga", tint = Color.White, modifier = Modifier.size(24.dp))
-        }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(androidx.compose.foundation.rememberScrollState()).padding(horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-            Icon(AruIcons.Campaign, null, tint = AruColors.Accent, modifier = Modifier.size(64.dp))
-            Spacer(Modifier.height(18.dp))
-            Text("Bepul ko'rish", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold)
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "Bu bo'limni bepul ko'rish uchun quyidagi kanallarga obuna bo'lishingiz kerak. Ruxsat bersangiz, ilova Telegram hisobingiz bilan ularga o'zi qo'shiladi (yopiq kanalga so'rov yuboradi). Kanaldan istalgan vaqtda Telegram'da chiqib ketishingiz mumkin.",
-                color = muted, fontSize = 13.5.sp, lineHeight = 21.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-            )
-            Spacer(Modifier.height(16.dp))
-            if (loading) androidx.compose.material3.CircularProgressIndicator(color = AruColors.Accent, modifier = Modifier.padding(12.dp))
-            channels.forEach { c ->
-                Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(if (c.kind == "public") AruIcons.Campaign else Icons.Filled.Lock, null, tint = muted, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(8.dp))
-                    Text(c.title.ifEmpty { c.url }, color = Color.White, fontSize = 14.sp)
-                }
-            }
-            Spacer(Modifier.height(20.dp))
-            Box(Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp)).background(AruColors.Accent).clickable(onClick = onGrant), contentAlignment = Alignment.Center) {
-                Text("Ruxsat berish va ko'rish", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold)
-            }
-            Spacer(Modifier.height(10.dp))
-            Text("Kanalsiz — obuna olish", color = muted, fontSize = 13.sp, modifier = Modifier.clickable(onClick = onBilling).padding(10.dp))
-        }
-    }
-}
-
 
 /** Hozir ijro etilayotgan qismning yuklanishi (sozlamalardan boshlangan): "Yuklanmoqda · 720p  12.3%" va ingichka chiziq. Yuklash tugagach yo'qoladi. */
 @Composable

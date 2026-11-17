@@ -23,8 +23,6 @@ data class AppUser(
     val isAdmin: Boolean = false,
     /** Boshqalarga ko'rsatilmaydigan statistika kalitlari (Sozlamalar > Maxfiylik). */
     val hiddenStats: List<String> = emptyList(),
-    /** Bepul bo'limlar uchun kanallarga avtomatik obuna ruxsati. */
-    val chanConsent: Boolean = false,
     /** Telegram username (bo'sh — yo'q) va Google email: "Accountlarim" ro'yxatida ko'rsatiladi. */
     val tgUsername: String = "",
     val email: String = "",
@@ -65,7 +63,7 @@ data class AppUser(
         .put("id", id).put("telegram_id", telegramId).put("username", username)
         .put("first_name", firstName).put("last_name", lastName).put("photo_url", photoUrl)
         .put("balance", balance).put("profile_done", profileDone).put("is_admin", isAdmin)
-        .put("hidden_stats", JSONArray(hiddenStats)).put("chan_consent", chanConsent).put("tg_username", tgUsername).put("email", email)
+        .put("hidden_stats", JSONArray(hiddenStats)).put("tg_username", tgUsername).put("email", email)
 
     companion object {
         fun fromJson(j: JSONObject) = AppUser(
@@ -79,7 +77,6 @@ data class AppUser(
             profileDone = j.optBoolean("profile_done", true),
             isAdmin = j.optBoolean("is_admin", false),
             hiddenStats = j.optJSONArray("hidden_stats")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(),
-            chanConsent = j.optBoolean("chan_consent", false),
             tgUsername = j.optString("tg_username"),
             email = j.optString("email"),
         )
@@ -151,16 +148,16 @@ class AuthService(
     private var settingsAt = 0L
 
     /** `SyncQueue` ulaydi. */
-    var onSettings: ((List<String>, Boolean) -> Unit)? = null
+    var onSettings: ((List<String>) -> Unit)? = null
     var hasPendingSettings: () -> Boolean = { false }
 
-    fun updateSettings(hiddenStats: List<String>? = null, chanConsent: Boolean? = null) {
+    fun updateSettings(hiddenStats: List<String>? = null) {
         val s = sessionToken ?: return
         val u = _user.value ?: return
-        val nu = u.copy(hiddenStats = hiddenStats ?: u.hiddenStats, chanConsent = chanConsent ?: u.chanConsent)
+        val nu = u.copy(hiddenStats = hiddenStats ?: u.hiddenStats)
         settingsAt = System.currentTimeMillis()
         save(s, nu)
-        onSettings?.invoke(nu.hiddenStats, nu.chanConsent)
+        onSettings?.invoke(nu.hiddenStats)
     }
 
     private fun keepLocalSettings(fromServer: AppUser): AppUser {
@@ -168,7 +165,7 @@ class AuthService(
         if (local.id != fromServer.id) return fromServer
         val fresh = System.currentTimeMillis() - settingsAt < 5 * 60_000L
         if (!fresh && !hasPendingSettings()) return fromServer
-        return fromServer.copy(hiddenStats = local.hiddenStats, chanConsent = local.chanConsent)
+        return fromServer.copy(hiddenStats = local.hiddenStats)
     }
 
     /** Profil rasmi: fayl Telegram'ga yuklangach (`avatar_<id>_<vaqt>.jpg`) worker'ga faqat NOM aytiladi. `null` — saqlandi. */

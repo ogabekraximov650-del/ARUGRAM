@@ -16,7 +16,6 @@ import uz.arumediatv.com.data.PublicRepository
 import uz.arumediatv.com.data.VideoCache
 import uz.arumediatv.com.data.UnreadBadge
 import uz.arumediatv.com.data.TrafficMeter
-import uz.arumediatv.com.data.ChannelGate
 import uz.arumediatv.com.data.PackStore
 import java.io.File
 import uz.arumediatv.com.data.AdminApi
@@ -58,8 +57,8 @@ object AppServices {
         private set
     lateinit var traffic: TrafficMeter
         private set
-    lateinit var gate: ChannelGate
-        private set
+    /** Pleyer ochiq turgan ekranlar soni: shu paytda orqa fondagi kadr yaratish to'xtaydi (tarmoq faqat videoniki). */
+    val playerBusy = java.util.concurrent.atomic.AtomicInteger(0)
     lateinit var packs: PackStore
     lateinit var tgStickers: uz.arumediatv.com.data.TgStickerStore
         private set
@@ -73,7 +72,6 @@ object AppServices {
         billing.clear()
         unread.clear()
         packs.reset()
-        gate.reset()
     }
 
     fun trafficOrNull(): TrafficMeter? = if (::traffic.isInitialized) traffic else null
@@ -130,7 +128,6 @@ object AppServices {
         videoCache = VideoCache(ctx)
         unread = UnreadBadge(auth)
         traffic = TrafficMeter(ctx, auth)
-        gate = ChannelGate(ctx, auth, telegram)
         thumbs = uz.arumediatv.com.data.ThumbStore(ctx, telegram, videoCache)
         tgStickers = uz.arumediatv.com.data.TgStickerStore(ctx)
         packs = PackStore(ctx, auth, telegram, { sync })
@@ -143,7 +140,7 @@ object AppServices {
         downloadsIndex = DownloadsIndex(ctx, downloads)
         offlineLib = uz.arumediatv.com.data.OfflineLibrary(downloadsIndex)
         appContext = ctx
-        auth.onSettings = { hidden, consent -> sync.putSettings(hidden, consent) }
+        auth.onSettings = { hidden -> sync.putSettings(hidden) }
         auth.hasPendingSettings = { sync.hasPendingSettings }
         ready = true
     }

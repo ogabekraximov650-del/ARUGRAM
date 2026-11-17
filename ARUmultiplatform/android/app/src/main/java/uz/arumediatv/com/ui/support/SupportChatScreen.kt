@@ -862,8 +862,8 @@ private fun ViewerVideo(m: ChatMessage) {
     var attempt by remember { mutableStateOf(0) }
     var drag by remember { mutableStateOf<Float?>(null) }
     DisposableEffect(Unit) {
-        AppServices.gate.busy.incrementAndGet()
-        onDispose { player.release(); AppServices.gate.busy.decrementAndGet() }
+        AppServices.playerBusy.incrementAndGet()
+        onDispose { player.release(); AppServices.playerBusy.decrementAndGet() }
     }
     LaunchedEffect(m.id, attempt) {
         player.error = null

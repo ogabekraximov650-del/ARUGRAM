@@ -43,7 +43,6 @@ class AruApplication : Application() {
         scope.launch {
             AppServices.auth.restore()
             AppServices.billing.restore()
-            AppServices.gate.start()
             AppServices.billing.loadIfStale()
             sweepTemp()
             AppServices.telegram.start()

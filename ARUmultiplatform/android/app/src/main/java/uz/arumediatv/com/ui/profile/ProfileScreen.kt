@@ -187,6 +187,8 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
             })
             Spacer(Modifier.height(16.dp))
             BillingButton(onBilling)
+            Spacer(Modifier.height(10.dp))
+            AdButton(u.id)
             Spacer(Modifier.height(12.dp))
             StatsGrid(stats, cacheBytes, onOpenStat, onStorage)
             Spacer(Modifier.height(12.dp))
@@ -463,6 +465,53 @@ private fun BillingButton(onClick: () -> Unit) {
         }
         Spacer(Modifier.width(6.dp))
         Icon(AruIcons.ChevronRight, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
+    }
+}
+
+/** Bepul tomosha: reklama oxirigacha ko'rilsa ko'rish muddatiga 1 soat qo'shiladi (har safar oldingisining ustiga). */
+@Composable
+private fun AdButton(userId: Long) {
+    val ctx = LocalContext.current
+    val until by uz.arumediatv.com.data.AdAccess.until.collectAsStateWithLifecycle()
+    var now by remember { mutableStateOf(System.currentTimeMillis()) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(userId) {
+        uz.arumediatv.com.data.AdAccess.load(ctx, userId)
+        uz.arumediatv.com.data.RewardedAds.ensureInit(ctx)
+    }
+    LaunchedEffect(until) {
+        while (uz.arumediatv.com.data.AdAccess.active(until, now)) { now = System.currentTimeMillis(); kotlinx.coroutines.delay(1000) }
+        now = System.currentTimeMillis()
+    }
+    val left = uz.arumediatv.com.data.AdAccess.remainingMs(until, now)
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        Modifier.fillMaxWidth().clip(shape).background(Color.White.copy(alpha = if (busy) 0.05f else 0.09f)).border(1.dp, AruColors.Accent.copy(alpha = 0.55f), shape)
+            .clickable(enabled = !busy) {
+                var a: android.content.Context? = ctx
+                while (a is android.content.ContextWrapper && a !is android.app.Activity) a = a.baseContext
+                val act = a as? android.app.Activity
+                if (act == null) { msg = "Reklamani ochib bo'lmadi." } else {
+                    busy = true; msg = null
+                    uz.arumediatv.com.data.RewardedAds.show(
+                        act,
+                        onReward = { uz.arumediatv.com.data.AdAccess.grant(ctx, userId); busy = false; msg = null },
+                        onFail = { msg = it; busy = false },
+                    )
+                }
+            }.padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(AruIcons.PlayCircleOutline, null, tint = AruColors.Accent, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            Text(if (busy) "Reklama ochilmoqda..." else "Bepul tomosha qilish uchun reklama ko'rish", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2)
+            Text(
+                msg ?: if (left > 0) "Qolgan vaqt: ${uz.arumediatv.com.data.formatLeft(left)} · yana +1 soat qo'shiladi" else "Reklamani oxirigacha ko'ring — ko'rish muddatiga 1 soat qo'shiladi",
+                color = if (msg != null) Color(0xFFFF8A80) else Color.White.copy(alpha = 0.7f), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp),
+            )
+        }
     }
 }
 

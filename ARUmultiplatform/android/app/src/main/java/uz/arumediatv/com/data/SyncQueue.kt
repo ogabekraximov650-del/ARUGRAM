@@ -106,8 +106,8 @@ class SyncQueue(
         }
     }
 
-    fun putSettings(hidden: List<String>, consent: Boolean) =
-        put(Kind.SETTINGS, "settings", JSONObject().put("hidden_stats", JSONArray(hidden)).put("chan_consent", consent))
+    fun putSettings(hidden: List<String>) =
+        put(Kind.SETTINGS, "settings", JSONObject().put("hidden_stats", JSONArray(hidden)))
 
     fun putFavorite(animeId: Long, seasonId: Long, on: Boolean) {
         if (animeId <= 0) return

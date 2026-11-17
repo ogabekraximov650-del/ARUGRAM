@@ -271,14 +271,6 @@ fun SettingsScreen(onBack: () -> Unit) {
                 color = AruColors.TextFaint, fontSize = 12.sp, lineHeight = 18.sp, modifier = Modifier.padding(horizontal = 4.dp, vertical = 10.dp),
             )
             Spacer(Modifier.height(10.dp))
-            SectionLabel("BEPUL KO'RISH")
-            Spacer(Modifier.height(6.dp))
-            SwitchRow(
-                "Kanallarga avtomatik obuna",
-                "Bepul bo'limlar uchun ilova Telegram hisobingiz bilan majburiy kanallarga qo'shiladi. O'chirsangiz, bepul bo'lim ochilganda ruxsat yana so'raladi.",
-                checked = u?.chanConsent ?: false, enabled = u != null,
-            ) { on -> AppServices.gate.setConsent(on) }
-            Spacer(Modifier.height(10.dp))
             SectionLabel("QISMLAR BOSHQARUVI")
             Text(
                 "Bo'lim sahifasidagi \"Qismlar\" tabida qismlarni almashtirish usuli. Istalgan payt o'zgartirishingiz mumkin.",

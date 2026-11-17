@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Kadr Rust yadrosining `/thumb?u=<manba>&ms=<vaqt>` yo'lidan olinadi: u faylning faqat kerakli baytlarini
  * (moov + bitta kalit kadr) olib, bitta kadrlik MP4 yasaydi; `MediaMetadataRetriever` undan JPEG chiqaradi.
  * Natija diskda shifrlangan (`SecureStore`) saqlanadi; kalit `<video>_<to'xtagan ms>` — joy o'zgarsa yangi kadr
- * yasaladi, eskisi o'chadi. Navbat bitta-bitta ishlaydi; pleyer ochiq paytda (`gate.busy`) kutadi.
+ * yasaladi, eskisi o'chadi. Navbat bitta-bitta ishlaydi; pleyer ochiq paytda (`playerBusy`) kutadi.
  */
 class ThumbStore(context: Context, private val tg: TelegramService, private val cache: VideoCache) {
     private val appCtx: Context = context.applicationContext
@@ -140,7 +140,7 @@ class ThumbStore(context: Context, private val tg: TelegramService, private val 
         fromDisk(key)?.let { return it }
         val f = file(key)
         // Pleyer ochiq — tarmoq faqat videoniki.
-        while (uz.arumediatv.com.AppServices.gate.busy.get() > 0) delay(400)
+        while (uz.arumediatv.com.AppServices.playerBusy.get() > 0) delay(400)
         val src = item.thumbUrl.ifEmpty { item.videoUrl }
         // YANGI TIZIM (vd): kadr Telegram hisobisiz, Cloudflare keshidan (fayl telefonda to'liq bo'lmasa).
         val vname = Names.fileNameOf(src)
