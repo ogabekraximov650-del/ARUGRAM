@@ -7521,3 +7521,8 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 
 - `billing_ad_reward` endi obuna/vaqt faol bo'lsa 409 qaytaradi (reklama vaqti yig'ilmaydi, faqat tugagach 1 soat beriladi). Profildagi reklama tugmasi muddat tugaguncha o'chiq turadi va tugagan zahoti ochiladi (`ProfileScreen.AdButton`).
 - "Reklama yoki obuna kerak" ekrani to'liq ekran (gorizontal) holatida ham to'g'ri chiqadi: kontent siljiydi, belgi yashiriladi, status paneli tagiga kirmaydi (`SubRequiredScreen(fullscreen)`).
+
+## To'lov tarixi: "To'ldirish" va "Qo'shilgan muddat" tugmalari (2026-11-17)
+
+- `BillingScreen.HistoryPage`: ikki tugma — "To'ldirish" (balans to'ldirishlar) va "Qo'shilgan muddat" (obuna sotib olish + reklama orqali "+1 soat"). Reklama yozuvlari endi shu yerda ko'rinadi (`kind='ad'`).
+- Worker `GET /api/billing`: tarix endi ikkita so'rov birlashmasi — pulli yozuvlar (oxirgi 100) va reklama yozuvlari (oxirgi 100) alohida, ko'p reklama to'lovlarni siqib chiqarmasin.

@@ -25,6 +25,7 @@ data class PayLink(val orderId: String, val amount: Long, val url: String, val e
 
 data class BillingEntry(val kind: String, val amount: Long, val days: Int, val note: String, val createdAt: Long) {
     val isTopUp: Boolean get() = kind == "topup"
+    val isAd: Boolean get() = kind == "ad"
 }
 
 data class BillingState(
@@ -108,7 +109,8 @@ class BillingStore(
             .map { PayLink(it.optString("order_id"), it.optLong("amount"), it.optString("pay_url"), it.optLong("expires_at")) }
             .filter { it.url.isNotEmpty() }
         val hist = j.optJSONArray("history")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) } }.orEmpty()
-            .filter { it.optString("kind") != "ad" }.map { BillingEntry(it.optString("kind"), it.optLong("amount"), it.optInt("days"), it.optString("note"), it.optLong("created_at")) }
+            .map { BillingEntry(it.optString("kind"), it.optLong("amount"), it.optInt("days"), it.optString("note"), it.optLong("created_at")) }
+            .sortedByDescending { it.createdAt }
         val bal = j.optLong("balance")
         val until = j.optLong("subscription_until")
         auth.user.value?.id?.let { uid -> prefs.edit().putLong("bal_$uid", bal).putLong("until_$uid", until).putLong("at_$uid", System.currentTimeMillis()).apply(); auth.accounts.setSub(uid, until) }

@@ -31,10 +31,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -311,22 +313,39 @@ private fun LinkTile(l: PayLink, now: Long, open: (String) -> Boolean, say: (Str
 @Composable
 private fun HistoryPage() {
     val st by AppServices.billing.state.collectAsStateWithLifecycle()
-    if (st.history.isEmpty()) { Placeholder(st.loading, st.error ?: "Hozircha yozuv yo'q"); return }
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        items(st.history) { e ->
-            val up = e.isTopUp
-            val c = if (up) Success else AruColors.Accent
-            Glass(radius = 14) { Row(Modifier.padding(14.dp, 11.dp), verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                    Icon(if (up) AruIcons.AddCard else AruIcons.WorkspacePremium, null, tint = c, modifier = Modifier.size(18.dp))
-                }
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(if (up) "Balans to'ldirildi" else "${planLabel(e.days)} obuna", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(whenText(e.createdAt), color = Color.White.copy(alpha = 0.5f), fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp))
-                }
-                Text("${if (up) "+" else "−"}${formatSum(Math.abs(e.amount))}", color = if (up) Success else Color.White.copy(alpha = 0.8f), fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
-            } }
+    // Ikki tugma: "To'ldirish" (balans to'ldirishlar) va "Qo'shilgan muddat" (obuna sotib olish va reklama orqali qo'shilgan vaqt).
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val list = remember(st.history, tab) { if (tab == 0) st.history.filter { it.isTopUp } else st.history.filter { !it.isTopUp } }
+    Column(Modifier.fillMaxSize()) {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            listOf("To'ldirish", "Qo'shilgan muddat").forEachIndexed { i, label ->
+                val on = tab == i
+                val shape = RoundedCornerShape(14.dp)
+                Box(
+                    Modifier.weight(1f).height(42.dp).clip(shape).background(if (on) AruColors.Accent else Color.White.copy(alpha = 0.08f)).clickable { tab = i },
+                    contentAlignment = Alignment.Center,
+                ) { Text(label, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+            }
+        }
+        if (list.isEmpty()) { Placeholder(st.loading, st.error ?: "Hozircha yozuv yo'q"); return@Column }
+        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            items(list) { e ->
+                val up = e.isTopUp
+                val ad = e.isAd
+                val c = if (up) Success else AruColors.Accent
+                Glass(radius = 14) { Row(Modifier.padding(14.dp, 11.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
+                        Icon(if (up) AruIcons.AddCard else if (ad) AruIcons.PlayCircleOutline else AruIcons.WorkspacePremium, null, tint = c, modifier = Modifier.size(18.dp))
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (up) "Balans to'ldirildi" else if (ad) "Reklama orqali" else "${planLabel(e.days)} obuna", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(whenText(e.createdAt), color = Color.White.copy(alpha = 0.5f), fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp))
+                    }
+                    if (ad) Text("+1 soat", color = AruColors.Accent, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+                    else Text("${if (up) "+" else "−"}${formatSum(Math.abs(e.amount))}", color = if (up) Success else Color.White.copy(alpha = 0.8f), fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+                } }
+            }
         }
     }
 }

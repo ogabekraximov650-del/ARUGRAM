@@ -9728,9 +9728,15 @@ async fn billing_state(req: Request, env: &Env) -> Result<Response> {
            WHERE user_id=? AND status='pending' AND expires_at > ?
            ORDER BY created_at DESC LIMIT 20",
          vec![TursoArg::int(me), TursoArg::int(now)]),
-        ("SELECT kind,amount,days,note,created_at FROM billing_log
-           WHERE user_id=? AND kind<>'ad' ORDER BY created_at DESC LIMIT 100",
-         vec![TursoArg::int(me)]),
+        // To'ldirish/obuna (oxirgi 100 ta) va reklama vaqti (oxirgi 100 ta) ALOHIDA olinadi: ko'p reklama pulli yozuvlarni siqib chiqarmasin.
+        ("SELECT kind,amount,days,note,created_at FROM (
+            SELECT kind,amount,days,note,created_at FROM billing_log
+             WHERE user_id=? AND kind<>'ad' ORDER BY created_at DESC LIMIT 100)
+          UNION ALL
+          SELECT kind,amount,days,note,created_at FROM (
+            SELECT kind,amount,days,note,created_at FROM billing_log
+             WHERE user_id=? AND kind='ad' ORDER BY created_at DESC LIMIT 100)",
+         vec![TursoArg::int(me), TursoArg::int(me)]),
         // ── MUDDATI O'TGAN HAVOLA BAZADAN O'CHADI ────────
         //
         // TALAB (foydalanuvchi): "balans to'ldirish havolasi
