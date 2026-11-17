@@ -7526,3 +7526,7 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 
 - `BillingScreen.HistoryPage`: ikki tugma — "To'ldirish" (balans to'ldirishlar) va "Obuna" (obuna sotib olish + reklama orqali "+1 soat"). Reklama yozuvlari endi shu yerda ko'rinadi (`kind='ad'`).
 - Worker `GET /api/billing`: tarix endi ikkita so'rov birlashmasi — pulli yozuvlar (oxirgi 100) va reklama yozuvlari (oxirgi 100) alohida, ko'p reklama to'lovlarni siqib chiqarmasin.
+
+## Reklama "hali tayyor emas": sabab ekranda va qayta urinish (2026-11-17)
+
+- `RewardedAds`: yuklanmasa 30 soniyadan keyin qayta uriniladi; SDK qaytarmasa 8 soniyadan keyin zaxira yuklash; `reason()` — ekranda sabab (SDK ishga tushmagan / yuklanmoqda / AdMob xato kodi, masalan `3: No fill`). Paywall ekrani har 2 soniyada yangilanadi.

@@ -164,6 +164,9 @@ fun SeasonScreen(
     val player = remember { AruPlayer(ctx) }
     // Ruxsat tugadi: ijro pauzaga qo'yiladi, joy saqlanadi.
     LaunchedEffect(canWatch) { if (!canWatch) { player.pause(); uz.arumediatv.com.data.RewardedAds.ensureInit(ctx) } }
+    // Reklama holati (tayyor/sabab) ekranda yangilanib turishi uchun har 2 soniyada qayta chiziladi.
+    var adTick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(canWatch) { while (!canWatch) { delay(2000); adTick++ } }
     var episodes by remember { mutableStateOf<List<Episode>>(emptyList()) }
     var loadingEps by remember { mutableStateOf(true) }
     var seasons by remember { mutableStateOf<List<Season>>(emptyList()) }
@@ -469,7 +472,7 @@ fun SeasonScreen(
     val collapsed = commentsExpanded && pager.currentPage == 3 && !fullscreen
 
     if (!canWatch) {
-        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, fullscreen = fullscreen, adBusy = adBusy, adMsg = adMsg, adExpired = billing.until > 0, adReady = uz.arumediatv.com.data.RewardedAds.ready())
+        SubRequiredScreen(onBack = onBack, onBilling = onOpenBilling, onWatchAd = watchAd, fullscreen = fullscreen, adBusy = adBusy, adMsg = adMsg, adExpired = billing.until > 0, adReady = adTick >= 0 && uz.arumediatv.com.data.RewardedAds.ready())
     } else
     Column(Modifier.fillMaxSize().background(AruColors.Bg).then(if (fullscreen) Modifier else Modifier.statusBarsPadding())) {
         if (!fullscreen && !collapsed) {
@@ -732,7 +735,7 @@ private fun SubRequiredScreen(onBack: () -> Unit, onBilling: () -> Unit, onWatch
                 Text(adMsg, color = Color(0xFFFF8A80), fontSize = 12.5.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             } else if (!adReady) {
                 Spacer(Modifier.height(8.dp))
-                Text("Reklama yuklanmoqda...", color = Color.White.copy(alpha = 0.4f), fontSize = 12.sp)
+                Text("Reklama yuklanmoqda... (${uz.arumediatv.com.data.RewardedAds.reason()})", color = Color.White.copy(alpha = 0.4f), fontSize = 12.sp)
             }
             Spacer(Modifier.height(10.dp))
             Box(Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(14.dp)).background(AruColors.Accent).clickable(onClick = onBilling), contentAlignment = Alignment.Center) {

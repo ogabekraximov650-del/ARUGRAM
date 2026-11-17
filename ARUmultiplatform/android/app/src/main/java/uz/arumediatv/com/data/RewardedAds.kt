@@ -40,6 +40,8 @@ object RewardedAds {
         Thread {
             try {
                 MobileAds.initialize(app) { main.post { preload(app) } }
+                // Zaxira: SDK qaytarma chaqirmasa ham 8 soniyadan keyin yuklash boshlanadi.
+                main.postDelayed({ preload(app) }, 8_000L)
             } catch (e: Throwable) {
                 lastError = e.message.orEmpty()
             }
@@ -47,6 +49,14 @@ object RewardedAds {
     }
 
     fun ready(): Boolean = ad != null
+
+    /** UZ: yuklanmasa (masalan yangi reklama bloki hali to'lmagan) 30 soniyadan keyin qayta uriniladi. EN: retry a failed load after 30 s. */
+    private fun retryLater(app: Context) {
+        main.postDelayed({ preload(app) }, 30_000L)
+    }
+
+    /** Oxirgi xato (bo'sh — yo'q): ekranda sababni ko'rsatish uchun. */
+    fun reason(): String = if (!started) "SDK ishga tushmagan" else if (loading) "yuklanmoqda" else lastError.ifEmpty { "noma'lum" }
 
     fun preload(ctx: Context) {
         if (ad != null || loading) return
@@ -56,7 +66,7 @@ object RewardedAds {
                 ctx.applicationContext, BuildConfig.ADMOB_REWARDED_ID, AdRequest.Builder().build(),
                 object : RewardedAdLoadCallback() {
                     override fun onAdLoaded(loaded: RewardedAd) { ad = loaded; loading = false; lastError = "" }
-                    override fun onAdFailedToLoad(e: LoadAdError) { ad = null; loading = false; lastError = "${e.code}: ${e.message}" }
+                    override fun onAdFailedToLoad(e: LoadAdError) { ad = null; loading = false; lastError = "${e.code}: ${e.message}"; retryLater(ctx.applicationContext) }
                 },
             )
         } catch (e: Exception) {
@@ -72,8 +82,9 @@ object RewardedAds {
     fun show(act: Activity, onReward: () -> Unit, onFail: (String) -> Unit) {
         val a = ad
         if (a == null) {
+            ensureInit(act)
             preload(act)
-            onFail("Reklama hali tayyor emas. Bir necha soniyadan keyin qayta urinib ko'ring.")
+            onFail("Reklama hali tayyor emas (${reason()}). Bir necha soniyadan keyin qayta urinib ko'ring.")
             return
         }
         ad = null
