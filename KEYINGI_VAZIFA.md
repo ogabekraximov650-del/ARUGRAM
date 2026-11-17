@@ -7483,3 +7483,8 @@ O'zgarish: worker Ample'ga 1 KB dan katta `/v2/pipeline` so'rovlarini Brotli 6 b
 Xavfsizlik avvalgidek: yangi `tgstore-jr` har javobga `x-req-br: 1` (va `x-req-gzip: 1`) qo'shadi; worker faqat shu sarlavhani ko'rgandan keyin siqadi, eski server sarlavha bermaydi. Server `415` desa belgi o'chadi va so'rov siqilmasdan qayta yuboriladi. Turso'ga HECH QACHON siqilmaydi.
 Ample tomoni (`ample-rs/src/main.rs`): `decode_request` endi `br` ni ham ochadi (gzip ham qoladi), chegara 64 MiB.
 Eslatma: `Content-Encoding: br` so'rovlarini faqat yangi `tgstore-jr` ochadi — Ample'ni eski binarga qaytarsangiz, worker'ni qayta deploy qiling (belgi ishlayotgan izolyatlarda `true` qolishi mumkin).
+
+## Reklama (AdMob) vaqtincha QAYTARILDI (2026-11-17)
+
+AdMob'li APK (build 185/186) foydalanuvchi telefonida ilova ochilmasdan yopilib ketdi (server sog'lom: Ample va worker ishlayapti, sessiya bazada). Sabab aniq emas (eng ehtimoli — `play-services-ads` + R8 `isMinifyEnabled` yoki kutubxonaning ishga tushishi). Shu sabab `372fdd39`, `8b06daca`, `50255008` commit'lari QAYTARILDI (`git revert`) — kod git tarixida saqlangan (reklama mantig'i: `AdAccess`, `RewardedAds`, SeasonScreen).
+Qayta qo'shish rejasi: avval sabab aniqlanadi (`AruApplication` endi Kotlin/Java halokatini `last_crash.txt` ga yozadi va keyingi ochilishda ko'rsatadi), `proguard-rules.pro` ga AdMob qoidalari (`-keep class com.google.android.gms.ads.** { *; }` va sh.k.) qo'shiladi, keyin AdMob alohida build bilan sinaladi. Haqiqiy ID'lar: ilova `ca-app-pub-8901205768474122~2994428955`, mukofotli blok `ca-app-pub-8901205768474122/4115938931`.

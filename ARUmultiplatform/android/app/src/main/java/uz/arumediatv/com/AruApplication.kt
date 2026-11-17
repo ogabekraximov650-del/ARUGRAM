@@ -19,6 +19,18 @@ class AruApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // UZ: Kotlin/Java halokatlari ham `last_crash.txt` ga yoziladi — keyingi ochilishda sababi ko'rsatiladi (Rust halokatlari bilan bir joyda). Ilova ochilmay yopilsa ham iz qoladi.
+        // EN: Kotlin/Java crashes are also written to `last_crash.txt` and shown on the next launch.
+        // RU: Java/Kotlin-padeniya takzhe pishutsya v `last_crash.txt`.
+        val prev = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler { t, e ->
+            try {
+                val text = "${t.name}: " + android.util.Log.getStackTraceString(e).take(4000)
+                java.io.File(filesDir, "last_crash.txt").writeText(text)
+            } catch (_: Throwable) {
+            }
+            prev?.uncaughtException(t, e)
+        }
         AppServices.init(this)
         scope.launch {
             AppServices.auth.restore()
