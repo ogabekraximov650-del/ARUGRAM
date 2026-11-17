@@ -18,6 +18,7 @@ rand = "0.10"
 base64 = "0.22"
 anyhow = "1"
 flate2 = "1"
+brotli = { version = "8", default-features = false, features = ["std"] }
 
 [profile.release]
 opt-level = "z"

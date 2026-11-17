@@ -32,7 +32,59 @@ fn json_resp(code: u16, v: J) -> Response { (StatusCode::from_u16(code).unwrap()
 
 fn res_json(r: Vec<Res>) -> Vec<J> { r.into_iter().map(|x| match x { Res::Ok(v) => json!({"ok": true, "result": v}), Res::Err(e) => json!({"ok": false, "error": e}) }).collect() }
 
+/// UZ: javob siqiladi (trafikni tejash): mijoz `br` ko'rsatsa Brotli 6, aks holda `gzip` 6; 512 baytdan kichik javob siqilmaydi.
+/// Cloudflare worker `fetch` ikkalasini ham o'zi ochadi. Brotli 6 tanlandi (o'lchov: gzip 6 dan ~20% kichik, vaqti deyarli teng; 7+ ko'p vaqt oladi, foydasi <1%).
+/// EN: responses are compressed to save traffic: Brotli 6 if the client accepts `br`, else gzip 6; bodies under 512 bytes are left alone.
+/// RU: otvety szhimayutsya: Brotli 6 pri `br`, inache gzip 6; otvety menshe 512 bajt ne szhimayutsya.
+fn accepts(accept: &str, name: &str) -> bool {
+    accept.split(',').any(|t| {
+        let mut p = t.trim().split(';');
+        let n = p.next().unwrap_or("").trim();
+        let zero = p.any(|x| { let x = x.trim().replace(' ', ""); x == "q=0" || x == "q=0.0" || x == "q=0.00" || x == "q=0.000" });
+        n.eq_ignore_ascii_case(name) && !zero
+    })
+}
+
+pub(crate) fn compress_body(accept: &str, body: &[u8]) -> Option<(&'static str, Vec<u8>)> {
+    use std::io::Write;
+    if body.len() < 512 { return None; }
+    if accepts(accept, "br") {
+        let mut out = Vec::with_capacity(body.len() / 4);
+        {
+            let mut w = brotli::CompressorWriter::new(&mut out, 4096, 6, 22);
+            w.write_all(body).ok()?;
+            w.flush().ok()?;
+        }
+        return Some(("br", out));
+    }
+    if accepts(accept, "gzip") {
+        let mut e = flate2::write::GzEncoder::new(Vec::with_capacity(body.len() / 4), flate2::Compression::new(6));
+        e.write_all(body).ok()?;
+        return Some(("gzip", e.finish().ok()?));
+    }
+    None
+}
+
 async fn handle(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
+    let accept = headers.get("accept-encoding").and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
+    let resp = handle_inner(State(app), method, uri, headers, body).await;
+    if accept.is_empty() { return resp; }
+    let json = resp.headers().get("content-type").and_then(|v| v.to_str().ok()).is_some_and(|v| v.starts_with("application/json"));
+    if !json || resp.status() != StatusCode::OK { return resp; }
+    let (mut parts, b) = resp.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(b, usize::MAX).await else { return Response::from_parts(parts, axum::body::Body::empty()) };
+    match compress_body(&accept, &bytes) {
+        Some((enc, out)) => {
+            parts.headers.insert("content-encoding", axum::http::HeaderValue::from_static(enc));
+            parts.headers.insert("vary", axum::http::HeaderValue::from_static("accept-encoding"));
+            parts.headers.remove("content-length");
+            Response::from_parts(parts, axum::body::Body::from(out))
+        }
+        None => { parts.headers.remove("content-length"); Response::from_parts(parts, axum::body::Body::from(bytes)) }
+    }
+}
+
+async fn handle_inner(State(app): State<Arc<App>>, method: Method, uri: Uri, headers: HeaderMap, body: Bytes) -> Response {
     if method == Method::GET { return json_resp(200, json!({"ok": true, "service": "tgstore-jr", "engine": "libsql-rs"})); }
     let path = uri.path().trim_start_matches('/').to_string();
     let tok = headers.get("authorization").and_then(|v| v.to_str().ok()).unwrap_or("").trim_start_matches("Bearer ").to_string();
@@ -164,4 +216,49 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await.expect("port band");
     log(&format!("tgstore-jr (rust) listening {}", port));
     axum::serve(listener, router).await.unwrap();
+}
+
+#[cfg(test)]
+mod compress_tests {
+    use super::*;
+    use std::io::Read;
+
+    fn sample() -> Vec<u8> {
+        let row = r#"{"type":"text","value":"INSERT INTO vd_queue (name,size,chunks) VALUES (?,?,?)"},"#;
+        row.repeat(40).into_bytes()
+    }
+
+    #[test]
+    fn small_body_is_left_alone() {
+        assert!(compress_body("br, gzip", b"{\"ok\":true}").is_none());
+    }
+
+    #[test]
+    fn brotli_round_trip_and_smaller() {
+        let b = sample();
+        let (enc, out) = compress_body("gzip, deflate, br", &b).unwrap();
+        assert_eq!(enc, "br");
+        assert!(out.len() < b.len() / 3);
+        let mut back = Vec::new();
+        brotli::Decompressor::new(&out[..], 4096).read_to_end(&mut back).unwrap();
+        assert_eq!(back, b);
+    }
+
+    #[test]
+    fn gzip_fallback_round_trip() {
+        let b = sample();
+        let (enc, out) = compress_body("gzip", &b).unwrap();
+        assert_eq!(enc, "gzip");
+        let mut back = Vec::new();
+        flate2::read::GzDecoder::new(&out[..]).read_to_end(&mut back).unwrap();
+        assert_eq!(back, b);
+    }
+
+    #[test]
+    fn no_supported_encoding_or_q0() {
+        let b = sample();
+        assert!(compress_body("identity", &b).is_none());
+        assert!(compress_body("br;q=0, gzip;q=0", &b).is_none());
+        assert_eq!(compress_body("br;q=0, gzip", &b).unwrap().0, "gzip");
+    }
 }

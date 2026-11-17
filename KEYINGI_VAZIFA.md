@@ -7461,3 +7461,10 @@ Muammo: "Anibla orqali" qism tugmalari tez bosilsa, `encbot_register` ID ni `MAX
 Tuzatish: yangi qism BITTA `INSERT ... SELECT ... WHERE NOT EXISTS ... RETURNING epizod_id` bilan (ID va "bu raqam yo'q" sharti atomik); agar shu raqamni boshqa so'rov hozirgina qo'shgan bo'lsa — u "bor qism" yo'liga (almashtirish) o'tadi. Anibla oqimida har bosishga bitta xabar (avval ikkita edi) — Telegram chatga xabar chegarasi.
 Qolgan cheklov: `anibla_nav` (tanlangan anime/fasl) bitta umumiy yozuv — ikki admin bir vaqtda ishlasa bir-birining tanlovini almashtiradi. Navbat tartibi tez bosishda kafolatlanmaydi (Telegram webhook'lari parallel).
 Fayllar: `worker/src/lib.rs` (`encbot_register`), `worker/src/anibla.rs` (`start`).
+
+## Ample baza javoblari siqiladi (Brotli 6, zaxira gzip 6)
+
+Nima: `tgstore-jr` (`ARUmultiplatform/ample-rs`) JSON javoblarini siqadi: mijoz `br` ko'rsatsa Brotli 6, aks holda `gzip` 6; 512 baytdan kichik javoblar siqilmaydi; 200 dan boshqa javoblar o'zgarmaydi. Cloudflare worker `fetch` ikkalasini ham o'zi ochadi (worker kodi o'zgarmadi).
+Nega 6: Ample serverida haqiqiy jurnal (~300 KB JSON) bilan o'lchandi — gzip 6: 28 186 bayt/3 ms; Brotli 5: 22 616/3 ms; Brotli 6: 22 419/4 ms; Brotli 7: 22 303/7 ms; Brotli 8: 22 216/11 ms; Brotli 9: 22 171/18 ms; Brotli 11: ~18 900/384 ms. Server 1 CPU — 7+ ko'p vaqt olib kam foyda beradi, 11 juda sekin.
+Fayllar: `ample-rs/src/main.rs` (`compress_body`, `handle` o'rami, 4 ta test), `ample-rs/Cargo.toml` (`brotli`).
+Eslatma: Ample trafikni siqilgan baytlar bo'yicha sanashi tasdiqlanmagan — Ample panelida oldin/keyin solishtiring.
