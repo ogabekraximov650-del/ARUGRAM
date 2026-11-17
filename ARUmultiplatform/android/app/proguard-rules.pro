@@ -42,3 +42,15 @@
 -keep class com.google.android.gms.internal.ads.** { *; }
 -dontwarn com.google.android.gms.ads.**
 -dontwarn com.google.android.gms.internal.ads.**
+
+# WorkManager + Room + androidx.startup (AdMob kutubxonasi olib keladi va ilova ochilishida ishga tushiradi): Room `WorkDatabase_Impl` ni nomi bo'yicha (reflection) yaratadi.
+# R8 uning konstruktorini kesib tashlasa ilova ochilmasdan yopiladi: "Failed to create an instance of androidx.work.impl.WorkDatabase" (build 189, Xiaomi, Android 10).
+# WorkManager + Room + startup: Room creates `WorkDatabase_Impl` by name; if R8 strips its constructor the app dies at launch.
+-keep class androidx.startup.** { *; }
+-keep class * extends androidx.startup.Initializer { *; }
+-keep class androidx.work.** { *; }
+-keep class androidx.room.** { *; }
+-keep class androidx.sqlite.** { *; }
+-keep class * extends androidx.room.RoomDatabase { *; }
+-dontwarn androidx.work.**
+-dontwarn androidx.room.**

@@ -118,6 +118,9 @@ jobs:
             echo "== $f"; ls -la "$f"
             "$APKSIGNER" verify --print-certs "$f" | head -3
             unzip -l "$f" | grep -E "librust_core" || true
+            # R8 tekshiruvi: WorkManager'ning Room bazasi (ilova ochilishida kerak) APK ichida konstruktori bilan bormi (build 189 da shu yetishmay ilova ochilmagan).
+            echo "== R8: WorkDatabase_Impl"
+            "$ANDROID_HOME"/cmdline-tools/latest/bin/apkanalyzer dex packages --defined-only "$f" 2>&1 | grep -i "WorkDatabase_Impl" | head -5 || echo "WorkDatabase_Impl TOPILMADI"
           done
           echo "dir=$OUT" >> "$GITHUB_OUTPUT"
 
