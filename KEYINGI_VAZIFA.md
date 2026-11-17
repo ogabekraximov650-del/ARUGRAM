@@ -7488,3 +7488,7 @@ Eslatma: `Content-Encoding: br` so'rovlarini faqat yangi `tgstore-jr` ochadi —
 
 AdMob'li APK (build 185/186) foydalanuvchi telefonida ilova ochilmasdan yopilib ketdi (server sog'lom: Ample va worker ishlayapti, sessiya bazada). Sabab aniq emas (eng ehtimoli — `play-services-ads` + R8 `isMinifyEnabled` yoki kutubxonaning ishga tushishi). Shu sabab `372fdd39`, `8b06daca`, `50255008` commit'lari QAYTARILDI (`git revert`) — kod git tarixida saqlangan (reklama mantig'i: `AdAccess`, `RewardedAds`, SeasonScreen).
 Qayta qo'shish rejasi: avval sabab aniqlanadi (`AruApplication` endi Kotlin/Java halokatini `last_crash.txt` ga yozadi va keyingi ochilishda ko'rsatadi), `proguard-rules.pro` ga AdMob qoidalari (`-keep class com.google.android.gms.ads.** { *; }` va sh.k.) qo'shiladi, keyin AdMob alohida build bilan sinaladi. Haqiqiy ID'lar: ilova `ca-app-pub-8901205768474122~2994428955`, mukofotli blok `ca-app-pub-8901205768474122/4115938931`.
+
+## Halokat hisoboti Yuklashlar (Download) papkasiga ham saqlanadi
+
+`AruApplication` Kotlin/Java halokatini `last_crash.txt` (keyingi ochilishda ko'rsatiladi) bilan birga telefonning **Download** papkasiga ham yozadi: `arumediatv_xato_<sana_vaqt>.txt` (versiya, qurilma, Android, stack). Android 10+ da MediaStore orqali, ruxsat so'ralmaydi; eski Android'da `Android/data/uz.arumediatv.com/files/Download`. Maqsad: ilova ochilmay yopilsa ham fayl menejeridan topib yuborish mumkin bo'lsin.
