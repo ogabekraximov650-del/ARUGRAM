@@ -39,6 +39,9 @@ except Exception:  # noqa: BLE001 — modul yo'q bo'lsa eski usul
     r2client = None
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import stage  # noqa: E402 — 2 GB dan katta videoni qismlab shifrlash (toza yordamchilar)
+
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "anibla"
 SESSION = str(HERE / "pyro_session")
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -84,6 +87,8 @@ class Job:
         self.chat = int(j.get("chat") or 0)
         self.attempt = int(j.get("attempt") or 1)
         self.channel = int(r.get("channel") or 0)
+        # "Ilova uchun -> Anibla orqali": `anime/bo'lim[/qism]`. Bo'sh bo'lmasa video Telegram'ga qo'yiladi va kodlash navbati `done` da yaratiladi.
+        self.target = str(j.get("target") or "").strip()
 
     def ident(self):
         return {"runner": RUNNER, "id": self.id, "status_msg": self.status, "chat": self.chat}
@@ -575,6 +580,51 @@ async def upload(app, job, out, thumb, live):
     return m.id
 
 
+async def upload_doc(app, job, path, caption, name, live, label):
+    """Faylni yopiq kanalga HUJJAT qilib yuklaydi (tez usul, bo'lmasa oddiy); qaytadi: xabar raqami."""
+    orig = app.save_file
+
+    async def patched(p, progress=None, progress_args=(), file_id=None, file_part=0):
+        return await fast_save_file(app, orig, p, progress, progress_args, file_id, file_part)
+
+    def send():
+        return app.send_document(job.channel, str(path), caption=caption[:1024], file_name=name, force_document=True,
+                                 disable_notification=True, progress=live.transfer(label))
+
+    app.save_file = patched
+    try:
+        m = await send()
+    except Exception as e:  # noqa: BLE001
+        log(f"tez yuklash ishlamadi ({e}) — oddiy usulda qayta urinilmoqda")
+        app.save_file = orig
+        m = await send()
+    finally:
+        app.save_file = orig
+    if not m:
+        raise RuntimeError("Telegram'ga yuklanmadi")
+    return m.id
+
+
+async def upload_parts(app, job, out, size, live):
+    """2 GB dan katta video: BAYT bo'yicha ~1,9 GB li qismlarga bo'linadi, butun fayl bitta kalit bilan shifrlanadi, har qism ketma-ket
+    kanalga yuklanadi (yuklangach diskdan o'chadi). Qaytadi: (xabar raqamlari, kalit hex)."""
+    import secrets
+    key = secrets.token_bytes(16)
+    plan = stage.plan_parts(size)
+    ids = []
+    for i, (off, n) in enumerate(plan):
+        part = WORK / f"part{i}.bin"
+        await asyncio.to_thread(stage.encrypt_range, out, key, off, n, part)
+        log(f"  qism {i + 1}/{len(plan)}: {n / 1048576:.0f} MB Telegram'ga yuklanmoqda")
+        try:
+            mid = await upload_doc(app, job, part, f"ARUSTAGE {job.file_name} {i + 1}/{len(plan)}", f"{job.file_name}.p{i}",
+                                   live, f"⬆️ Telegram'ga yuklanmoqda (qism {i + 1}/{len(plan)})")
+        finally:
+            part.unlink(missing_ok=True)
+        ids.append(mid)
+    return ids, key.hex()
+
+
 def session_api_id():
     """Sessiya faylidagi api_id (sessiya qaysi ilova bilan yaratilgan bo'lsa)."""
     try:
@@ -614,7 +664,26 @@ async def process(app, job):
         live.done(f"Yuklab olindi: {size / 1048576:.1f} MB · {w or '?'}x{h or '?'} · {hms(dur or 0)} · {hms(el)} da")
         log(f"  yuklab olindi: {size / 1048576:.1f} MB")
         if size > MAX_BYTES:
-            raise Fatal(f"fayl {size / 1048576:.0f} MB — Telegram chegarasi 2 GB. Pastroq sifatni tanlang.")
+            if not job.target:
+                raise Fatal(f"fayl {size / 1048576:.0f} MB — Telegram chegarasi 2 GB. Pastroq sifatni tanlang.")
+            # Ilova uchun: katta video qismlab shifrlanib Telegram'ga qo'yiladi; qismlar kodlovchilarga `origin_parts` bo'lib beriladi.
+            live.send(f"✂️ {size / 1048576:.0f} MB — 2 GB dan katta: qismlab Telegram'ga yuklanadi", force=True)
+            t_up = time.time()
+            ids, key = await upload_parts(app, job, out, size, live)
+            live.done(f"Telegram'ga {len(ids)} qismda yuklandi · {hms(time.time() - t_up)}")
+            live.close()
+            try:
+                api("done", {**job.ident(), "ok": True, "channel_msg": ids[0], "parts": ids, "key": key,
+                             "size": size, "height": int(h or 0), "text": live.text(f"✅ Tayyor ({size / 1048576:.0f} MB, {len(ids)} qism)")})
+            except Lost:
+                for mid in ids:
+                    try:
+                        await app.delete_messages(job.channel, mid)
+                    except Exception:  # noqa: BLE001
+                        pass
+                raise
+            log(f"  ✅ #{job.id} {len(ids)} qismda Telegram'ga qo'yildi")
+            return
         subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "10", "-i", str(out), "-frames:v", "1",
                         "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(thumb)])
         # Telegram'ga yuklanadigan fayl avval R2'ga yoziladi; yuklovchi workflow kanalga yuboradi va `done` ni o'zi chaqiradi.

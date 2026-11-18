@@ -48,6 +48,7 @@ for _src in sorted((HERE.parent / "translate").iterdir()):
 # `creds.enc` KO'CHIRILMAYDI: login/parol faqat worker'da (ANIBLA_CREDS).
 FILES[".github/workflows/anibla.yml"] = HERE.parent / "anibla" / "anibla.workflow.yml"
 FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
+FILES["tool/anibla/stage.py"] = HERE.parent / "anibla" / "stage.py"
 # aniraxuzbot: BITTA workflow (`anibla_bot.yml`) — bitta run = bitta to'liq qism (sifatlar 360p dan ketma-ket), R2 orqali.
 FILES[".github/workflows/anibla_bot.yml"] = HERE.parent / "anibla" / "anibla_bot.workflow.yml"
 # Eski per-sifat workflow'lar: run'lari to'xtatilib o'chiriladi, fayllari olib tashlanadi (bir martalik, keyin hech narsa topilmaydi).

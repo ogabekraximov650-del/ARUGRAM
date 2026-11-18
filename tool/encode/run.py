@@ -1166,8 +1166,27 @@ async def process(app: Client, channel: int, job: dict):
                 raise Fatal("asl video kanalda topilmadi")
             log("  asl video yuklab olinmoqda...")
             await asyncio.to_thread(hb.set, "download", True)
-            got = await app.download_media(m, file_name=str(enc),
-                                           progress=transfer_progress("yuklab olinmoqda"))
+            parts = [int(x) for x in (job.get("origin_parts") or []) if int(x) > 0]
+            if len(parts) > 1:
+                # 2 GB dan katta asl video Telegram'ga qismlab qo'yilgan (`tool/anibla/download.py`): qismlar tartib bilan olinib ulanadi,
+                # shifri esa quyida (butun fayl bo'yicha bitta kalit) ochiladi.
+                got = str(enc)
+                with open(enc, "wb") as fo:
+                    for i, pm in enumerate(parts):
+                        pmsg = await app.get_messages(channel, pm)
+                        if not pmsg or pmsg.empty or not (pmsg.document or pmsg.video):
+                            raise Fatal(f"asl video qismi {i + 1}/{len(parts)} kanalda topilmadi")
+                        log(f"  asl video qismi {i + 1}/{len(parts)} yuklab olinmoqda...")
+                        pgot = await app.download_media(pmsg, file_name=str(WORK / f"opart{i}"),
+                                                        progress=transfer_progress(f"yuklab olinmoqda ({i + 1}/{len(parts)})"))
+                        if not pgot or Path(pgot).stat().st_size == 0:
+                            raise RuntimeError(f"asl video qismi {i + 1} yuklab olinmadi")
+                        with open(pgot, "rb") as fi:
+                            shutil.copyfileobj(fi, fo, 8 * 1048576)
+                        Path(pgot).unlink()
+            else:
+                got = await app.download_media(m, file_name=str(enc),
+                                               progress=transfer_progress("yuklab olinmoqda"))
             if not got or Path(got).stat().st_size == 0:
                 raise RuntimeError("asl video yuklab olinmadi")
             if bot_msg is not None:

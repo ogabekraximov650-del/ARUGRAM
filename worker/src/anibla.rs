@@ -1797,7 +1797,48 @@ async fn start(env: &Env, chat: i64, status: i64, it: &Item, ep: Option<(&str, &
         return;
     }
 
-    // "Ilova uchun -> Anibla orqali": Telegram'ga YUKLANMAYDI (2 GB chegarasi).
+    // "Ilova uchun -> Anibla orqali" (YANGI, standart): video Anibla'dan BIR marta yuklanadi va Telegram'ga (>2 GB bo'lsa qismlab) qo'yiladi;
+    // qism va kodlash navbati faqat shundan KEYIN yaratiladi (`done`), shuning uchun 4 ta sifat-workflow asl videoni Telegram'dan oladi,
+    // Anibla'dan 4 marta yuklamaydi. O'chirish: `anibla_stage` = 0.
+    // EN: the video is downloaded from the site ONCE and put into Telegram (in parts if >2 GB); the episode + encode job are created only
+    //     afterwards (`done`), so the 4 quality workflows read the origin from Telegram instead of hitting the site 4 times.
+    if config_get(env, "anibla_stage").await.as_deref() != Some("0") {
+        if let Some((t, label)) = &target {
+            let v2: Vec<i64> = t.split('/').filter_map(|p| p.parse().ok()).collect();
+            if v2.len() >= 2 {
+                let (a, s) = (v2[0], v2[1]);
+                if encbot_titles(env, a, s).await.is_none() {
+                    let _ = encbot_api(env, "editMessageText", edit("\u{274C} Anime yoki bo'lim topilmadi (o'chirilgan bo'lishi mumkin).".into())).await;
+                    return;
+                }
+                let dup = turso_exec(env, "SELECT id FROM anibla_jobs WHERE url=? AND state IN ('queued','running') LIMIT 1",
+                    vec![TursoArg::text(&v.job_url())]).await.ok().and_then(|r| first_row(&r));
+                if let Some(d) = dup {
+                    let _ = encbot_api(env, "editMessageText", edit(format!(
+                        "\u{2139}\u{FE0F} Bu video allaqachon navbatda (#{}).", jint(&d, "id")))).await;
+                    return;
+                }
+                let ins = turso_exec(env,
+                    "INSERT INTO anibla_jobs (url, caption, file_name, chat, status_msg, queued_at, target) VALUES (?,?,?,?,?,?,?) RETURNING id",
+                    vec![TursoArg::text(&v.job_url()), TursoArg::text(&caption), TursoArg::text(&fname),
+                         TursoArg::int(chat), TursoArg::int(status), TursoArg::int(now_ms()), TursoArg::text(t)]).await;
+                let Some(id) = ins.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")) else {
+                    let _ = encbot_api(env, "editMessageText", edit("\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi).".into())).await;
+                    return;
+                };
+                if v2.len() == 3 {
+                    config_put(env, "anibla_target", "").await;
+                }
+                let k = kick(env).await;
+                let _ = encbot_api(env, "editMessageText", edit(format!(
+                    "\u{2705} {} \u{2014} navbatga qo'shildi (#{id}). Video saytdan BIR marta yuklanib Telegram'ga qo'yiladi (2 GB dan katta bo'lsa qismlab), \
+                     shundan keyin 4 sifat kodlashga tushadi.\n\n{k}", html_escape(label)))).await;
+                return;
+            }
+        }
+    }
+
+    // "Ilova uchun -> Anibla orqali" (ESKI usul, `anibla_stage`=0): Telegram'ga YUKLANMAYDI (2 GB chegarasi).
     // Qism darhol yaratiladi va kodlash navbatiga `anibla:<manzil>` bilan tushadi —
     // kodlash run'i (`tool/encode/run.py`) videoni saytdan yuklab, shu zahoti
     // H.265 da 4 sifatga (MP4 + fMP4) kodlaydi.
@@ -2117,6 +2158,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             return ok(json!({"channel": tg_channel_id(env), "job": {
                 "id": id, "url": job["url"], "caption": job["caption"], "file_name": job["file_name"],
                 "chat": chat, "status_msg": status,
+                "target": job["target"],
                 "attempt": jint(&got, "attempts"),
             }}));
         }
@@ -2173,6 +2215,21 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                     None => encbot_numbers(env, a, s).await.iter().max().copied().unwrap_or(0) + 1,
                 };
                 let origin = format!("orig_bot_{a}_{s}_{n}_{}.mp4", now_ms());
+                // 2 GB dan katta video: qismlar (`<asl>.p0..pN`) va umumiy kalit (butun fayl bo'yicha AES-CTR) yozib qo'yiladi; `encbot_register` asl nomni bog'laydi.
+                let parts: Vec<i64> = b["parts"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).filter(|m| *m > 0).collect()).unwrap_or_default();
+                let key = b["key"].as_str().unwrap_or("").trim().to_string();
+                if parts.len() > 1 && valid_file_key(&key) {
+                    for (i, m) in parts.iter().enumerate() {
+                        let _ = turso_exec(env,
+                            "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')
+                             ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
+                            vec![TursoArg::text(&origin_part_name(&origin, i)), TursoArg::int(*m)]).await;
+                    }
+                    let _ = turso_exec(env,
+                        "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
+                         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
+                        vec![TursoArg::text(&origin), TursoArg::int(parts[0]), TursoArg::text(&key)]).await;
+                }
                 let res = if encbot_titles(env, a, s).await.is_some() {
                     encbot_register(env, a, s, n, &origin, msg, jint(&b, "size"), jint(&b, "height")).await
                 } else {

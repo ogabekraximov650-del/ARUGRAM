@@ -7553,3 +7553,11 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 - **Dastur manbasi:** `.github/workflows/ytbot-build.yml` ytbot'ni yig'ib, ochiq Release `ytbot-latest` ga qo'yadi; `ytjob.yml` dasturni shu yerdan oladi (zaxira — Ample `/bin`).
 - **Cheklov:** PDF (sahifa rasmlari) ishi Ample'da qoladi (ffmpeg faqat PNG/WebP→JPEG uchun kerak).
 - Fayllar: `ARUmultiplatform/ytbot/src/{bot.rs,bot/actions.rs,bot/ajob.rs,dl.rs}`, `tool/ytjob/*`, `.github/workflows/ytbot-build.yml`.
+
+## Anibla orqali qism: video BIR marta yuklanadi va Telegram'ga qo'yiladi, kodlash shundan keyin (2026-11-18)
+
+- **Muammo:** "Ilova uchun -> Anibla orqali" da 4 ta sifat-workflow (360/480/720/1080) asl videoni anibla.uz'dan har biri o'zi yuklardi (4 marta).
+- **Yangi tartib (standart, o'chirish: `config anibla_stage = 0`):** `anibla.rs::start` qismni darhol yaratmaydi — `anibla_jobs` navbatiga `target = anime/bo'lim[/qism]` bilan qo'yadi. `anibla.yml` (`tool/anibla/download.py`) videoni BIR marta yuklaydi va yopiq kanalga qo'yadi; `/api/anibla/done` shundan KEYIN qismni yaratadi va kodlash navbatiga tushiradi (`encbot_register`, avvalgi "Telegram-origin" yo'li). Shuning uchun sifat-workflow'lar asl videoni Telegram'dan oladi.
+- **2 GB dan katta:** `tool/anibla/stage.py` — BAYT bo'yicha 1900 MiB li qismlar, butun fayl bitta AES-128-CTR kalit bilan shifrlanadi (hisoblagich fayl bo'ylab davom etadi). Qismlar `tg_files` da `<asl>.p0..pN` nomi bilan, kalit asl nomda (`file_key`). Claim javobida `origin_parts` (tartibli xabar raqamlari); `tool/encode/run.py` qismlarni yuklab ulaydi va bir marta ochadi. `tg_forget_file` hamma qismni kanaldan o'chiradi.
+- **Sinovlar:** `python3 tool/anibla/test_stage.py` (bo'lish/shifrlash/ulash/`run.py::ctr_file` mosligi), worker `origin_parts_tests`. To'liq zanjir (Anibla hisobi + Telegram sessiyasi) Actions'da sinalmagan: birinchi haqiqiy qismni kuzating.
+- Fayllar: `worker/src/{anibla.rs,lib.rs}`, `tool/anibla/{download.py,stage.py,test_stage.py}`, `tool/encode/run.py`, `tool/packs/sync_repo.py`, `tool/encode/setup_repo.py`, `.github/workflows/sync-packs.yml`.

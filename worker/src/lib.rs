@@ -3854,6 +3854,40 @@ fn valid_file_key(k: &str) -> bool {
     k.len() == 32 && k.chars().all(|c| c.is_ascii_hexdigit())
 }
 
+/// UZ: 2 GB dan katta asl video Telegram'ga qismlab yuklanadi: qism nomi `<asl>.p<tartib>` (`origin_part_name`).
+/// EN: an origin video over 2 GB is uploaded in parts named `<origin>.p<index>`.
+pub(crate) fn origin_part_name(origin: &str, idx: usize) -> String {
+    format!("{origin}.p{idx}")
+}
+
+/// `<asl>.p<tartib>` nomidan tartib raqami (boshqa nom bo'lsa `None`). EN: index from a part name.
+pub(crate) fn origin_part_index(origin: &str, name: &str) -> Option<usize> {
+    let rest = name.strip_prefix(origin)?.strip_prefix(".p")?;
+    if rest.is_empty() || !rest.bytes().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+    rest.parse().ok()
+}
+
+/// Asl videoning qismlari: `(nom, xabar)` tartib bo'yicha. Bitta fayl bo'lsa — bo'sh. EN: ordered `(name, msg_id)` parts; empty for a single file.
+pub(crate) async fn origin_part_rows(env: &Env, origin: &str) -> Vec<(String, i64)> {
+    let esc: String = origin.chars().flat_map(|c| if matches!(c, '%' | '_' | '\\') { vec!['\\', c] } else { vec![c] }).collect();
+    let res = turso_exec(env, "SELECT file_name, msg_id FROM tg_files WHERE file_name LIKE ? ESCAPE '\\'",
+        vec![TursoArg::text(&format!("{esc}.p%"))]).await;
+    let mut v: Vec<(usize, String, i64)> = res.map(|r| rows_of(&r)).unwrap_or_default().into_iter()
+        .filter_map(|r| {
+            let n = r["file_name"].as_str()?.to_string();
+            Some((origin_part_index(origin, &n)?, n, r["msg_id"].as_i64()?))
+        }).collect();
+    v.sort_by_key(|x| x.0);
+    v.into_iter().map(|(_, n, m)| (n, m)).collect()
+}
+
+/// Kodlovchiga beriladigan qism xabarlari (tartib bilan); bitta fayl bo'lsa bo'sh ro'yxat. EN: ordered part message ids for the encoder.
+pub(crate) async fn origin_parts(env: &Env, origin: &str) -> Vec<i64> {
+    origin_part_rows(env, origin).await.into_iter().map(|(_, m)| m).collect()
+}
+
 /// Qism yozuvidan kalitlarni olib tashlaydi — ro'yxat hammaga
 /// (va chekka keshga) beriladi, kalit esa faqat `/api/tg/deliver`
 /// orqali, ruxsat tekshirilgach.
@@ -11589,6 +11623,17 @@ async fn tg_forget_file(env: &Env, value: &str) {
     }
     // Yangi tizimdagi (18 MiB bo'lakli) nusxa ham ketadi.
     vd::forget(env, name).await;
+    // 2 GB dan katta asl video qismlarga bo'lingan bo'lsa (`<nom>.p0`, `.p1`, ...) — hamma qism kanaldan o'chadi.
+    for (pname, pmsg) in origin_part_rows(env, name).await {
+        let channel = tg_channel_id(env);
+        if channel != 0 {
+            let body = json!({"chat_id": channel, "message_id": pmsg});
+            if tg_api(env, "deleteMessage", body.clone()).await.is_err() && !encbot_token(env).is_empty() {
+                let _ = encbot_api(env, "deleteMessage", body).await;
+            }
+        }
+        let _ = turso_exec(env, "DELETE FROM tg_files WHERE file_name=?", vec![TursoArg::text(&pname)]).await;
+    }
     let res = turso_exec(env, "SELECT msg_id FROM tg_files WHERE file_name=?",
         vec![TursoArg::text(name)]).await;
     let Some(msg_id) = res.ok().and_then(|r| first_row(&r)).and_then(|r| r["msg_id"].as_i64()) else {
@@ -12139,6 +12184,7 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                     "wq": wq,
                     "src_h": h,
                     "origin_msg": src["msg_id"],
+                    "origin_parts": origin_parts(env, &origin).await,
                     "origin_vd": src["vd"].as_bool().unwrap_or(false),
                     "origin_url": anibla_url.unwrap_or_default(),
                     "origin_label": anibla_label,
@@ -12999,6 +13045,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     "done": done,
                     "uploaded": uploaded,
                     "origin_msg": src["msg_id"],
+                    "origin_parts": origin_parts(env, &origin).await,
                     "origin_vd": src["vd"].as_bool().unwrap_or(false),
                     "origin_url": anibla_url.unwrap_or_default(),
                     "origin_label": anibla_label,
@@ -16444,6 +16491,22 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
 }
 
+
+#[cfg(test)]
+mod origin_parts_tests {
+    use super::*;
+
+    #[test]
+    fn part_names_roundtrip() {
+        let o = "orig_bot_1_2_3_1700000000.mp4";
+        assert_eq!(origin_part_name(o, 0), "orig_bot_1_2_3_1700000000.mp4.p0");
+        assert_eq!(origin_part_index(o, &origin_part_name(o, 12)), Some(12));
+        assert_eq!(origin_part_index(o, o), None);
+        assert_eq!(origin_part_index(o, "orig_bot_1_2_3_1700000000.mp4.px"), None);
+        assert_eq!(origin_part_index(o, "orig_bot_1_2_3_1700000000.mp4.p"), None);
+        assert_eq!(origin_part_index(o, "boshqa.mp4.p1"), None);
+    }
+}
 
 #[cfg(test)]
 mod tg_tests {
