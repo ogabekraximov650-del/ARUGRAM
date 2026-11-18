@@ -863,6 +863,32 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
     Ok(json!({"deleted": deleted, "failed": failed, "left": total, "tg_files": l["tg"], "vd_queue": l["vd"], "r2_files": l["r2"]}))
 }
 
+/// Xabarlarni o'chiradi: avval bitta so'rovda; bo'lmasa har birini alohida (mavjud bo'lmagan xabar "o'chirilgan" hisoblanadi). Qaytadi: (o'chdi, xato, oxirgi xato matni).
+async fn del_msgs_loose(env: &Env, channel: i64, msgs: &[i64]) -> (i64, i64, String) {
+    if msgs.is_empty() || channel == 0 {
+        return (0, 0, String::new());
+    }
+    if tg_api(env, "deleteMessages", json!({"chat_id": channel, "message_ids": msgs})).await.is_ok() {
+        return (msgs.len() as i64, 0, String::new());
+    }
+    let (mut ok, mut bad, mut last) = (0i64, 0i64, String::new());
+    for m in msgs {
+        match tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": m})).await {
+            Ok(_) => ok += 1,
+            Err(e) => {
+                let t = e.to_string();
+                if t.contains("not found") {
+                    ok += 1;
+                } else {
+                    bad += 1;
+                    last = t;
+                }
+            }
+        }
+    }
+    (ok, bad, last)
+}
+
 /// UZ: faqat QISM videolari: `epizod_db` dagi sifat fayllarining kanal xabarlari (`q<sifat>_vd_msgs`), R2 va kesh; `vd_queue` dagi `ep_`/`orig_` fayllar; `tg_files` dagi `orig*` (asl video va `.p<i>` qismlari).
 /// Rasm, avatar, yozishma va boshqa fayllarga TEGILMAYDI. Qatorlarni o'chirmaydi — faqat xabar ro'yxatini bo'shatadi (qayta chaqirilsa takrorlanmaydi). Qolgan ish soni `left`.
 /// EN: episode videos only; leaves images/avatars/chat files alone. Clears the message lists instead of deleting rows so repeat calls make progress.
@@ -871,17 +897,24 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
     ensure(env).await?;
     let channel = tg_channel_id(env);
     let (mut deleted, mut failed) = (0i64, 0i64);
+    let mut err = String::new();
     const Q: [&str; 4] = ["360", "480", "720", "1080"];
     let cols: Vec<String> = Q.iter().flat_map(|q| [format!("q{q}_vd_msgs"), format!("q{q}_vd_name"), format!("url_{q}p")]).collect();
     let any = Q.iter().map(|q| format!("COALESCE(q{q}_vd_msgs,'')<>''")).collect::<Vec<_>>().join(" OR ");
-    let r = turso_exec(env, &format!("SELECT anime_id,season_id,epizod_id,{} FROM epizod_db WHERE {any} LIMIT 2", cols.join(",")), vec![]).await?;
+    let r = turso_exec(env, &format!("SELECT anime_id,season_id,epizod_id,{} FROM epizod_db WHERE {any} LIMIT 1", cols.join(",")), vec![]).await?;
     for row in rows_of(&r) {
         let mut set = Vec::new();
         for q in Q {
             let msgs: Vec<i64> = ids(row[format!("q{q}_vd_msgs")].as_str().unwrap_or("")).iter().filter_map(|x| x.parse().ok()).collect();
             let mut ok_all = true;
             for part in msgs.chunks(100) {
-                if del_msgs(env, vd_channel(env), part).await { deleted += part.len() as i64 } else { failed += part.len() as i64; ok_all = false }
+                let (o, b, e) = del_msgs_loose(env, vd_channel(env), part).await;
+                deleted += o;
+                failed += b;
+                if b > 0 {
+                    ok_all = false;
+                    err = e;
+                }
             }
             for n in [row[format!("q{q}_vd_name")].as_str().unwrap_or(""), row[format!("url_{q}p")].as_str().unwrap_or("")] {
                 // Tayyor fayl Telegram'da; R2 da bo'lak qolmaydi (so'rovlar chegarasi ~50 — R2 ga tegilmaydi), faqat kesh.
@@ -932,7 +965,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
                 (SELECT COUNT(*) FROM vd_queue WHERE name LIKE 'ep\\_%' ESCAPE '\\' OR name LIKE 'orig\\_%' ESCAPE '\\') AS vd,
                 (SELECT COUNT(*) FROM tg_files WHERE file_name LIKE 'orig%') AS tg"), vec![]).await?;
     let l = first_row(&left).unwrap_or(json!({}));
-    Ok(json!({"deleted": deleted, "failed": failed, "left": jint(&l, "ep") + jint(&l, "vd") + jint(&l, "tg"), "epizod_db": l["ep"], "vd_queue": l["vd"], "tg_files": l["tg"]}))
+    Ok(json!({"deleted": deleted, "failed": failed, "err": err, "left": jint(&l, "ep") + jint(&l, "vd") + jint(&l, "tg"), "epizod_db": l["ep"], "vd_queue": l["vd"], "tg_files": l["tg"]}))
 }
 
 // ── Foydalanuvchi yo'llari (sessiya bilan) ───────────────────
