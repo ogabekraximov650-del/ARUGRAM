@@ -876,7 +876,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
     let mut err = String::new();
     let mut budget: i32 = 14;
     const Q: [&str; 4] = ["360", "480", "720", "1080"];
-    let cols: Vec<String> = Q.iter().flat_map(|q| [format!("q{q}_vd_msgs"), format!("q{q}_vd_name"), format!("url_{q}p")]).collect();
+    let cols: Vec<String> = Q.iter().map(|q| format!("q{q}_vd_msgs")).collect();
     let any = Q.iter().map(|q| format!("COALESCE(q{q}_vd_msgs,'')<>''")).collect::<Vec<_>>().join(" OR ");
     let r = turso_exec(env, &format!("SELECT anime_id,season_id,epizod_id,{} FROM epizod_db WHERE {any} LIMIT 1", cols.join(",")), vec![]).await?;
     for row in rows_of(&r) {
@@ -1029,11 +1029,23 @@ async fn owner_save(env: &Env, name: &str, size: i64, chunks: i64, key: &str, id
     let mut saved = false;
     for o in owners_of(name) {
         let r = &o.r;
-        let sql = format!(
-            "UPDATE {t} SET {r}_vd_name=?, {r}_vd_size=?, {r}_vd_chunks=?, {r}_vd_key=?, {r}_vd_ids=?, {r}_vd_msgs=? WHERE {w}",
-            t = o.table, w = o.where_sql
-        );
-        let mut args = vec![TursoArg::text(name), TursoArg::int(size), TursoArg::int(chunks), TursoArg::text(key), TursoArg::text(ids), TursoArg::text(msgs)];
+        let mut sets = Vec::new();
+        let mut args: Vec<TursoArg> = Vec::new();
+        if let Some(nc) = o.name_col() {
+            sets.push(format!("{nc}=?"));
+            args.push(TursoArg::text(name));
+        }
+        sets.push(format!("{}=?", o.size_col()));
+        args.push(TursoArg::int(size));
+        sets.push(format!("{r}_vd_chunks=?"));
+        args.push(TursoArg::int(chunks));
+        sets.push(format!("{}=?", o.key_col()));
+        args.push(TursoArg::text(key));
+        sets.push(format!("{r}_vd_ids=?"));
+        args.push(TursoArg::text(ids));
+        sets.push(format!("{r}_vd_msgs=?"));
+        args.push(TursoArg::text(msgs));
+        let sql = format!("UPDATE {t} SET {s} WHERE {w}", t = o.table, s = sets.join(", "), w = o.where_sql);
         args.extend(o.args.iter().map(owner_arg));
         if let Ok(res) = turso_exec(env, &sql, args).await {
             if jint(&res, "affected_row_count") > 0 {
@@ -1045,15 +1057,23 @@ async fn owner_save(env: &Env, name: &str, size: i64, chunks: i64, key: &str, id
 }
 
 /// Faylning egasidagi ma'lumotini tozalaydi (fayl o'chirilganda); faqat ma'lumot AYNAN shu nomga tegishli bo'lsa.
+/// `plain` egada (qism) faqat bo'laklar ma'lumoti (`chunks/ids/msgs`) tozalanadi; nom/hajm/kalit qism yozuvining o'zida qoladi.
 async fn owner_clear(env: &Env, name: &str) {
     for o in owners_of(name) {
         let r = &o.r;
-        let sql = format!(
-            "UPDATE {t} SET {r}_vd_name='', {r}_vd_size=0, {r}_vd_chunks=0, {r}_vd_key='', {r}_vd_ids='', {r}_vd_msgs='' WHERE ({w}) AND {r}_vd_name=?",
-            t = o.table, w = o.where_sql
-        );
-        let mut args: Vec<TursoArg> = o.args.iter().map(owner_arg).collect();
-        args.push(TursoArg::text(name));
+        let (sql, args) = if let Some(nc) = o.name_col() {
+            let mut args: Vec<TursoArg> = o.args.iter().map(owner_arg).collect();
+            args.push(TursoArg::text(name));
+            (format!(
+                "UPDATE {t} SET {nc}='', {sz}=0, {r}_vd_chunks=0, {k}='', {r}_vd_ids='', {r}_vd_msgs='' WHERE ({w}) AND {nc}=?",
+                t = o.table, sz = o.size_col(), k = o.key_col(), w = o.where_sql
+            ), args)
+        } else {
+            (format!(
+                "UPDATE {t} SET {r}_vd_chunks=0, {r}_vd_ids='', {r}_vd_msgs='' WHERE ({w})",
+                t = o.table, w = o.where_sql
+            ), o.args.iter().map(owner_arg).collect())
+        };
         let _ = turso_exec(env, &sql, args).await;
     }
 }
@@ -1066,14 +1086,17 @@ async fn owner_load_many(env: &Env, names: &[String]) -> Result<serde_json::Map<
     for n in names {
         for o in owners_of(n) {
             let r = &o.r;
+            let name_cond = o.name_col().map(|c| format!(" AND {c}=?")).unwrap_or_default();
             parts.push(format!(
-                "SELECT ? AS n, {r}_vd_size AS size, {r}_vd_chunks AS chunks, {r}_vd_key AS vkey, {r}_vd_ids AS chunk_ids, {r}_vd_msgs AS msg_ids \
-                 FROM {t} WHERE ({w}) AND {r}_vd_name=? AND {r}_vd_chunks>0",
-                t = o.table, w = o.where_sql
+                "SELECT ? AS n, {sz} AS size, {r}_vd_chunks AS chunks, {k} AS vkey, {r}_vd_ids AS chunk_ids, {r}_vd_msgs AS msg_ids \
+                 FROM {t} WHERE ({w}){name_cond} AND {r}_vd_chunks>0",
+                sz = o.size_col(), k = o.key_col(), t = o.table, w = o.where_sql
             ));
             args.push(TursoArg::text(n));
             args.extend(o.args.iter().map(owner_arg));
-            args.push(TursoArg::text(n));
+            if o.name_col().is_some() {
+                args.push(TursoArg::text(n));
+            }
         }
     }
     if parts.is_empty() {
@@ -1763,6 +1786,10 @@ pub(crate) fn owner_alter_sqls(table: &str, refs: &[&str], have: &[String]) -> V
     let mut out = Vec::new();
     for r in refs {
         for (suffix, ty) in OWNER_COLS {
+            // `epizod_db` da nom/hajm/kalit qismning o'z ustunlarida (`url_*`, `size_*`, `key_*`) — takroriy ustun qo'shilmaydi.
+            if table == "epizod_db" && matches!(suffix, "name" | "size" | "key") {
+                continue;
+            }
             let col = owner_col(r, suffix);
             if !have.iter().any(|h| *h == col) {
                 out.push(format!("ALTER TABLE {table} ADD COLUMN {col} {ty}"));
@@ -1790,7 +1817,7 @@ mod owner_cols_tests {
     #[test]
     fn full_set_for_fresh_table_and_all_present() {
         let q = owner_alter_sqls("epizod_db", &["q360", "q1080"], &[]);
-        assert_eq!(q.len(), 12);
+        assert_eq!(q.len(), 6);
         assert!(q.iter().any(|s| s.contains("q1080_vd_msgs")));
         let have: Vec<String> = q.iter().map(|s| s.split_whitespace().nth(5).unwrap().to_string()).collect();
         assert!(owner_alter_sqls("epizod_db", &["q360", "q1080"], &have).is_empty());
@@ -1820,6 +1847,22 @@ pub(crate) struct OwnerRef {
     /// `WHERE` sharti (`?` belgilari bilan) va uning argumentlari.
     pub where_sql: String,
     pub args: Vec<OwnerArg>,
+    /// `true` — egasi (`epizod_db`) nom/hajm/kalitni O'Z ustunlarida saqlaydi (`url_<sifat>p`, `size_<sifat>p`, `key_<sifat>p`); takroriy `<ref>_vd_name/size/key` YO'Q.
+    /// `false` — hamma narsa `<ref>_vd_*` ustunlarida.
+    pub plain: bool,
+}
+
+impl OwnerRef {
+    /// Fayl nomi ustuni (faqat `plain` bo'lmaganda; `plain` da nom `where_sql` ichida tekshiriladi).
+    fn name_col(&self) -> Option<String> {
+        if self.plain { None } else { Some(owner_col(&self.r, "name")) }
+    }
+    fn size_col(&self) -> String {
+        if self.plain { format!("size_{}p", &self.r[1..]) } else { owner_col(&self.r, "size") }
+    }
+    fn key_col(&self) -> String {
+        if self.plain { format!("key_{}p", &self.r[1..]) } else { owner_col(&self.r, "key") }
+    }
 }
 
 fn all_digits(s: &str) -> bool {
@@ -1849,6 +1892,7 @@ pub(crate) fn owners_of(name: &str) -> Vec<OwnerRef> {
                         r: format!("q{q}"),
                         where_sql: format!("anime_id=? AND season_id=? AND epizod_id=? AND url_{q}p=?"),
                         args: vec![OwnerArg::Int(a), OwnerArg::Int(s), OwnerArg::Int(e), OwnerArg::Text(name.to_string())],
+                        plain: true,
                     }];
                 }
             }
@@ -1856,16 +1900,16 @@ pub(crate) fn owners_of(name: &str) -> Vec<OwnerRef> {
         return Vec::new();
     }
     if stamped(name, "anime") {
-        return vec![OwnerRef { table: "anime_db", r: "photo".into(), where_sql: "photo_url=?".into(), args: vec![OwnerArg::Text(name.to_string())] }];
+        return vec![OwnerRef { table: "anime_db", r: "photo".into(), where_sql: "photo_url=?".into(), args: vec![OwnerArg::Text(name.to_string())], plain: false }];
     }
     if stamped(name, "season") {
-        return vec![OwnerRef { table: "season_db", r: "photo".into(), where_sql: "photo_url=?".into(), args: vec![OwnerArg::Text(name.to_string())] }];
+        return vec![OwnerRef { table: "season_db", r: "photo".into(), where_sql: "photo_url=?".into(), args: vec![OwnerArg::Text(name.to_string())], plain: false }];
     }
     if let Some(rest) = name.strip_prefix("avatar_") {
         let mut it = rest.split('_');
         if let (Some(u), Some(t), None) = (it.next(), it.next(), it.next()) {
             if all_digits(u) && t.strip_suffix(".jpg").map_or(false, all_digits) {
-                return vec![OwnerRef { table: "users_db", r: "avatar".into(), where_sql: "avatar_file=?".into(), args: vec![OwnerArg::Text(name.to_string())] }];
+                return vec![OwnerRef { table: "users_db", r: "avatar".into(), where_sql: "avatar_file=?".into(), args: vec![OwnerArg::Text(name.to_string())], plain: false }];
             }
         }
         return Vec::new();
@@ -1875,7 +1919,7 @@ pub(crate) fn owners_of(name: &str) -> Vec<OwnerRef> {
         if let (Some(u), Some(t), None) = (it.next(), it.next(), it.next()) {
             if all_digits(u) && t.split_once('.').map_or(false, |(st, ext)| all_digits(st) && !ext.is_empty()) {
                 return ["chat_messages", "comments_db"].iter().map(|tb| OwnerRef {
-                    table: tb, r: "media".into(), where_sql: "media_file=?".into(), args: vec![OwnerArg::Text(name.to_string())],
+                    table: tb, r: "media".into(), where_sql: "media_file=?".into(), args: vec![OwnerArg::Text(name.to_string())], plain: false,
                 }).collect();
             }
         }

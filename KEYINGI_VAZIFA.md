@@ -7591,3 +7591,11 @@ Foydalanuvchi talabi: kanaldagi va bazadagi barcha QISM videolari + `epizod_db` 
 Worker orqali tozalash 7 ta qismdan keyin to'xtadi: Telegram `message can't be deleted` (botda o'chirish huquqi yo'q). Foydalanuvchi talabi: kanal egasi sessiyasi bilan o'chirilsin.
 - `ci/ep_wipe_tg.py` + `.github/workflows/ep-wipe-tg.yml` (trigger `ci/EP_WIPE_TG_ONCE`): `tool/encode/session.enc` (kalit `ENCODE_TOKEN`) bilan Pyrogram, xabarlar `epizod_db.q*_vd_msgs`, `tg_files orig%`, `vd_queue ep_/orig_`; so'ng `epizod_db`, `encode_jobs`, `encode_q` bo'shatiladi. Avval zaxira.
 - Eslatma (2026-11-18): asosiy ma'lumotlar Ample bazasida (`tool/migrate/ample.enc`, `db_endpoint`), Turso'da faqat `post_jobs`/`anibla_jobs`. `ep-wipe-tg.yml` bazani Ample'dan oladi (Turso'ga tegmaydi). Avvalgi `ep-wipe.yml` zaxiralari Turso'dan (eski nusxa) edi.
+
+## `epizod_db` ustunlari ixchamlandi va tartiblandi (2026-11-18)
+
+Foydalanuvchi talabi: takroriy ustunlarni olib tashlab, qolganini ketma-ket tartiblash.
+- Olib tashlandi: `q360/q480/q720/q1080_vd_name`, `_vd_size`, `_vd_key` (12 ta) — ular `url_*`, `size_*`, `key_*` bilan bir xil edi.
+- Yangi tartib: qism (`anime_id, season_id, epizod_id, epizod_number, epizod_name`) -> har sifat uchun `url, size, key, q<sifat>_vd_chunks, q<sifat>_vd_ids, q<sifat>_vd_msgs` (360p, 480p, 720p, 1080p) -> `intro_1..10` -> `origin_video, origin_key, origin_size, origin_height` -> `views_total, watch_ms_total, created_at, ready_at`.
+- `worker/src/lib.rs`: `epizod_cols!` makrosi (yaratish va qayta qurish uchun bitta manba), `EPIZOD_COL_NAMES`, bir martalik `mig_epizod_cols_v3` (yangi jadval yaratiladi, ma'lumot ko'chadi, qator soni teng bo'lsa eski jadval almashtiriladi; xato bo'lsa eski jadval qoladi).
+- `worker/src/vd.rs`: `OwnerRef::plain` — `epizod_db` da fayl nomi `url_<sifat>p` orqali tekshiriladi, hajm/kalit `size_<sifat>p`/`key_<sifat>p` ga yoziladi; `<ref>_vd_chunks/ids/msgs` o'z joyida. `owner_alter_sqls` `epizod_db` uchun takroriy ustun qo'shmaydi.

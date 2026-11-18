@@ -665,6 +665,46 @@ impl DurableObject for MarkHub {
     }
 }
 
+/// `epizod_db` ustunlari (tartib bilan) — yaratish va qayta qurish (`mig_epizod_cols_v3`) uchun bitta manba.
+macro_rules! epizod_cols {
+    () => {
+        "anime_id INTEGER, season_id INTEGER, epizod_id INTEGER,
+            epizod_number INTEGER, epizod_name TEXT,
+            url_360p TEXT, size_360p INTEGER DEFAULT 0, key_360p TEXT DEFAULT '',
+            q360_vd_chunks INTEGER DEFAULT 0, q360_vd_ids TEXT DEFAULT '', q360_vd_msgs TEXT DEFAULT '',
+            url_480p TEXT, size_480p INTEGER DEFAULT 0, key_480p TEXT DEFAULT '',
+            q480_vd_chunks INTEGER DEFAULT 0, q480_vd_ids TEXT DEFAULT '', q480_vd_msgs TEXT DEFAULT '',
+            url_720p TEXT, size_720p INTEGER DEFAULT 0, key_720p TEXT DEFAULT '',
+            q720_vd_chunks INTEGER DEFAULT 0, q720_vd_ids TEXT DEFAULT '', q720_vd_msgs TEXT DEFAULT '',
+            url_1080p TEXT, size_1080p INTEGER DEFAULT 0, key_1080p TEXT DEFAULT '',
+            q1080_vd_chunks INTEGER DEFAULT 0, q1080_vd_ids TEXT DEFAULT '', q1080_vd_msgs TEXT DEFAULT '',
+            intro_1 TEXT, intro_2 TEXT, intro_3 TEXT, intro_4 TEXT,
+            intro_5 TEXT, intro_6 TEXT, intro_7 TEXT, intro_8 TEXT,
+            intro_9 TEXT, intro_10 TEXT,
+            origin_video TEXT DEFAULT '', origin_key TEXT DEFAULT '',
+            origin_size INTEGER DEFAULT 0, origin_height INTEGER DEFAULT 0,
+            views_total INTEGER DEFAULT 0,
+            watch_ms_total INTEGER DEFAULT 0,
+            created_at INTEGER,
+            -- Birinchi sifat joylangan vaqt (qism ilovada ko'rinadigan payt).
+            -- `created_at` — qator yaratilgan (asl video joylangan) vaqt.
+            ready_at INTEGER DEFAULT 0,
+            PRIMARY KEY (anime_id, season_id, epizod_id)"
+    };
+}
+
+/// `epizod_db` ustunlari nomlari (tartib bilan): eski jadvaldan yangisiga ko'chirishda faqat shular olinadi.
+const EPIZOD_COL_NAMES: &[&str] = &[
+    "anime_id", "season_id", "epizod_id", "epizod_number", "epizod_name",
+    "url_360p", "size_360p", "key_360p", "q360_vd_chunks", "q360_vd_ids", "q360_vd_msgs",
+    "url_480p", "size_480p", "key_480p", "q480_vd_chunks", "q480_vd_ids", "q480_vd_msgs",
+    "url_720p", "size_720p", "key_720p", "q720_vd_chunks", "q720_vd_ids", "q720_vd_msgs",
+    "url_1080p", "size_1080p", "key_1080p", "q1080_vd_chunks", "q1080_vd_ids", "q1080_vd_msgs",
+    "intro_1", "intro_2", "intro_3", "intro_4", "intro_5", "intro_6", "intro_7", "intro_8", "intro_9", "intro_10",
+    "origin_video", "origin_key", "origin_size", "origin_height",
+    "views_total", "watch_ms_total", "created_at", "ready_at",
+];
+
 /// UZ: qaysi bazaga boriladi. Faqat "Post kodlash" va "Anibla yuklash" navbatlari (`post_jobs`, `anibla_jobs`) Turso'da qoladi; qolgan hamma narsa
 /// Ample'da (`AMPLE_URL`/`AMPLE_TOKEN` berilgan bo'lsa). Berilmagan bo'lsa hammasi avvalgidek Turso'da.
 /// EN: picks the database. Only the post-encode and anibla job queues stay on Turso; everything else goes to Ample when AMPLE_URL/AMPLE_TOKEN are set (else all Turso).
@@ -1016,24 +1056,9 @@ async fn init_db(env: &Env) -> bool {
         //              (`rust/src/telegram.rs`). Kalit RO'YXATDA
         //              BERILMAYDI (`hide_keys`) — faqat faylni ko'rish
         //              ruxsati bor odamga `/api/tg/deliver` javobida.
-        ("CREATE TABLE IF NOT EXISTS epizod_db (
-            anime_id INTEGER, season_id INTEGER, epizod_id INTEGER,
-            epizod_number INTEGER, epizod_name TEXT,
-            url_360p TEXT, size_360p INTEGER DEFAULT 0, key_360p TEXT DEFAULT '',
-            url_480p TEXT, size_480p INTEGER DEFAULT 0, key_480p TEXT DEFAULT '',
-            url_720p TEXT, size_720p INTEGER DEFAULT 0, key_720p TEXT DEFAULT '',
-            url_1080p TEXT, size_1080p INTEGER DEFAULT 0, key_1080p TEXT DEFAULT '',
-            intro_1 TEXT, intro_2 TEXT, intro_3 TEXT, intro_4 TEXT,
-            intro_5 TEXT, intro_6 TEXT, intro_7 TEXT, intro_8 TEXT,
-            intro_9 TEXT, intro_10 TEXT,
-            views_total INTEGER DEFAULT 0,
-            watch_ms_total INTEGER DEFAULT 0,
-            created_at INTEGER,
-            -- Birinchi sifat joylangan vaqt (qism ilovada ko'rinadigan payt).
-            -- `created_at` — qator yaratilgan (asl video joylangan) vaqt.
-            ready_at INTEGER DEFAULT 0,
-            PRIMARY KEY (anime_id, season_id, epizod_id)
-        )", vec![]),
+        // Ustunlar tartibi (2026-11-18): qism -> har sifat uchun [havola, hajm, kalit, bo'laklar soni, Telegram fayl ID'lari, xabar raqamlari] -> o'tkazish vaqtlari -> asl video -> hisoblagichlar -> vaqtlar.
+        // Takroriy `q<sifat>_vd_name/size/key` YO'Q: nom/hajm/kalit `url_*`/`size_*`/`key_*` da (`vd.rs` -> `OwnerRef::plain`).
+        (concat!("CREATE TABLE IF NOT EXISTS epizod_db (", epizod_cols!(), ")"), vec![]),
 
         // ── JANRLAR: BITTA BO'LIM — BITTA QATOR ───────────────
         //
@@ -1706,6 +1731,38 @@ async fn init_db(env: &Env) -> bool {
             if turso_batch(env, &stmts).await.is_err() { all_ok = false }
         }
         if all_ok { config_put(env, "mig_vd_owner_cols2", "1").await; }
+    }
+    // `epizod_db` ustunlarini ixchamlash va tartiblash (2026-11-18, foydalanuvchi talabi): takroriy `q<sifat>_vd_name/size/key` olib tashlanadi, ustunlar
+    // sifat bo'yicha ketma-ket turadi. SQLite'da ustun tartibi faqat jadvalni qayta qurish bilan o'zgaradi: yangisi yaratiladi, ma'lumot ko'chadi, SO'NG eskisi o'chadi
+    // (ko'chirish xato bersa eski jadval TEGILMAYDI va keyingi ishga tushishda qayta uriniladi).
+    if ok && config_get(env, "mig_epizod_cols_v3").await.is_none() {
+        let have: Vec<String> = match turso_exec(env, "SELECT name FROM pragma_table_info('epizod_db')", vec![]).await {
+            Ok(r) => rows_of(&r).iter().filter_map(|x| x["name"].as_str().map(String::from)).collect(),
+            Err(_) => Vec::new(),
+        };
+        if have.is_empty() {
+            // jadval hali yo'q (yangi baza) yoki o'qib bo'lmadi: yangi sxema yuqoridagi yaratishda keladi
+        } else if !have.iter().any(|c| c == "q360_vd_name") {
+            config_put(env, "mig_epizod_cols_v3", "1").await; // allaqachon yangi sxema
+        } else {
+            let copy: Vec<&str> = EPIZOD_COL_NAMES.iter().copied().filter(|c| have.iter().any(|h| h == c)).collect();
+            let list = copy.join(",");
+            let _ = turso_exec(env, "DROP TABLE IF EXISTS epizod_db_new", vec![]).await;
+            let created = turso_exec(env, concat!("CREATE TABLE epizod_db_new (", epizod_cols!(), ")"), vec![]).await.is_ok();
+            let copied = created && turso_exec(env, &format!("INSERT INTO epizod_db_new ({list}) SELECT {list} FROM epizod_db"), vec![]).await.is_ok();
+            let n_old = turso_exec(env, "SELECT COUNT(*) AS n FROM epizod_db", vec![]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(-1);
+            let n_new = turso_exec(env, "SELECT COUNT(*) AS n FROM epizod_db_new", vec![]).await.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(-2);
+            if copied && n_old >= 0 && n_old == n_new
+                && turso_exec(env, "ALTER TABLE epizod_db RENAME TO epizod_db_old", vec![]).await.is_ok()
+            {
+                if turso_exec(env, "ALTER TABLE epizod_db_new RENAME TO epizod_db", vec![]).await.is_ok() {
+                    let _ = turso_exec(env, "DROP TABLE IF EXISTS epizod_db_old", vec![]).await;
+                    config_put(env, "mig_epizod_cols_v3", "1").await;
+                } else {
+                    let _ = turso_exec(env, "ALTER TABLE epizod_db_old RENAME TO epizod_db", vec![]).await; // orqaga: eski jadval qaytadi
+                }
+            }
+        }
     }
     // Kodlash jarayoni (qaysi sifat, necha foiz) — botning "Holat" xabari uchun.
     if ok && config_get(env, "mig_encode_progress").await.is_none() {
