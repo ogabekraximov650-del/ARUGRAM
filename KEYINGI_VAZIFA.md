@@ -7590,3 +7590,4 @@ Foydalanuvchi talabi: kanaldagi va bazadagi barcha QISM videolari + `epizod_db` 
 ### Qism tozalash: bot o'chira olmadi — asosiy hisob bilan (2026-11-18)
 Worker orqali tozalash 7 ta qismdan keyin to'xtadi: Telegram `message can't be deleted` (botda o'chirish huquqi yo'q). Foydalanuvchi talabi: kanal egasi sessiyasi bilan o'chirilsin.
 - `ci/ep_wipe_tg.py` + `.github/workflows/ep-wipe-tg.yml` (trigger `ci/EP_WIPE_TG_ONCE`): `tool/encode/session.enc` (kalit `ENCODE_TOKEN`) bilan Pyrogram, xabarlar `epizod_db.q*_vd_msgs`, `tg_files orig%`, `vd_queue ep_/orig_`; so'ng `epizod_db`, `encode_jobs`, `encode_q` bo'shatiladi. Avval zaxira.
+- Eslatma (2026-11-18): asosiy ma'lumotlar Ample bazasida (`tool/migrate/ample.enc`, `db_endpoint`), Turso'da faqat `post_jobs`/`anibla_jobs`. `ep-wipe-tg.yml` bazani Ample'dan oladi (Turso'ga tegmaydi). Avvalgi `ep-wipe.yml` zaxiralari Turso'dan (eski nusxa) edi.
