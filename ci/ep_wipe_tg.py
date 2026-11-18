@@ -103,10 +103,20 @@ for t in ("vd_queue",):
     if t in tabs:
         run("DELETE FROM vd_queue WHERE name LIKE 'ep\\_%' ESCAPE '\\' OR name LIKE 'orig\\_%' ESCAPE '\\'")
 run("DELETE FROM tg_files WHERE file_name LIKE 'orig%'")
-cols = [r[1] for r in rows(run('PRAGMA table_info("season_db")')[0])]
-sets = [f"{c}=0" for c in ("views_total", "watch_ms_total", "epizod_count") if c in cols]
-if sets:
-    run("UPDATE season_db SET " + ", ".join(sets))
+# Ko'rishlar soni (foydalanuvchi talabi): anime/bo'lim hisoblagichlari 0, tomosha tarixi va statistikadagi ko'rishlar/tomosha vaqti tozalanadi (trafik qoladi).
+for t, names in (("season_db", ("views_total", "watch_ms_total", "epizod_count")), ("anime_db", ("views_total", "watch_ms_total"))):
+    cols = [r[1] for r in rows(run(f'PRAGMA table_info("{t}")')[0])]
+    sets = [f"{c}=0" for c in names if c in cols]
+    if sets:
+        run(f"UPDATE {t} SET " + ", ".join(sets))
+        print("   hisoblagichlar 0:", t, sets)
+if "watch_history_db" in tabs:
+    run("DELETE FROM watch_history_db")
+    print("   tozalandi: watch_history_db")
+for t in ("stats_hourly", "stats_daily"):
+    if t in tabs:
+        run(f"DELETE FROM {t} WHERE metric IN ('views','watch_ms')")
+        print("   ko'rishlar statistikasi tozalandi:", t)
 run("CREATE TABLE IF NOT EXISTS app_config (cfg_key TEXT PRIMARY KEY, cfg_value TEXT)",
     f"INSERT OR REPLACE INTO app_config (cfg_key, cfg_value) VALUES ('ep_wipe_done', '{mark}')")
 print(f"✅ Qism videolari kanaldan va bazadan tozalandi. Belgi: {mark}")

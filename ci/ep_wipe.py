@@ -5,7 +5,7 @@
 #   wipe   — worker kanal/R2 ni tozalaydi (`stage: episodes`), so'ng `epizod_db`, `encode_jobs`, `encode_q` bo'shatiladi; belgi bazaga yoziladi (BIR MARTA).
 import json, os, sys, time, urllib.error, urllib.request
 
-TABLES = ["epizod_db", "encode_jobs", "encode_q", "vd_queue", "tg_files"]
+TABLES = ["epizod_db", "encode_jobs", "encode_q", "vd_queue", "tg_files", "watch_history_db", "stats_hourly", "stats_daily"]
 url = os.environ.get("TURSO_URL", "").strip()
 token = os.environ.get("TURSO_TOKEN", "").strip()
 api = os.environ.get("API_BASE", "https://arumediatv.uzcom.workers.dev").rstrip("/")

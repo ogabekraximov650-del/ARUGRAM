@@ -62,6 +62,9 @@ jobs:
           path: ${{ runner.temp }}/ep_backup.jsonl.gz.enc
           retention-days: 14
           if-no-files-found: error
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
       - name: Python paketlari
         if: steps.backup.outputs.ok == '1'
         run: pip install --no-cache-dir pyrogram==2.0.106 tgcrypto==1.2.5
