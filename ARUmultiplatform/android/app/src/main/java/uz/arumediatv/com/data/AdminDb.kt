@@ -3,7 +3,7 @@ package uz.arumediatv.com.data
 import org.json.JSONObject
 
 /**
- * UZ: Admin uchun ma'lumotlar bazasini FAQAT O'QISH (jurnallar = jadvallar, ustunlar, yozuvlar) — serverdagi `/api/admin/db/*` (`worker/src/dbview.rs`).
+ * UZ: Admin uchun ma'lumotlar bazasini FAQAT O'QISH (jurnallar = jadvallar, ustunlar, yozuvlar) — serverdagi `/api/admin/db/tables` va `/api/admin/db/rows` (`worker/src/dbview.rs`).
  * EN: read-only admin database browser client (tables, columns, rows).
  */
 data class DbTable(val name: String, val kind: String)
