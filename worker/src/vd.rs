@@ -559,7 +559,10 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             "cancel" => ok(json!({"cancelled": cancel_runs(env).await})),
             "files" => ok(wipe_files(env, &bk).await?),
             // Faqat qism videolari (foydalanuvchi talabi, 2026-11): kanal xabarlari + R2; `epizod_db` qatorlarini Actions (`ep-wipe.yml`) o'chiradi.
-            "episodes" => ok(wipe_episodes(env, &bk).await?),
+            "episodes" => match wipe_episodes(env, &bk).await {
+                Ok(v) => ok(v),
+                Err(e) => ok(json!({"error": e.to_string(), "failed": 1, "left": 1, "err": e.to_string()})),
+            },
             // Baza Actions orqali to'g'ridan-to'g'ri tozalangach: "o'zgarish bormi?" belgilari yangilanadi (ilova/Mini App eski ro'yxatni ushlab qolmasin).
             "marks" => {
                 let t: Vec<String> = b["tables"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
@@ -863,32 +866,6 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
     Ok(json!({"deleted": deleted, "failed": failed, "left": total, "tg_files": l["tg"], "vd_queue": l["vd"], "r2_files": l["r2"]}))
 }
 
-/// Xabarlarni o'chiradi: avval bitta so'rovda; bo'lmasa har birini alohida (mavjud bo'lmagan xabar "o'chirilgan" hisoblanadi). Qaytadi: (o'chdi, xato, oxirgi xato matni).
-async fn del_msgs_loose(env: &Env, channel: i64, msgs: &[i64]) -> (i64, i64, String) {
-    if msgs.is_empty() || channel == 0 {
-        return (0, 0, String::new());
-    }
-    if tg_api(env, "deleteMessages", json!({"chat_id": channel, "message_ids": msgs})).await.is_ok() {
-        return (msgs.len() as i64, 0, String::new());
-    }
-    let (mut ok, mut bad, mut last) = (0i64, 0i64, String::new());
-    for m in msgs {
-        match tg_api(env, "deleteMessage", json!({"chat_id": channel, "message_id": m})).await {
-            Ok(_) => ok += 1,
-            Err(e) => {
-                let t = e.to_string();
-                if t.contains("not found") {
-                    ok += 1;
-                } else {
-                    bad += 1;
-                    last = t;
-                }
-            }
-        }
-    }
-    (ok, bad, last)
-}
-
 /// UZ: faqat QISM videolari: `epizod_db` dagi sifat fayllarining kanal xabarlari (`q<sifat>_vd_msgs`), R2 va kesh; `vd_queue` dagi `ep_`/`orig_` fayllar; `tg_files` dagi `orig*` (asl video va `.p<i>` qismlari).
 /// Rasm, avatar, yozishma va boshqa fayllarga TEGILMAYDI. Qatorlarni o'chirmaydi — faqat xabar ro'yxatini bo'shatadi (qayta chaqirilsa takrorlanmaydi). Qolgan ish soni `left`.
 /// EN: episode videos only; leaves images/avatars/chat files alone. Clears the message lists instead of deleting rows so repeat calls make progress.
@@ -898,6 +875,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
     let channel = tg_channel_id(env);
     let (mut deleted, mut failed) = (0i64, 0i64);
     let mut err = String::new();
+    let mut budget: i32 = 40;
     const Q: [&str; 4] = ["360", "480", "720", "1080"];
     let cols: Vec<String> = Q.iter().flat_map(|q| [format!("q{q}_vd_msgs"), format!("q{q}_vd_name"), format!("url_{q}p")]).collect();
     let any = Q.iter().map(|q| format!("COALESCE(q{q}_vd_msgs,'')<>''")).collect::<Vec<_>>().join(" OR ");
@@ -906,24 +884,45 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
         let mut set = Vec::new();
         for q in Q {
             let msgs: Vec<i64> = ids(row[format!("q{q}_vd_msgs")].as_str().unwrap_or("")).iter().filter_map(|x| x.parse().ok()).collect();
-            let mut ok_all = true;
+            if msgs.is_empty() {
+                continue;
+            }
+            // So'rovlar chegarasi (~50): bitta so'rovda 100 tagacha; bo'lmasa bittalab, `budget` tugaguncha. Qolgan xabarlar ustunga qaytadi (keyingi chaqiruv davom etadi).
+            let mut rest: Vec<i64> = Vec::new();
             for part in msgs.chunks(100) {
-                let (o, b, e) = del_msgs_loose(env, vd_channel(env), part).await;
-                deleted += o;
-                failed += b;
-                if b > 0 {
-                    ok_all = false;
-                    err = e;
+                if budget >= 2 && del_msgs(env, vd_channel(env), part).await {
+                    deleted += part.len() as i64;
+                    budget -= 2;
+                    continue;
+                }
+                budget = budget.saturating_sub(2);
+                for m in part {
+                    if budget == 0 {
+                        rest.push(*m);
+                        continue;
+                    }
+                    budget -= 1;
+                    match tg_api(env, "deleteMessage", json!({"chat_id": vd_channel(env), "message_id": m})).await {
+                        Ok(_) => deleted += 1,
+                        Err(e) => {
+                            let t = e.to_string();
+                            if t.contains("not found") {
+                                deleted += 1;
+                            } else {
+                                failed += 1;
+                                err = t;
+                                rest.push(*m);
+                            }
+                        }
+                    }
                 }
             }
+            set.push(format!("q{q}_vd_msgs='{}'", rest.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(",")));
             for n in [row[format!("q{q}_vd_name")].as_str().unwrap_or(""), row[format!("url_{q}p")].as_str().unwrap_or("")] {
                 // Tayyor fayl Telegram'da; R2 da bo'lak qolmaydi (so'rovlar chegarasi ~50 — R2 ga tegilmaydi), faqat kesh.
                 if tg_safe_name(n) {
                     meta_drop(n).await;
                 }
-            }
-            if ok_all {
-                set.push(format!("q{q}_vd_msgs=''"));
             }
         }
         if !set.is_empty() {
