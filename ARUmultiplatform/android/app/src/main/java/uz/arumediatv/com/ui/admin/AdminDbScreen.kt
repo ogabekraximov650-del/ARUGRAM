@@ -43,6 +43,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChanged
+import androidx.compose.ui.unit.Dp
+import uz.arumediatv.com.data.DbColumn
 import uz.arumediatv.com.AppServices
 import uz.arumediatv.com.data.DbPage
 import uz.arumediatv.com.data.DbTable
@@ -107,61 +121,98 @@ private fun DbTablesPage(onBack: () -> Unit, onOpen: (String) -> Unit) {
     }
 }
 
+/** Ikki barmoq bilan kattalashtirish/kichraytirish (brauzerdagidek): bir barmoq surish bolalarga (ro'yxat/jadval) qoladi, ikkita barmoq `onZoom` ga ketadi. */
+private fun Modifier.pinchZoom(onZoom: (Float) -> Unit): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        do {
+            val ev = awaitPointerEvent(PointerEventPass.Initial)
+            if (ev.changes.size >= 2) {
+                val z = ev.calculateZoom()
+                if (z != 1f) {
+                    onZoom(z)
+                    ev.changes.forEach { if (it.positionChanged()) it.consume() }
+                }
+            }
+        } while (ev.changes.any { it.pressed })
+    }
+}
+
+/** Ustun kengligi turiga qarab (son — tor, matn — keng). */
+private fun colBase(c: DbColumn): Float = when {
+    c.type.contains("INT", ignoreCase = true) -> 96f
+    c.type.contains("REAL", ignoreCase = true) || c.type.contains("NUM", ignoreCase = true) || c.type.contains("FLOA", ignoreCase = true) -> 110f
+    else -> 180f
+}
+
+/**
+ * UZ: jurnal yozuvlari Turso paneliga o'xshash JADVAL: hamma ustun yonma-yon, bitta ekranda; pastga surilgan sari yuklanadi (har safar bir so'rovda imkon qadar ko'p, 100 tagacha); ikki barmoq bilan kattalashtirish/kichraytirish;
+ *     chapga-o'ngga va yuqoriga-pastga surish; ustun nomi bosilsa tartiblanadi; qator bosilsa to'liq ko'rinadi.
+ * EN: Turso-like table with all columns side by side, infinite scroll (up to 100 rows per request) and pinch zoom.
+ */
 @Composable
 private fun DbRowsPage(table: String, onBack: () -> Unit) {
-    var page by rememberKept<DbPage?>("db.$table.page", null)
-    var loading by remember { mutableStateOf(page == null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var offset by rememberKept("db.$table.offset", 0)
+    var cols by rememberKept<List<DbColumn>>("db.$table.cols", emptyList())
+    var rows by rememberKept<List<List<String?>>>("db.$table.data", emptyList())
+    var hasMore by rememberKept("db.$table.more", true)
+    var loadedKey by rememberKept("db.$table.key", "")
     var order by rememberKept("db.$table.order", "")
     var desc by rememberKept("db.$table.desc", true)
     var fcol by rememberKept("db.$table.fcol", "")
     var input by rememberKept("db.$table.input", "")
     var applied by rememberKept("db.$table.applied", "")
-    val rowsState = rememberKeptLazy("db.$table.rows")
-    val colsScroll = rememberKeptScroll("db.$table.cols")
+    var zoom by rememberKept("db.$table.zoom", 1f)
+    var error by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(rows.isEmpty()) }
+    var loadingMore by remember { mutableStateOf(false) }
     var detail by remember { mutableStateOf<List<String?>?>(null) }
     var menu by remember { mutableStateOf(false) }
-    val limit = 30
+    val listState = rememberKeptLazy("db.$table.rows")
+    val hScroll = rememberKeptScroll("db.$table.h")
+    val step = 100
+    // `fcol` faqat qidiruv faol bo'lganda so'rovni o'zgartiradi (aks holda ustun tanlash ortiqcha o'qimasin).
+    val key = "$order|$desc|$applied|${if (applied.isEmpty()) "" else fcol}"
 
-    // `fcol` faqat qidiruv faol bo'lganda so'rovni o'zgartiradi (aks holda ustun tanlash Turso'dan ortiqcha o'qimasin).
-    LaunchedEffect(table, offset, order, desc, applied, if (applied.isEmpty()) "" else fcol) {
+    LaunchedEffect(key) {
+        if (key == loadedKey && rows.isNotEmpty()) { loading = false; return@LaunchedEffect } // ekrandan qaytgan: avvalgi ko'rinish
         loading = true
-        val (p, err) = AppServices.admin.dbRows(table, offset, limit, order, desc, fcol, applied)
+        error = null
+        val (p, err) = AppServices.admin.dbRows(table, 0, step, order, desc, fcol, applied)
         if (p != null) {
-            page = p
+            cols = p.columns
+            rows = p.rows
+            hasMore = p.hasMore
+            loadedKey = key
             if (fcol.isEmpty()) fcol = p.columns.firstOrNull()?.name.orEmpty()
+        } else {
+            rows = emptyList()
+            error = err
         }
-        error = err
         loading = false
+        listState.scrollToItem(0)
     }
 
+    suspend fun more() {
+        if (loadingMore || loading || !hasMore) return
+        loadingMore = true
+        val (p, err) = AppServices.admin.dbRows(table, rows.size, step, order, desc, fcol, applied)
+        if (p != null) { rows = rows + p.rows; hasMore = p.hasMore } else if (err != null) error = err
+        loadingMore = false
+    }
+    val near by remember { derivedStateOf { val l = listState.layoutInfo; l.totalItemsCount > 0 && (l.visibleItemsInfo.lastOrNull()?.index ?: 0) >= l.totalItemsCount - 3 } }
+    LaunchedEffect(near, rows.size, hasMore, loading) { if (near) more() }
+
     OverlayScaffold(table, onBack) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            val p = page
-            // Ustunlar: bosilsa shu ustun bo'yicha tartiblanadi (yana bossangiz yo'nalish almashadi).
-            if (p != null) {
-                Row(Modifier.horizontalScroll(colsScroll), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    p.columns.forEach { c ->
-                        val on = order == c.name
-                        val shape = RoundedCornerShape(10.dp)
-                        Text(
-                            "${if (c.pk) "🔑 " else ""}${c.name}${if (c.type.isNotBlank()) " · ${c.type.lowercase()}" else ""}${if (on) if (desc) " ↓" else " ↑" else ""}",
-                            color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
-                            modifier = Modifier.clip(shape).background(if (on) AruColors.Accent else AruColors.CardAlt).border(1.dp, AruColors.Border, shape)
-                                .clickable { if (order == c.name) desc = !desc else { order = c.name; desc = true }; offset = 0 }.padding(horizontal = 10.dp, vertical = 6.dp),
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.fillMaxSize()) {
+            if (cols.isNotEmpty()) {
+                Row(Modifier.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box {
                         Text(
                             "${fcol.ifEmpty { "ustun" }} ▾", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                             modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(AruColors.CardAlt).clickable { menu = true }.padding(horizontal = 10.dp, vertical = 12.dp),
                         )
                         DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                            p.columns.forEach { c -> DropdownMenuItem(text = { Text(c.name, fontFamily = FontFamily.Monospace) }, onClick = { fcol = c.name; menu = false; offset = 0 }) }
+                            cols.forEach { c -> DropdownMenuItem(text = { Text(c.name, fontFamily = FontFamily.Monospace) }, onClick = { fcol = c.name; menu = false }) }
                         }
                     }
                     Spacer(Modifier.width(8.dp))
@@ -170,35 +221,60 @@ private fun DbRowsPage(table: String, onBack: () -> Unit) {
                         modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
                         colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = AruColors.Accent, unfocusedBorderColor = AruColors.BorderBright),
                     )
-                    TextButton(onClick = { applied = input.trim(); offset = 0 }) { Text("Qidirish", color = AruColors.Accent) }
+                    TextButton(onClick = { applied = input.trim() }) { Text("Qidirish", color = AruColors.Accent) }
                 }
-                Spacer(Modifier.height(8.dp))
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${rows.size}${if (hasMore) "+" else ""} yozuv · ${cols.size} ustun · ${(zoom * 100).toInt()}%", color = AruColors.TextFaint, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { zoom = 1f }) { Text("100%", color = AruColors.Accent, fontSize = 12.sp) }
+                }
             }
             when {
-                loading && p == null -> LoadingBox()
-                error != null && p == null -> EmptyState(text = error.orEmpty())
-                p == null || p.rows.isEmpty() -> EmptyState(text = if (applied.isNotEmpty()) "Hech narsa topilmadi" else "Jurnal bo'sh")
+                loading && rows.isEmpty() -> LoadingBox()
+                error != null && rows.isEmpty() -> EmptyState(text = error.orEmpty())
+                rows.isEmpty() -> EmptyState(text = if (applied.isNotEmpty()) "Hech narsa topilmadi" else "Jurnal bo'sh")
                 else -> {
-                    LazyColumn(Modifier.weight(1f), state = rowsState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        items(p.rows.size) { i ->
-                            val row = p.rows[i]
-                            val shape = RoundedCornerShape(12.dp)
-                            Column(Modifier.fillMaxWidth().clip(shape).background(AruColors.Card).border(1.dp, AruColors.Border, shape).clickable { detail = row }.padding(12.dp)) {
-                                Text("#${p.offset + i + 1}", color = AruColors.Accent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                p.columns.take(5).forEachIndexed { c, col ->
-                                    Row(Modifier.padding(top = 3.dp)) {
-                                        Text(col.name, color = AruColors.TextFaint, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.width(110.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(row.getOrNull(c) ?: "NULL", color = if (row.getOrNull(c) == null) AruColors.TextFaint else Color.White, fontSize = 12.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    val idxW = (56f * zoom).dp
+                    val widths = cols.map { (colBase(it) * zoom).dp }
+                    val totalW = idxW + widths.fold(0.dp) { a, w -> a + w }
+                    val fs = (12f * zoom).sp
+                    val padV = (8f * zoom).dp
+                    val padH = (8f * zoom).dp
+                    Box(Modifier.weight(1f).fillMaxWidth().clipToBounds().pinchZoom { f -> zoom = (zoom * f).coerceIn(0.4f, 3f) }) {
+                        Column(Modifier.fillMaxHeight().horizontalScroll(hScroll)) {
+                            // Sarlavha: ustun nomi va turi; bosilsa shu ustun bo'yicha tartiblanadi (yana bossangiz yo'nalish almashadi).
+                            Row(Modifier.width(totalW).background(AruColors.CardAlt)) {
+                                Text("#", color = AruColors.TextFaint, fontSize = fs, fontFamily = FontFamily.Monospace, modifier = Modifier.width(idxW).border(0.5.dp, AruColors.Border).padding(horizontal = padH, vertical = padV))
+                                cols.forEachIndexed { i, c ->
+                                    val on = order == c.name
+                                    Row(
+                                        Modifier.width(widths[i]).border(0.5.dp, AruColors.Border).clickable { if (order == c.name) desc = !desc else { order = c.name; desc = true } }.padding(horizontal = padH, vertical = padV),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            (if (c.pk) "🔑 " else "") + c.name, color = if (on) AruColors.Accent else Color.White, fontSize = fs, fontWeight = FontWeight.SemiBold,
+                                            fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false),
+                                        )
+                                        if (c.type.isNotBlank()) Text(" " + c.type.lowercase(), color = AruColors.TextFaint, fontSize = (10f * zoom).sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+                                        if (on) Text(if (desc) " ↓" else " ↑", color = AruColors.Accent, fontSize = fs)
                                     }
                                 }
-                                if (p.columns.size > 5) Text("+ yana ${p.columns.size - 5} ustun (bosib oching)", color = AruColors.TextFaint, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp))
+                            }
+                            LazyColumn(Modifier.width(totalW).weight(1f), state = listState) {
+                                itemsIndexed(rows) { i, row ->
+                                    Row(Modifier.width(totalW).background(if (i % 2 == 0) AruColors.Bg else AruColors.Card).clickable { detail = row }) {
+                                        Text("${i + 1}", color = AruColors.TextFaint, fontSize = fs, fontFamily = FontFamily.Monospace, modifier = Modifier.width(idxW).border(0.5.dp, AruColors.Border).padding(horizontal = padH, vertical = padV))
+                                        cols.forEachIndexed { c, _ ->
+                                            val v = row.getOrNull(c)
+                                            Text(
+                                                v ?: "NULL", color = if (v == null) AruColors.TextFaint else Color.White, fontSize = fs, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.width(widths[c]).border(0.5.dp, AruColors.Border).padding(horizontal = padH, vertical = padV),
+                                            )
+                                        }
+                                    }
+                                }
+                                if (hasMore) item { Box(Modifier.width(totalW).padding(12.dp), contentAlignment = Alignment.CenterStart) { CircularProgressIndicator(color = AruColors.Accent, strokeWidth = 2.dp, modifier = Modifier.size(22.dp)) } }
                             }
                         }
-                    }
-                    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(enabled = offset > 0 && !loading, onClick = { offset = (offset - limit).coerceAtLeast(0) }) { Text("← Oldingi", color = if (offset > 0) AruColors.Accent else AruColors.TextFaint) }
-                        Text("${p.offset + 1}–${p.offset + p.rows.size}", color = Color.White, fontSize = 13.sp)
-                        TextButton(enabled = p.hasMore && !loading, onClick = { offset += limit }) { Text("Keyingi →", color = if (p.hasMore) AruColors.Accent else AruColors.TextFaint) }
                     }
                 }
             }
@@ -206,8 +282,7 @@ private fun DbRowsPage(table: String, onBack: () -> Unit) {
     }
 
     val d = detail
-    val pg = page
-    if (d != null && pg != null) {
+    if (d != null && cols.isNotEmpty()) {
         AlertDialog(
             onDismissRequest = { detail = null },
             confirmButton = { TextButton(onClick = { detail = null }) { Text("Yopish", color = AruColors.Accent) } },
@@ -216,7 +291,7 @@ private fun DbRowsPage(table: String, onBack: () -> Unit) {
             text = {
                 SelectionContainer {
                     Column(Modifier.verticalScroll(rememberScrollState())) {
-                        pg.columns.forEachIndexed { c, col ->
+                        cols.forEachIndexed { c, col ->
                             Text("${col.name}${if (col.type.isNotBlank()) " · ${col.type.lowercase()}" else ""}", color = AruColors.TextFaint, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(top = 8.dp))
                             Text(d.getOrNull(c) ?: "NULL", color = if (d.getOrNull(c) == null) AruColors.TextFaint else Color.White, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
                         }

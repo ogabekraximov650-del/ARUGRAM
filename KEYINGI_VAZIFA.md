@@ -7613,3 +7613,10 @@ Foydalanuvchi talabi: admin ekranlari anime boshqarishdagidek (`rememberKeptList
 - Yangi `ARUmultiplatform/android/.../ui/admin/AdminKeep.kt`: `AdminKeep` (xotirada), `rememberKeptScroll`, `rememberKeptLazy`, `rememberKept`, `AdminKeep.store`. Ilova ishlayotganda saqlanadi; hisob almashganda `MainActivity.AuthGate` tozalaydi.
 - Qo'llandi: Admin bosh sahifa (surish), Suhbatlar, Foydalanuvchilar (ombor, qidiruv matni, joy; qaytganda ro'yxat qayta yuklanmaydi), Shikoyatlar, Ma'lumotlar bazasi (tanlangan jurnal, qidiruv, tartib, sahifa, joy), Kodlash navbati, Majburiy kanallar, To'plamlar, Statistika, Ilova sozlamalari. Anime boshqarish (`AdminContentScreens`) avvaldan shunday.
 - Chegara: ilova butunlay yopilsa (jarayon o'lsa) joy yo'qoladi — faqat xotirada saqlanadi.
+
+## Admin: ma'lumotlar bazasi jadval ko'rinishida (2026-11-18)
+
+Foydalanuvchi talabi: Turso veb-paneli kabi bitta jadval (hamma ustun yonma-yon), pastga surilgan sari yuklash, ikki barmoq bilan kattalashtirish/kichraytirish.
+- `AdminDbScreen.kt` -> `DbRowsPage`: sarlavha (ustun nomi + turi, bosilsa tartiblanadi), `#` ustuni, qatorlar jadval katakchalarida; chapga-o'ngga va yuqoriga-pastga surish; `pinchZoom` (0.4x–3x, "100%" tugmasi tiklaydi; shrift va kenglik masshtablanadi); qator bosilsa to'liq ko'rinadi; "oldingi/keyingi" sahifalar olib tashlandi — oxirga yaqinlashganda keyingi 100 ta yoziladi (`step`).
+- `worker/src/dbview.rs`: `MAX_LIMIT` 50 -> 200 (bir so'rovda ko'proq qator).
+- Holat (surilgan joy, tartib, qidiruv, kattalashtirish, yuklangan qatorlar) `AdminKeep` orqali eslab qolinadi.

@@ -6,7 +6,7 @@
 //! RU: tolko-dlya-chteniya prosmotr bazy dlya admina; vse znacheniya vidny polnostyu.
 use super::*;
 
-pub(crate) const MAX_LIMIT: i64 = 50;
+pub(crate) const MAX_LIMIT: i64 = 200;
 const CELL_MAX: usize = 4000;
 
 /// Jadval/ustun nomi xavfsizmi: faqat harf, raqam va pastki chiziq (so'rovga qo'shib yuborib bo'lmaydi).
