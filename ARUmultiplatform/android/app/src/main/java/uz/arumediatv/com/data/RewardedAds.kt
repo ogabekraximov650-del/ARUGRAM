@@ -27,6 +27,9 @@ object RewardedAds {
         private set
 
     @Volatile private var started = false
+    @Volatile private var initDone = false
+    @Volatile private var loadStart = 0L
+    @Volatile private var startedAt = 0L
 
     /**
      * UZ: SDK ilova ochilganda EMAS, birinchi kerak bo'lganda (obuna so'raladigan ekran) fonda ishga tushadi — reklama kutubxonasi ilovaning ochilishiga hech qachon xalaqit bermasin.
@@ -36,10 +39,17 @@ object RewardedAds {
     fun ensureInit(ctx: Context) {
         if (started) return
         started = true
+        startedAt = System.currentTimeMillis()
         val app = ctx.applicationContext
+        // Google Play xizmatlari yo'q yoki eskirgan bo'lsa (Xiaomi/Huawei kabi telefonlarda) reklama umuman yuklanmaydi: sababi ekranda ko'rinadi.
+        try {
+            val gms = com.google.android.gms.common.GoogleApiAvailability.getInstance().isGooglePlayServicesAvailable(app)
+            if (gms != com.google.android.gms.common.ConnectionResult.SUCCESS) lastError = "Google Play xizmatlari muammosi (kod $gms)"
+        } catch (_: Throwable) {
+        }
         Thread {
             try {
-                MobileAds.initialize(app) { main.post { preload(app) } }
+                MobileAds.initialize(app) { initDone = true; main.post { preload(app) } }
                 // Zaxira: SDK qaytarma chaqirmasa ham 8 soniyadan keyin yuklash boshlanadi.
                 main.postDelayed({ preload(app) }, 8_000L)
             } catch (e: Throwable) {
@@ -56,11 +66,20 @@ object RewardedAds {
     }
 
     /** Oxirgi xato (bo'sh — yo'q): ekranda sababni ko'rsatish uchun. */
-    fun reason(): String = if (!started) "SDK ishga tushmagan" else if (loading) "yuklanmoqda" else lastError.ifEmpty { "noma'lum" }
+    fun reason(): String {
+        if (!started) return "SDK ishga tushmagan"
+        val now = System.currentTimeMillis()
+        if (!initDone) return "SDK tayyorlanmoqda, ${(now - startedAt) / 1000} s${if (lastError.isNotEmpty()) "; $lastError" else ""}"
+        if (loading) return "yuklanmoqda, ${(now - loadStart) / 1000} s${if (lastError.isNotEmpty()) "; $lastError" else ""}"
+        return lastError.ifEmpty { "noma'lum" }
+    }
 
     fun preload(ctx: Context) {
-        if (ad != null || loading) return
+        if (ad != null) return
+        // Qaytarma 40 soniya kelmasa (tarmoq/xizmat osilib qolsa) holat tiklanib, qayta uriniladi.
+        if (loading && System.currentTimeMillis() - loadStart < 40_000L) return
         loading = true
+        loadStart = System.currentTimeMillis()
         try {
             RewardedAd.load(
                 ctx.applicationContext, BuildConfig.ADMOB_REWARDED_ID, AdRequest.Builder().build(),

@@ -7540,3 +7540,7 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 
 - `ad-test.yml` natijasi: haqiqiy blok `code=3 Account not approved yet` (AdMob akkaunti tasdiqlanmagan), Google sinov bloki esa yuklandi. Shuning uchun `app/build.gradle.kts` da standart ID'lar VAQTINCHA Google sinov ID'lariga almashtirildi (`testAdmobApp`, `testAdmobRewarded`): reklama oqimi (ko'rsatish → serverda +1 soat) sinov reklamalari bilan ishlaydi, pul keltirmaydi.
 - **Akkaunt tasdiqlangach qaytarish:** `?: testAdmobApp` → `?: prodAdmobApp` va `?: testAdmobRewarded` → `?: prodAdmobRewarded`.
+
+## Reklama "yuklanmoqda" qotib qolsa: tashxis va qayta urinish (2026-11-18)
+
+- Sinov ID'lari bilan ham telefonda "Reklama hali tayyor emas (yuklanmoqda)" turib qoldi. `RewardedAds`: Google Play xizmatlari tekshiruvi (muammo bo'lsa kod ekranda), SDK tayyorlanish va yuklanish soniyalari ekranda, 40 soniya qaytarma kelmasa holat tiklanib qayta uriniladi.
