@@ -7571,3 +7571,10 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 
 - E'londagi tugma havolasi endi `https://t.me/<bot>?start=<anime>_<bo'lim>_<qism>` (faqat raqamlar, `w` yo'q) — `worker/src/announce.rs`. Eski `w<anime>_...` havolalar ham ishlaydi (`parse_watch`). Kirish tokenlari (tasodifiy hex, `_` yo'q) bilan to'qnashmaydi (test).
 - Oxirgi raqam (masalan `30`) — qism RAQAMI emas, bazadagi qism ID'si (`epizod_id`).
+
+## Admin paneli: "Ma'lumotlar bazasi" — jurnallar, ustunlar va yozuvlarni ko'rish (2026-11-18)
+
+- **Nima:** Turso / Cloudflare D1 paneliga o'xshash FAQAT O'QISH ko'rinishi. Admin paneli > "Ma'lumotlar bazasi": jurnallar (jadvallar) ro'yxati (qidiruv bilan) -> jadval: ustunlar (tur, 🔑 PK; bosilsa shu ustun bo'yicha tartiblanadi), yozuvlar (30 tadan sahifalab, "Oldingi/Keyingi"), bitta ustun bo'yicha qiymat qidirish, yozuvni bosib hamma ustunini to'liq ko'rish (matn belgilab nusxalanadi).
+- **Server:** `worker/src/dbview.rs` — `GET /api/admin/db/tables`, `GET /api/admin/db/rows?table=&offset=&limit=&order=&dir=&col=&q=` (faqat admin, `admin_only`). Jadval/ustun nomi `sqlite_master`/`PRAGMA table_info` bilan tekshiriladi, qiymatlar bog'lanadi (SQL qo'shib bo'lmaydi); hech narsa yozilmaydi; bir so'rovda ko'pi bilan 50 qator (Turso o'qishlari pul turadi; qator soni `COUNT` bilan sanalmaydi).
+- **Qiymatlar to'liq ko'rinadi** (foydalanuvchi talabi: admin panelida sir yo'q; faqat 4000 belgidan uzun matn ekran uchun kesiladi).
+- **Ilova:** `data/AdminDb.kt`, `ui/admin/AdminDbScreen.kt`, `AdminHubScreen` ("DB" bo'limi), `MainActivity` (`Page.AdminDb`).

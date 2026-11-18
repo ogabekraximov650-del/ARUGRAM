@@ -71,6 +71,7 @@ enum class AdminSection(val title: String, val hint: String, val icon: ImageVect
     CHANNELS("Majburiy obunalar", "Kanallar, limit va statistika", AruIcons.Campaign),
     STATS("Umumiy statistika", "Kontent, foydalanuvchilar, ko'rishlar, trafik", AruIcons.Insights),
     ENCODE("Kodlash navbati", "Kodlanayotgan va navbatdagi qismlar, log", AruIcons.Movie),
+    DB("Ma'lumotlar bazasi", "Jurnallar, ustunlar va yozuvlarni ko'rish (faqat o'qish)", AruIcons.Insights),
     APP("Ilova va xavfsizlik", "Eng past versiya, ulanish kaliti", AruIcons.Security),
     COOKIE("Brauzer", "Istalgan saytni nom yoki havola bilan oching, kiring va cookies.txt oling (yuklash boti uchun)", AruIcons.Security),
 }

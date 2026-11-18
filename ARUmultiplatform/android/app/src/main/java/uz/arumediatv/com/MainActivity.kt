@@ -75,6 +75,7 @@ import uz.arumediatv.com.ui.admin.AdminSection
 import uz.arumediatv.com.ui.admin.AdminThreadsScreen
 import uz.arumediatv.com.ui.admin.AdminUsersScreen
 import uz.arumediatv.com.ui.admin.AdminReportsScreen
+import uz.arumediatv.com.ui.admin.AdminDbScreen
 import uz.arumediatv.com.ui.admin.AdminChannelsScreen
 import uz.arumediatv.com.ui.admin.AdminChannelAddScreen
 import uz.arumediatv.com.ui.admin.AdminPacksScreen
@@ -152,6 +153,7 @@ private sealed interface Page {
     data object AdminThreads : Page
     data object AdminUsers : Page
     data object AdminReports : Page
+    data object AdminDb : Page
     data object AdminChannels : Page
     data object AdminChannelAdd : Page
     data object AdminPacks : Page
@@ -412,6 +414,7 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
                             AdminSection.CHATS -> push(Page.AdminThreads)
                             AdminSection.USERS -> push(Page.AdminUsers)
                             AdminSection.REPORTS -> push(Page.AdminReports)
+                            AdminSection.DB -> push(Page.AdminDb)
                             AdminSection.CHANNELS -> push(Page.AdminChannels)
                             AdminSection.PACKS -> push(Page.AdminPacks)
                             AdminSection.STATS -> push(Page.AdminStats)
@@ -424,6 +427,7 @@ private fun AruApp(initialTab: Int, onTab: (Int) -> Unit) {
                     })
                     Page.AdminThreads -> AdminThreadsScreen(onBack = ::pop, onOpenThread = { t -> push(Page.AdminChat(t.userId, t.name)) })
                     Page.AdminUsers -> AdminUsersScreen(onBack = ::pop, onOpenProfile = { id -> push(Page.PublicUser(id)) }, onOpenChat = { id, n -> push(Page.AdminChat(id, n)) })
+                    Page.AdminDb -> AdminDbScreen(onBack = ::pop)
                     Page.AdminReports -> AdminReportsScreen(onBack = ::pop, onOpenProfile = { id -> if (id > 0) push(Page.PublicUser(id)) })
                     Page.AdminChannels -> AdminChannelsScreen(onBack = ::pop, onAdd = { push(Page.AdminChannelAdd) })
                     Page.AdminChannelAdd -> AdminChannelAddScreen(onBack = ::pop, onDone = ::pop)

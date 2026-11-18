@@ -42,6 +42,7 @@ mod trbot;
 mod cmpbot;
 mod dubbot;
 mod announce;
+mod dbview;
 mod sessionbot;
 mod encupload;
 mod admins;
@@ -15788,6 +15789,10 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
     // ── ADMIN: FOYDALANUVCHILARNI BOSHQARISH ──────────────────
     if path == "/api/admin/users" && method == Method::Get {
         return admin_users(&req, &env, &origin).await;
+    }
+    // Ma'lumotlar bazasini FAQAT O'QISH (jurnallar, ustunlar, yozuvlar) — faqat admin (`dbview.rs`).
+    if path.starts_with("/api/admin/db/") && method == Method::Get {
+        return dbview::route(&req, &env, &path).await;
     }
     if method == Method::Post {
         if let Some(idv) = path.strip_prefix("/api/admin/user/") {
