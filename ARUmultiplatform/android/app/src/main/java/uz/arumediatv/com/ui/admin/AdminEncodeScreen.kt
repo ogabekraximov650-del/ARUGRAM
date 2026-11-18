@@ -100,8 +100,8 @@ private fun Bar(pct: Double, label: String) {
 fun AdminEncodeScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val api = AppServices.admin
-    var queue by remember { mutableStateOf<JSONObject?>(null) }
-    var live by remember { mutableStateOf<JSONObject?>(null) }
+    var queue by rememberKept<JSONObject?>("encode.queue", null)
+    var live by rememberKept<JSONObject?>("encode.live", null)
     var error by remember { mutableStateOf<String?>(null) }
     var ticks by remember { mutableStateOf(0) }
     var lastJob by remember { mutableStateOf("") }
@@ -133,7 +133,7 @@ fun AdminEncodeScreen(onBack: () -> Unit) {
         val sys = data?.optJSONObject("sys")
         val ladder = data?.optJSONArray("ladder").objs()
         val gh = live?.optJSONObject("gh") ?: live?.optJSONObject("github")
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberKeptScroll("encode")).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val updated = st?.optLong("updated_at") ?: 0
             val age = if (updated > 0) (System.currentTimeMillis() - updated) / 1000 else -1
             Text(if (age in 0..119) "● Jonli · ${age}s" else if (age >= 0) "● Eski holat · ${age}s" else "● Holat yo'q", color = if (age in 0..119) Color(0xFF4ADE80) else AruColors.Gold, fontSize = 12.sp)

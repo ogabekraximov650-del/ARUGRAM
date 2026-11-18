@@ -98,7 +98,7 @@ fun AdminHubScreen(onBack: () -> Unit, onOpen: (AdminSection) -> Unit) {
             Text("Admin paneli", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
             Icon(AruIcons.AdminPanel, null, tint = Color.White.copy(alpha = 0.54f), modifier = Modifier.size(24.dp))
         }
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.weight(1f).verticalScroll(rememberKeptScroll("hub")).padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             AdminSection.entries.forEach { s ->
                 val shape = RoundedCornerShape(20.dp)
                 val badge = if (s == AdminSection.CHATS) unread else 0
@@ -137,10 +137,11 @@ fun AdminHubScreen(onBack: () -> Unit, onOpen: (AdminSection) -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun AdminThreadsScreen(onBack: () -> Unit, onOpenThread: (ChatThread) -> Unit) {
-    val store = remember { ChatThreadsStore(AppServices.auth) }
+    val store = remember { AdminKeep.store("threads") { ChatThreadsStore(AppServices.auth) } }
     val items by store.items.collectAsStateWithLifecycle()
     val err by store.error.collectAsStateWithLifecycle()
-    var loaded by remember { mutableStateOf(false) }
+    var loaded by remember { mutableStateOf(items.isNotEmpty()) }
+    val listState = rememberKeptLazy("threads")
     var del by remember { mutableStateOf<ChatThread?>(null) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(Unit) { store.load(); loaded = true }
@@ -149,7 +150,7 @@ fun AdminThreadsScreen(onBack: () -> Unit, onOpenThread: (ChatThread) -> Unit) {
         when {
             !loaded -> LoadingBox()
             items.isEmpty() -> EmptyState(text = err.ifEmpty { "Suhbatlar yo'q" })
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(items, key = { it.userId }) { t ->
                     val shape = RoundedCornerShape(16.dp)
                     Row(

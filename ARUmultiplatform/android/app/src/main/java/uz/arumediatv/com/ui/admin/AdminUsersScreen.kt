@@ -67,10 +67,10 @@ import uz.arumediatv.com.ui.theme.AruColors
 @Composable
 fun AdminUsersScreen(onBack: () -> Unit, onOpenProfile: (Long) -> Unit, onOpenChat: (Long, String) -> Unit) {
     val ctx = LocalContext.current
-    val store = remember { AdminUsersStore(AppServices.admin) }
+    val store = remember { AdminKeep.store("users") { AdminUsersStore(AppServices.admin) } }
     val st by store.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    var query by remember { mutableStateOf("") }
+    var query by rememberKept("users.query", "")
     var menuFor by remember { mutableStateOf<AdminUser?>(null) }
     var amountFor by remember { mutableStateOf<AdminUser?>(null) }
     var daysFor by remember { mutableStateOf<AdminUser?>(null) }
@@ -78,14 +78,14 @@ fun AdminUsersScreen(onBack: () -> Unit, onOpenProfile: (Long) -> Unit, onOpenCh
     var unbanFor by remember { mutableStateOf<AdminUser?>(null) }
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
 
-    LaunchedEffect(Unit) { store.reload() }
+    LaunchedEffect(Unit) { if (store.state.value.items.isEmpty()) store.reload() }
     uz.arumediatv.com.data.LiveEffect("users") { store.reload(quiet = true) }
     LaunchedEffect(query) {
         if (query == st.query) return@LaunchedEffect
         delay(450)
         store.reload(query = query.trim())
     }
-    val listState = rememberLazyListState()
+    val listState = rememberKeptLazy("users")
     val near by remember { derivedStateOf { val l = listState.layoutInfo; l.totalItemsCount > 0 && (l.visibleItemsInfo.lastOrNull()?.index ?: 0) >= l.totalItemsCount - 4 } }
     LaunchedEffect(near) { if (near) store.loadMore() }
 

@@ -7606,3 +7606,10 @@ Foydalanuvchi talabi: kanalga yuklanadigan qism fayli `vid_<sifat>_<anime_id>_<b
 - `worker/src/vd.rs`: `doc_stem(name, vid)` — qism fayli (`ep_<a>_<s>_<e>_<sifat>p_<vaqt>.mp4`) uchun `vid_<sifat>p_<a>_<s>_<e>` + `mp4`; boshqa fayllar eski `<tur>_<raqam>` + `bin`. `/api/vd/claim` javobiga `doc`, `docext` qo'shildi; worker o'zi yuboradigan bitta bo'lakli yo'l ham shuni ishlatadi. Bo'lak raqami 1 dan boshlanadi (avvalgidek).
 - `tool/vd/store.py` (ikkinchi repoga `sync-packs.yml` ko'chiradi): `doc`/`docext` bo'lsa shu nom, bo'lmasa eski.
 - Eslatma: kanal xabarlari `epizod_db.q<sifat>_vd_msgs` dagi raqamlar bo'yicha topiladi, nom bog'lanishga ta'sir qilmaydi; avval yuklangan fayllar eski nomda qoladi.
+
+## Admin paneli oxirgi joyni eslab qoladi (2026-11-18)
+
+Foydalanuvchi talabi: admin ekranlari anime boshqarishdagidek (`rememberKeptListState`) qayerga kelganini eslab qolsin, har safar qaytadan chizilmasin.
+- Yangi `ARUmultiplatform/android/.../ui/admin/AdminKeep.kt`: `AdminKeep` (xotirada), `rememberKeptScroll`, `rememberKeptLazy`, `rememberKept`, `AdminKeep.store`. Ilova ishlayotganda saqlanadi; hisob almashganda `MainActivity.AuthGate` tozalaydi.
+- Qo'llandi: Admin bosh sahifa (surish), Suhbatlar, Foydalanuvchilar (ombor, qidiruv matni, joy; qaytganda ro'yxat qayta yuklanmaydi), Shikoyatlar, Ma'lumotlar bazasi (tanlangan jurnal, qidiruv, tartib, sahifa, joy), Kodlash navbati, Majburiy kanallar, To'plamlar, Statistika, Ilova sozlamalari. Anime boshqarish (`AdminContentScreens`) avvaldan shunday.
+- Chegara: ilova butunlay yopilsa (jarayon o'lsa) joy yo'qoladi — faqat xotirada saqlanadi.

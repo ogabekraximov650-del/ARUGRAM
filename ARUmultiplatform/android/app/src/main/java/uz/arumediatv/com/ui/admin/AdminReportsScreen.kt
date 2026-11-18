@@ -50,14 +50,14 @@ import uz.arumediatv.com.ui.theme.AruColors
 @Composable
 fun AdminReportsScreen(onBack: () -> Unit, onOpenProfile: (Long) -> Unit) {
     val ctx = LocalContext.current
-    val store = remember { AdminReportsStore(AppServices.admin) }
+    val store = remember { AdminKeep.store("reports") { AdminReportsStore(AppServices.admin) } }
     val st by store.state.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
     var banFor by remember { mutableStateOf<AdminReport?>(null) }
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
     LaunchedEffect(Unit) { store.load() }
     uz.arumediatv.com.data.LiveEffect("reports") { store.load() }
-    val listState = rememberLazyListState()
+    val listState = rememberKeptLazy("reports")
     val near by remember { derivedStateOf { val l = listState.layoutInfo; l.totalItemsCount > 0 && (l.visibleItemsInfo.lastOrNull()?.index ?: 0) >= l.totalItemsCount - 3 } }
     LaunchedEffect(near) { if (near) store.loadMore() }
 

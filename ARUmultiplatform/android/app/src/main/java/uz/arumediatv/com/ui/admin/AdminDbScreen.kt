@@ -56,17 +56,18 @@ import uz.arumediatv.com.ui.theme.AruColors
 /** Ma'lumotlar bazasi (Turso / Cloudflare D1 paneliga o'xshash, FAQAT O'QISH): jurnallar -> ustunlar va yozuvlar. */
 @Composable
 fun AdminDbScreen(onBack: () -> Unit) {
-    var table by remember { mutableStateOf<String?>(null) }
+    var table by rememberKept<String?>("db.table", null)
     val t = table
     if (t == null) DbTablesPage(onBack = onBack, onOpen = { table = it }) else DbRowsPage(t, onBack = { table = null })
 }
 
 @Composable
 private fun DbTablesPage(onBack: () -> Unit, onOpen: (String) -> Unit) {
-    var items by remember { mutableStateOf<List<DbTable>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    var items by rememberKept<List<DbTable>>("db.tables", emptyList())
+    var loading by remember { mutableStateOf(items.isEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
-    var filter by remember { mutableStateOf("") }
+    var filter by rememberKept("db.filter", "")
+    val tablesState = rememberKeptLazy("db.tables")
     LaunchedEffect(Unit) {
         val (list, err) = AppServices.admin.dbTables()
         items = list
@@ -88,7 +89,7 @@ private fun DbTablesPage(onBack: () -> Unit, onOpen: (String) -> Unit) {
                 shown.isEmpty() -> EmptyState(text = "Jurnal topilmadi")
                 else -> {
                     Text("${shown.size} ta jurnal · faqat o'qish", color = AruColors.TextFaint, fontSize = 12.sp, modifier = Modifier.padding(bottom = 6.dp))
-                    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
+                    LazyColumn(state = tablesState, verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 24.dp)) {
                         items(shown, key = { it.name }) { t ->
                             val shape = RoundedCornerShape(14.dp)
                             Row(
@@ -108,15 +109,17 @@ private fun DbTablesPage(onBack: () -> Unit, onOpen: (String) -> Unit) {
 
 @Composable
 private fun DbRowsPage(table: String, onBack: () -> Unit) {
-    var page by remember { mutableStateOf<DbPage?>(null) }
-    var loading by remember { mutableStateOf(true) }
+    var page by rememberKept<DbPage?>("db.$table.page", null)
+    var loading by remember { mutableStateOf(page == null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var offset by remember { mutableIntStateOf(0) }
-    var order by remember { mutableStateOf("") }
-    var desc by remember { mutableStateOf(true) }
-    var fcol by remember { mutableStateOf("") }
-    var input by remember { mutableStateOf("") }
-    var applied by remember { mutableStateOf("") }
+    var offset by rememberKept("db.$table.offset", 0)
+    var order by rememberKept("db.$table.order", "")
+    var desc by rememberKept("db.$table.desc", true)
+    var fcol by rememberKept("db.$table.fcol", "")
+    var input by rememberKept("db.$table.input", "")
+    var applied by rememberKept("db.$table.applied", "")
+    val rowsState = rememberKeptLazy("db.$table.rows")
+    val colsScroll = rememberKeptScroll("db.$table.cols")
     var detail by remember { mutableStateOf<List<String?>?>(null) }
     var menu by remember { mutableStateOf(false) }
     val limit = 30
@@ -138,7 +141,7 @@ private fun DbRowsPage(table: String, onBack: () -> Unit) {
             val p = page
             // Ustunlar: bosilsa shu ustun bo'yicha tartiblanadi (yana bossangiz yo'nalish almashadi).
             if (p != null) {
-                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(Modifier.horizontalScroll(colsScroll), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     p.columns.forEach { c ->
                         val on = order == c.name
                         val shape = RoundedCornerShape(10.dp)
@@ -176,7 +179,7 @@ private fun DbRowsPage(table: String, onBack: () -> Unit) {
                 error != null && p == null -> EmptyState(text = error.orEmpty())
                 p == null || p.rows.isEmpty() -> EmptyState(text = if (applied.isNotEmpty()) "Hech narsa topilmadi" else "Jurnal bo'sh")
                 else -> {
-                    LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LazyColumn(Modifier.weight(1f), state = rowsState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(p.rows.size) { i ->
                             val row = p.rows[i]
                             val shape = RoundedCornerShape(12.dp)

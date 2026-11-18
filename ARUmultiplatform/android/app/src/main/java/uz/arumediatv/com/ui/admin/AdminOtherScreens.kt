@@ -94,9 +94,10 @@ fun AdminChannelsScreen(onBack: () -> Unit, onAdd: () -> Unit) {
     val ctx = LocalContext.current
     val api = AppServices.admin
     val scope = rememberCoroutineScope()
-    var items by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-    var loading by remember { mutableStateOf(true) }
+    var items by rememberKept<List<JSONObject>>("channels.items", emptyList())
+    var loading by remember { mutableStateOf(items.isEmpty()) }
     var error by remember { mutableStateOf<String?>(null) }
+    val listState = rememberKeptLazy("channels")
     var limitFor by remember { mutableStateOf<JSONObject?>(null) }
     var delFor by remember { mutableStateOf<JSONObject?>(null) }
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
@@ -114,7 +115,7 @@ fun AdminChannelsScreen(onBack: () -> Unit, onAdd: () -> Unit) {
             when {
                 loading -> LoadingBox()
                 items.isEmpty() -> EmptyState(text = error ?: "Kanal yo'q")
-                else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                else -> LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 100.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(items.size) { i ->
                         val c = items[i]
                         val need = c.optInt("need")
@@ -241,7 +242,8 @@ fun AdminPacksScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val store = AppServices.packs
     val scope = rememberCoroutineScope()
-    var ops by remember { mutableStateOf<List<JSONObject>?>(null) }
+    var ops by rememberKept<List<JSONObject>?>("packs.ops", null)
+    val listState = rememberKeptLazy("packs")
     var rejectFor by remember { mutableStateOf<JSONObject?>(null) }
     var approveAll by remember { mutableStateOf(false) }
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
@@ -253,7 +255,7 @@ fun AdminPacksScreen(onBack: () -> Unit) {
         when {
             list == null -> LoadingBox()
             list.isEmpty() -> EmptyState(text = "Kutayotgan rasm yo'q")
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            else -> LazyColumn(Modifier.fillMaxSize(), state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 32.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 item { Row { Text("${list.size} ta kutmoqda", color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.weight(1f)); Text("Hammasini tasdiqlash", color = AruColors.Accent2, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.clickable { approveAll = true }) } }
                 items(list, key = { it.optLong("id") }) { o ->
                     var bytes by remember(o) { mutableStateOf<ByteArray?>(null) }
@@ -314,7 +316,7 @@ private val RANGES = listOf("24h" to "24 soat", "7d" to "7 kun", "30d" to "30 ku
 @Composable
 fun AdminStatsScreen(onBack: () -> Unit) {
     val api = AppServices.admin
-    var stats by remember { mutableStateOf<AppStats?>(null) }
+    var stats by rememberKept<AppStats?>("stats.data", null)
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) {
         val r = api.get("/api/stats")
@@ -323,7 +325,7 @@ fun AdminStatsScreen(onBack: () -> Unit) {
     OverlayScaffold("Umumiy statistika", onBack) {
         val s = stats
         if (s == null) { if (error != null) EmptyState(text = error!!) else LoadingBox(); return@OverlayScaffold }
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberKeptScroll("stats")).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.fillMaxWidth().clip(card).background(AruColors.Card).padding(16.dp)) {
                 Text("Kontent", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Text("Anime: ${s.anime} · Bo'lim: ${s.seasons} · Qism: ${s.episodes}", color = AruColors.TextDim, fontSize = 13.sp, modifier = Modifier.padding(top = 6.dp))
@@ -402,8 +404,8 @@ fun AdminAppScreen(onBack: () -> Unit) {
     val ctx = LocalContext.current
     val api = AppServices.admin
     val scope = rememberCoroutineScope()
-    var cfg by remember { mutableStateOf<JSONObject?>(null) }
-    var version by remember { mutableStateOf("") }
+    var cfg by rememberKept<JSONObject?>("app.cfg", null)
+    var version by rememberKept("app.version", "")
     var error by remember { mutableStateOf<String?>(null) }
     fun toast(t: String) = Toast.makeText(ctx, t, Toast.LENGTH_SHORT).show()
     suspend fun load() { val r = api.get("/api/admin/app"); if (r.ok && r.json != null) { cfg = r.json; version = r.json!!.optString("min_version") } else error = api.errorOf(r, "Yuklanmadi") }
@@ -413,7 +415,7 @@ fun AdminAppScreen(onBack: () -> Unit) {
     OverlayScaffold("Ilova va xavfsizlik", onBack) {
         val c = cfg
         if (c == null) { if (error != null) EmptyState(text = error!!) else LoadingBox(); return@OverlayScaffold }
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxSize().verticalScroll(rememberKeptScroll("app")).padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Column(Modifier.fillMaxWidth().clip(card).background(AruColors.Card).padding(16.dp)) {
                 Text("Eng kichik versiya", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
                 Text("Bundan eski ilovalar yangilanmaguncha ishlamaydi. Masalan 0.1.0 yoki 0.1.0+9. Bo'sh — cheklov yo'q.", color = AruColors.TextDim, fontSize = 12.sp, modifier = Modifier.padding(vertical = 6.dp))

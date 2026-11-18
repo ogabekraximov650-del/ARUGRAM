@@ -209,6 +209,8 @@ class MainActivity : ComponentActivity() {
 private fun AuthGate() {
     val restored by AppServices.auth.restored.collectAsStateWithLifecycle()
     val epoch by uz.arumediatv.com.data.AccountSwitcher.epoch.collectAsStateWithLifecycle()
+    // Hisob almashganda admin ekranlarining eslab qolingan joyi/ma'lumoti tozalanadi.
+    androidx.compose.runtime.LaunchedEffect(epoch) { uz.arumediatv.com.ui.admin.AdminKeep.clear() }
     // Hisob almashtirilganda ekran daraxti qayta quriladi, lekin ochiq bo'lim (tab) saqlanadi.
     var tabKeep by androidx.compose.runtime.remember { mutableIntStateOf(0) }
     Box(Modifier.fillMaxSize().background(AruColors.Bg)) {
