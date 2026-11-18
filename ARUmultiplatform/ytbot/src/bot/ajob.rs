@@ -11,15 +11,38 @@ async fn post(http: &reqwest::Client, cb: &str, job: &str, tok: &str, state: &st
     }
 }
 
-/// UZ: har soniyada `line()` natijasini yuboradigan fon vazifasi; bekor qilinsa jarayon to'xtaydi. EN: background task posting `line()` every second; exits the process on cancel.
-fn poster(http: reqwest::Client, cb: String, job: String, tok: String, line: impl Fn() -> String + Send + 'static) -> tokio::task::JoinHandle<()> {
+/// UZ: chat xabarini Actions o'zi Telegram'da yangilaydi (Ample orqali EMAS): (bot, chat, xabar). EN: the worker edits the chat message in Telegram directly (NOT through Ample).
+static CHAT: std::sync::OnceLock<(Bot, i64, i64)> = std::sync::OnceLock::new();
+
+/// UZ: har 3 soniyada `line()` natijasini Telegram xabariga yozadigan fon vazifasi. Ample'ga hech narsa yuborilmaydi (bekor qilishni `heartbeat` tekshiradi).
+/// EN: background task writing `line()` into the Telegram message every 3 s; nothing goes through Ample (cancel is polled by `heartbeat`).
+fn poster(_http: reqwest::Client, _cb: String, _job: String, _tok: String, line: impl Fn() -> String + Send + 'static) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut last = String::new();
+        loop {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            let t: String = line().chars().take(3500).collect();
+            if t.is_empty() || t == last {
+                continue;
+            }
+            if let Some((bot, chat, msg)) = CHAT.get() {
+                bot.edit(*chat, *msg, &t, None).await;
+            }
+            last = t;
+        }
+    })
+}
+
+/// UZ: Ample'ga har 15 soniyada bitta kichik "tirikman" so'rovi (matnsiz): ish holati "run" bo'ladi va bekor qilinganini bilamiz. Trafik deyarli yo'q.
+/// EN: one tiny textless heartbeat to Ample every 15 s: marks the job as running and learns about cancellation. Negligible traffic.
+fn heartbeat(http: reqwest::Client, cb: String, job: String, tok: String) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            if post(&http, &cb, &job, &tok, "run", &line(), "").await {
+            if post(&http, &cb, &job, &tok, "run", "", "").await {
                 eprintln!("ish bekor qilindi");
                 std::process::exit(0);
             }
+            tokio::time::sleep(Duration::from_secs(15)).await;
         }
     })
 }
@@ -30,7 +53,13 @@ pub async fn ajob_main() -> Result<()> {
     let (job, tok) = (env("JOB")?, env("TOK")?);
     let http = reqwest::Client::builder().timeout(Duration::from_secs(60)).build()?;
     let info: Value = http.get(format!("{cb}/ajob/{job}?tok={tok}")).send().await?.error_for_status().map_err(|e| anyhow!("Ample ish ma'lumotini bermadi: {e}"))?.json().await?;
-    match run(&http, &cb, &job, &tok, &info).await {
+    if std::env::var("MODE").map(|m| m == "probe").unwrap_or(false) {
+        return probe_main(&http, &cb, &job, &tok, &info).await;
+    }
+    let hb = heartbeat(http.clone(), cb.clone(), job.clone(), tok.clone());
+    let r = run(&http, &cb, &job, &tok, &info).await;
+    hb.abort();
+    match r {
         Ok(text) => {
             post(&http, &cb, &job, &tok, "done", &text, "").await;
             Ok(())
@@ -41,6 +70,30 @@ pub async fn ajob_main() -> Result<()> {
             Err(e)
         }
     }
+}
+
+/// UZ: sifatlar ro'yxatini yt-dlp bilan oladi va Ample'ga (`/pres`) beradi; Actions'da ishlaydi. EN: fetches the quality list with yt-dlp and posts it to Ample (`/pres`); runs inside Actions.
+async fn probe_main(http: &reqwest::Client, cb: &str, job: &str, tok: &str, info: &Value) -> Result<()> {
+    let data_dir = "./adata".to_string();
+    std::fs::create_dir_all(&data_dir)?;
+    let mut cookies = None;
+    if info["cookies"].as_bool() == Some(true) {
+        if let Ok(r) = http.get(format!("{cb}/ack/{job}?tok={tok}")).send().await {
+            if let Ok(t) = r.error_for_status()?.text().await {
+                let p = format!("{data_dir}/cookies.txt");
+                std::fs::write(&p, t)?;
+                cookies = Some(p);
+            }
+        }
+    }
+    let cfg = Cfg { bot_token: String::new(), data_dir, ytdlp: "yt-dlp".into(), cookies, owner_env: None, api_id: None, public_url: None, webhook_secret: String::new(), port: 0, gh_repo: None };
+    let url = info["url"].as_str().unwrap_or("").to_string();
+    let body = match dl::probe(&cfg, &url).await {
+        Ok(i) => json!({"tok": tok, "ok": true, "info": dl::info_to_json(&i)}),
+        Err(e) => json!({"tok": tok, "ok": false, "err": e.to_string().chars().take(600).collect::<String>()}),
+    };
+    http.post(format!("{cb}/pres/{job}")).json(&body).send().await?.error_for_status()?;
+    Ok(())
 }
 
 async fn run(http: &reqwest::Client, cb: &str, job: &str, tok: &str, info: &Value) -> Result<String> {
@@ -63,6 +116,10 @@ async fn run(http: &reqwest::Client, cb: &str, job: &str, tok: &str, info: &Valu
     }
     let cfg = Cfg { bot_token: info["bot_token"].as_str().unwrap_or("").to_string(), data_dir: data_dir.clone(), ytdlp: "yt-dlp".into(), cookies, owner_env: None, api_id: std::env::var("API_ID").ok().and_then(|v| v.trim().parse().ok()), public_url: None, webhook_secret: String::new(), port: 0, gh_repo: None };
     let t80: String = title.chars().take(80).collect();
+    // Chat xabarini keyingi yangilashlar to'g'ridan-to'g'ri Telegram'ga ketadi (status_msg Ample'dan bir marta olingan).
+    if let Some(m) = info["status_msg"].as_i64() {
+        let _ = CHAT.set((Bot::new(&cfg.bot_token), chat, m));
+    }
 
     // 1) Yuklash. To'g'ridan-to'g'ri havolalar bo'lsa (masalan Rumble) — shu fayl havolasi.
     let (src_url, src_fmt) = match meta["direct"].as_object().filter(|m| !m.is_empty()) {

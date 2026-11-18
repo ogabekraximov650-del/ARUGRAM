@@ -14,11 +14,15 @@ EN: `ytbot` on Ample manages the queue, logs and the chat message; heavy work ru
    EN: Add `GH_REPO=owner/repo` to the deploy env. `/actions` in the bot shows the status.
 
 ## Qanday ishlaydi / How it works
-- UZ: >400 MB yoki diskka sig'maydigan ish Actions'ga topshiriladi. Ample ishga xos bir martalik kalit yaratadi, workflow'ni ishga tushiradi va tugaguncha kutadi (navbat birin-ketin).
-  EN: Jobs over 400 MB (or that do not fit the disk) go to Actions. Ample makes a one-time per-job key, triggers the workflow and waits (the queue stays one-by-one).
+- UZ: HAMMA yuklash ishi (kichigi ham) Actions'ga topshiriladi; Ample faqat navbat va ishga tushirish. Ample ishga xos bir martalik kalit yaratadi, workflow'ni ishga tushiradi va tugaguncha kutadi (navbat birin-ketin).
+  EN: ALL download jobs (even small ones) go to Actions; Ample only queues and triggers. Ample makes a one-time per-job key, triggers the workflow and waits (the queue stays one-by-one).
 - UZ: Ishchi `ytbot ajob` dasturini Ample'dan (`/bin`) oladi, ish ma'lumoti va cookies'ni `/ajob`, `/ack` orqali oladi (GitHub'da saqlanmaydi), logni har soniyada `/prog` ga yuboradi.
   EN: The worker fetches `ytbot ajob` from Ample (`/bin`), gets job data and cookies through `/ajob`, `/ack` (never stored on GitHub) and posts its log to `/prog` every second.
 - UZ: Ample chat xabarini kamida 3 soniyada bir yangilaydi (Telegram cheklovi).
   EN: Ample edits the chat message at most once per 3 seconds (Telegram limits).
 - UZ: Ish tugagach kalit o'chiriladi. Kalit workflow kirishiga SHIFRLANGAN (`ENCODE_TOKEN` bilan) beriladi, shuning uchun repo ochiq bo'lsa ham u ko'rinmaydi. Lekin ochiq repoda Actions loglari (yuklanayotgan havolalar) hammaga ko'rinadi.
   EN: The key is wiped when the job ends. The key is passed ENCRYPTED (with `ENCODE_TOKEN`), so a public repo does not reveal it; but in a public repo the Actions logs (URLs being downloaded) are visible to everyone.
+
+## Trafik / Traffic
+- UZ: Ishchi dasturni ochiq Release'dan (`ytbot-latest`, `ytbot-build.yml` yig'adi) oladi; chat xabarini Telegram'da O'ZI yangilaydi; Ample'ga faqat har 15 soniyada kichik "tirikman" (bekor qilish uchun), ish ma'lumoti va cookies ketadi.
+  EN: The worker takes the binary from the public release, edits the chat message in Telegram itself, and talks to Ample only with a tiny heartbeat every 15 s (for cancellation), the job info and cookies.

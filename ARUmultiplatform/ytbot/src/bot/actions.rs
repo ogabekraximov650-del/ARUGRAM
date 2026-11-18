@@ -54,8 +54,8 @@ fn same(a: &str, b: &str) -> bool {
 }
 
 /// UZ: `workflow_dispatch` so'rovining tanasi. `etok` — ishga xos kalitning SHIFRLANGAN ko'rinishi (repo ochiq bo'lsa ham kirishlar sirni oshkor qilmasin). EN: body of the `workflow_dispatch` request; `etok` is the per-job key ENCRYPTED so a public repo's inputs reveal nothing.
-pub fn dispatch_body(job: i64, cb: &str, etok: &str) -> Value {
-    json!({"ref": "main", "inputs": {"job": job.to_string(), "cb": cb, "etok": etok}})
+pub fn dispatch_body(job: i64, cb: &str, etok: &str, mode: &str) -> Value {
+    json!({"ref": "main", "inputs": {"job": job.to_string(), "cb": cb, "etok": etok, "mode": mode}})
 }
 
 /// UZ: kalitni `encode_token` bilan shifrlaydi (openssl AES-256-CBC, PBKDF2 200000, base64 bir qator). Workflow shuni `secrets.ENCODE_TOKEN` bilan ochadi.
@@ -78,7 +78,7 @@ async fn encrypt_tok(cfg: &Cfg, tok: &str) -> Result<String> {
     Ok(t)
 }
 
-async fn dispatch(cfg: &Cfg, job: i64, tok: &str) -> Result<()> {
+async fn dispatch(cfg: &Cfg, job: i64, tok: &str, mode: &str) -> Result<()> {
     let repo = cfg.gh_repo.as_deref().ok_or_else(|| anyhow!("GH_REPO yo'q"))?;
     let cb = cfg.public_url.as_deref().ok_or_else(|| anyhow!("PUBLIC_URL yo'q"))?;
     let t = token(cfg).await?;
@@ -88,7 +88,7 @@ async fn dispatch(cfg: &Cfg, job: i64, tok: &str) -> Result<()> {
         .header("Accept", "application/vnd.github+json")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .header("User-Agent", "ytbot")
-        .json(&dispatch_body(job, cb, &encrypt_tok(cfg, tok).await?))
+        .json(&dispatch_body(job, cb, &encrypt_tok(cfg, tok).await?, mode))
         .send()
         .await?;
     if r.status().as_u16() != 204 {
@@ -107,7 +107,7 @@ pub async fn run_actions(app: &Arc<App>, job: &db::Job) -> Result<()> {
     db::kv_set(&app.db, &format!("ajerr:{}", job.id), "").await?;
     app.bot.edit(job.chat_id, job.status_msg, &format!("☁️ #{} GitHub Actions'ga topshirilmoqda…\n{}", job.id, job.title.chars().take(100).collect::<String>()), None).await;
     let res = async {
-        dispatch(&app.cfg, job.id, &tok).await?;
+        dispatch(&app.cfg, job.id, &tok, "dl").await?;
         let t0 = std::time::Instant::now();
         loop {
             tokio::time::sleep(Duration::from_secs(3)).await;
@@ -157,7 +157,7 @@ pub async fn ajob_info(State(app): State<Arc<App>>, AxPath(job): AxPath<i64>, q:
     let Some(j) = db::job_get(&app.db, job).await else { return StatusCode::NOT_FOUND.into_response() };
     let meta: Value = serde_json::from_str(&j.meta).unwrap_or(json!({}));
     let has_cookies = dl::cookie_file(&app.cfg).is_some();
-    axum::Json(json!({"chat_id": j.chat_id, "title": j.title, "url": j.url, "fmt": j.fmt, "meta": meta, "bot_token": app.cfg.bot_token, "bot_username": app.bot_username, "cookies": has_cookies})).into_response()
+    axum::Json(json!({"chat_id": j.chat_id, "status_msg": j.status_msg, "title": j.title, "url": j.url, "fmt": j.fmt, "meta": meta, "bot_token": app.cfg.bot_token, "bot_username": app.bot_username, "cookies": has_cookies})).into_response()
 }
 
 /// GET /ack/{job}?tok= — cookies.txt (GitHub'ga saqlanmaydi, faqat ish davomida olinadi).
@@ -184,7 +184,49 @@ pub async fn ajob_bin(State(app): State<Arc<App>>, q: TokQ, headers: HeaderMap) 
 }
 
 
-/// POST /prog/{job} — Actions har soniyada log yuboradi; chat xabari kamida 3 soniyada bir yangilanadi. Javobda `cancel` bo'lsa ishchi to'xtaydi.
+/// UZ: havola uchun sifatlar ro'yxatini ham Actions oladi (Ample'da yt-dlp kerak emas): vaqtinchalik ish ochiladi, workflow `mode=probe` bilan ishga tushadi va natija `/pres/{job}` ga keladi.
+/// EN: the quality list is also fetched by Actions (no yt-dlp on Ample): a temporary job is opened, the workflow runs with `mode=probe` and posts the result to `/pres/{job}`.
+pub async fn probe(app: &Arc<App>, chat: i64, url: &str) -> Result<dl::Info> {
+    let id = db::job_new(&app.db, chat, url, "(tekshiruv)", &json!({"probe": true}).to_string()).await?;
+    let tok = new_tok();
+    db::kv_set(&app.db, &format!("ajtok:{id}"), &tok).await?;
+    db::kv_set(&app.db, &format!("ajres:{id}"), "").await?;
+    let res = async {
+        dispatch(&app.cfg, id, &tok, "probe").await?;
+        let t0 = std::time::Instant::now();
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let r = db::kv_get(&app.db, &format!("ajres:{id}")).await.unwrap_or_default();
+            if !r.is_empty() {
+                let v: Value = serde_json::from_str(&r).map_err(|e| anyhow!("Actions javobi buzuq: {e}"))?;
+                if v["ok"].as_bool() == Some(true) {
+                    return dl::info_from_json(&v["info"]).ok_or_else(|| anyhow!("Actions sifatlar ro'yxatini noto'g'ri berdi"));
+                }
+                return Err(anyhow!("{}", v["err"].as_str().unwrap_or("Actions xatosi")));
+            }
+            if t0.elapsed() > Duration::from_secs(240) {
+                return Err(anyhow!("Actions 4 daqiqada javob bermadi (workflow yoki token tekshirilsin)"));
+            }
+        }
+    }
+    .await;
+    let _ = db::kv_set(&app.db, &format!("ajtok:{id}"), "").await;
+    let _ = db::kv_set(&app.db, &format!("ajres:{id}"), "").await;
+    db::job_cancel(&app.db, id).await; // vaqtinchalik tekshiruv ishi: tanlov uchun alohida ish ochiladi
+    res
+}
+
+/// POST /pres/{job} — Actions sifatlar ro'yxatini (yoki xatoni) yuboradi.
+pub async fn ajob_probe_result(State(app): State<Arc<App>>, AxPath(job): AxPath<i64>, axum::Json(p): axum::Json<Value>) -> Response {
+    if !auth(&app, job, p["tok"].as_str().unwrap_or("")).await {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let out = json!({"ok": p["ok"].as_bool().unwrap_or(false), "info": p["info"], "err": p["err"].as_str().unwrap_or("")});
+    let _ = db::kv_set(&app.db, &format!("ajres:{job}"), &out.to_string()).await;
+    StatusCode::NO_CONTENT.into_response()
+}
+
+/// POST /prog/{job} — Actions har 15 soniyada kichik "tirikman" yuboradi (matnsiz) va oxirida `done`/`fail`; chat xabarini Actions o'zi yangilaydi. Javobda `cancel` bo'lsa ishchi to'xtaydi.
 pub async fn ajob_prog(State(app): State<Arc<App>>, AxPath(job): AxPath<i64>, axum::Json(p): axum::Json<Value>) -> Response {
     let sget = |k: &str| p[k].as_str().unwrap_or("").to_string();
     let (ptok, ptext, pstate, perr) = (sget("tok"), sget("text"), sget("state"), sget("err"));
@@ -233,7 +275,8 @@ mod tests {
 
     #[test]
     fn dispatch_and_token_helpers() {
-        let b = dispatch_body(7, "https://x.ample.run", "abc");
+        let b = dispatch_body(7, "https://x.ample.run", "abc", "probe");
+        assert_eq!(b["inputs"]["mode"], "probe");
         assert_eq!(b["ref"], "main");
         assert_eq!(b["inputs"]["job"], "7");
         assert_eq!(b["inputs"]["etok"], "abc");

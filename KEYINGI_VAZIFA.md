@@ -7544,3 +7544,12 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 ## Reklama "yuklanmoqda" qotib qolsa: tashxis va qayta urinish (2026-11-18)
 
 - Sinov ID'lari bilan ham telefonda "Reklama hali tayyor emas (yuklanmoqda)" turib qoldi. `RewardedAds`: Google Play xizmatlari tekshiruvi (muammo bo'lsa kod ekranda), SDK tayyorlanish va yuklanish soniyalari ekranda, 40 soniya qaytarma kelmasa holat tiklanib qayta uriniladi.
+
+## ytbot: hamma ish GitHub Actions'da, Ample faqat ishga tushiradi (2026-11-18)
+
+- **Maqsad (foydalanuvchi talabi):** Ample bo'sh bo'lsin, undan trafik o'tmasin; u faqat Actions'ni uyg'otsin. `GH_REPO` ulangan bo'lsa (`actions::configured`) HAMMA yuklash ishi (kichigi ham) Actions'ga topshiriladi (`bot.rs` `process`, avval faqat >400 MB).
+- **Sifatlar ro'yxati ham Actions'da:** `actions::probe` — vaqtinchalik ish + `ytjob.yml` `mode=probe` bilan ishga tushadi; natija `POST /pres/{job}` ga keladi (`dl::info_to_json/from_json`). Ample'da yt-dlp kerak emas.
+- **Log/chat:** Actions chat xabarini Telegram'da O'ZI yangilaydi (har 3 s); Ample'ga faqat har 15 soniyada matnsiz "tirikman" (`/prog`, bekor qilish uchun) va oxirida `done/fail` boradi.
+- **Dastur manbasi:** `.github/workflows/ytbot-build.yml` ytbot'ni yig'ib, ochiq Release `ytbot-latest` ga qo'yadi; `ytjob.yml` dasturni shu yerdan oladi (zaxira — Ample `/bin`).
+- **Cheklov:** PDF (sahifa rasmlari) ishi Ample'da qoladi (ffmpeg faqat PNG/WebP→JPEG uchun kerak).
+- Fayllar: `ARUmultiplatform/ytbot/src/{bot.rs,bot/actions.rs,bot/ajob.rs,dl.rs}`, `tool/ytjob/*`, `.github/workflows/ytbot-build.yml`.

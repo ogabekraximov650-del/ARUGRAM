@@ -313,6 +313,7 @@ pub async fn run(cfg: Arc<Cfg>) -> Result<()> {
         .route("/", axum::routing::get(|| async { "ok" }))
         .route("/tg/{path_secret}", axum::routing::post(webhook))
         .route("/prog/{job}", axum::routing::post(actions::ajob_prog))
+        .route("/pres/{job}", axum::routing::post(actions::ajob_probe_result))
         .route("/ajob/{job}", axum::routing::get(actions::ajob_info))
         .route("/ack/{job}", axum::routing::get(actions::ajob_cookies))
         .route("/bin", axum::routing::get(actions::ajob_bin))
@@ -447,7 +448,7 @@ async fn on_message(app: &Arc<App>, msg: &Value) -> Result<()> {
             return Ok(());
         }
         "/actions" => {
-            let t = if actions::configured(&app.cfg) { format!("☁️ GitHub Actions ulangan: {}\nKatta (>400 MB) yoki diskka sig'maydigan ishlar shu yerda bajariladi.", app.cfg.gh_repo.clone().unwrap_or_default()) } else { "☁️ GitHub Actions ulanmagan.".to_string() };
+            let t = if actions::configured(&app.cfg) { format!("☁️ GitHub Actions ulangan: {}\nBarcha yuklash ishlari shu yerda bajariladi (Ample faqat ishga tushiradi).", app.cfg.gh_repo.clone().unwrap_or_default()) } else { "☁️ GitHub Actions ulanmagan.".to_string() };
             app.bot.send(chat, &t, None).await?;
             return Ok(());
         }
@@ -505,7 +506,9 @@ async fn save_cookies(app: &Arc<App>, chat: i64, mid: i64, file_id: &str, size: 
 
 async fn handle_url(app: &Arc<App>, chat: i64, url: &str) -> Result<()> {
     let st = app.bot.send(chat, "⏳ Ma'lumot olinmoqda…", None).await?;
-    let info = match dl::probe(&app.cfg, url).await {
+    // GitHub Actions ulangan bo'lsa sifatlar ro'yxatini ham Actions oladi (Ample'da yt-dlp yo'q, trafik o'tmaydi).
+    let probed = if actions::configured(&app.cfg) { actions::probe(app, chat, url).await } else { dl::probe(&app.cfg, url).await };
+    let info = match probed {
         Ok(i) => i,
         Err(e) => {
             // UZ: video topilmadi — sahifadagi rasmlarni PDF qilishni taklif qilamiz (YouTube/Rumble xatolari bundan mustasno).
@@ -698,6 +701,10 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
     let (w, h) = (meta["w"].as_i64().unwrap_or(0), meta["h"].as_i64().unwrap_or(0));
     let is_audio = job.fmt == "a";
     let title: String = job.title.chars().take(100).collect();
+    // GitHub Actions ulangan bo'lsa HAMMA ish (kichigi ham) Actions'da bajariladi: yuklash, bo'lish va yuborish. Ample faqat navbat va ishga tushirish (trafik o'tmaydi).
+    if actions::configured(&app.cfg) {
+        return actions::run_actions(app, job).await;
+    }
     // 0) OQIM (diskka yozilmasdan): akkaunt ulangan, hajmi ANIQ ma'lum manba va fayl 50 MB dan katta bo'lsa. Xato bo'lsa diskka yuklashga o'tiladi.
     if let (Some(acc), false) = (app.acc.as_ref(), is_audio) {
         if let Some(sm) = meta["stream"][&job.fmt].as_object() {
@@ -720,14 +727,6 @@ async fn run_job(app: &Arc<App>, job: &db::Job) -> Result<()> {
         }
     }
 
-    // GitHub Actions ulangan bo'lsa: katta (>400 MB) yoki diskka sig'maydigan ish ishchiga topshiriladi (disk/RAM chegarasi yo'q).
-    if actions::configured(&app.cfg) {
-        let est = meta["sizes"][&job.fmt].as_u64();
-        let free = dl::free_bytes(Path::new(&app.cfg.data_dir));
-        if est.map_or(false, |s| s > 400_000_000) || matches!((est, free), (Some(n), Some(f)) if n * 2 + 150_000_000 > f) {
-            return actions::run_actions(app, job).await;
-        }
-    }
     // Disk yetarlimi? (video+audio birlashtirilsa ~2 barobar joy kerak). Yetmasa foydalanuvchiga aniq xabar.
     if let (Some(need), Some(free)) = (meta["sizes"][&job.fmt].as_u64(), dl::free_bytes(Path::new(&app.cfg.data_dir))) {
         if need * 2 + 150_000_000 > free {

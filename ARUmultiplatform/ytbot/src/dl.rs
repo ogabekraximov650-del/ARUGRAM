@@ -31,6 +31,26 @@ pub struct Info {
     pub direct: Vec<(i64, String)>,
 }
 
+/// UZ: `Info` ni JSON'ga o'giradi (Actions ishchisi sifatlar ro'yxatini Ample'ga shu ko'rinishda beradi). EN: serialises `Info` (the Actions worker hands the quality list to Ample this way).
+pub fn info_to_json(i: &Info) -> Value {
+    serde_json::json!({
+        "title": i.title, "duration": i.duration, "w": i.w, "h": i.h, "audio_size": i.audio_size,
+        "opts": i.opts.iter().map(|o| serde_json::json!({"h": o.h, "size": o.size, "stream": o.stream.as_ref().map(|(a, b, c)| serde_json::json!([a, b, c]))})).collect::<Vec<_>>(),
+        "direct": i.direct.iter().map(|(h, u)| serde_json::json!([h, u])).collect::<Vec<_>>(),
+    })
+}
+
+/// UZ: `info_to_json` ning teskarisi. EN: inverse of `info_to_json`.
+pub fn info_from_json(v: &Value) -> Option<Info> {
+    let opts = v["opts"].as_array()?.iter().map(|o| Opt {
+        h: o["h"].as_i64().unwrap_or(0),
+        size: o["size"].as_u64(),
+        stream: o["stream"].as_array().and_then(|a| Some((a.first()?.as_str()?.to_string(), a.get(1)?.as_u64()?, a.get(2)?.as_str()?.to_string()))),
+    }).collect();
+    let direct = v["direct"].as_array().map(|a| a.iter().filter_map(|p| Some((p.get(0)?.as_i64()?, p.get(1)?.as_str()?.to_string()))).collect()).unwrap_or_default();
+    Some(Info { title: v["title"].as_str()?.to_string(), duration: v["duration"].as_i64().unwrap_or(0), w: v["w"].as_i64().unwrap_or(0), h: v["h"].as_i64().unwrap_or(0), opts, audio_size: v["audio_size"].as_u64(), direct })
+}
+
 fn has_codec(v: &Value) -> bool {
     matches!(v.as_str(), Some(s) if s != "none" && !s.is_empty())
 }
@@ -797,6 +817,21 @@ pub async fn split_with(path: &Path, dir: &Path, prog: Arc<AtomicU32>, limit: u6
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn info_json_roundtrip() {
+        let i = Info {
+            title: "Sarlavha".into(), duration: 125, w: 1280, h: 720,
+            opts: vec![Opt { h: 720, size: Some(5_000_000), stream: Some(("18".into(), 4_000_000, "mp4".into())) }, Opt { h: 360, size: None, stream: None }],
+            audio_size: Some(900_000), direct: vec![(720, "https://x/y.mp4".into())],
+        };
+        let j = info_to_json(&i);
+        let b = info_from_json(&j).unwrap();
+        assert_eq!(b.title, "Sarlavha");
+        assert_eq!(b.opts, i.opts);
+        assert_eq!(b.direct, i.direct);
+        assert_eq!((b.duration, b.w, b.h, b.audio_size), (125, 1280, 720, Some(900_000)));
+    }
+
     use super::*;
     use serde_json::json;
 

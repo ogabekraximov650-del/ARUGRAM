@@ -1,0 +1,40 @@
+# UZ: yt-dlp boti (`ARUmultiplatform/ytbot`) ni yig'adi va tayyor dasturni ochiq Release'ga (`ytbot-latest`) qo'yadi. Actions ishchisi (`ytjob.yml`, ikkinchi akkaunt) dasturni shu yerdan oladi — Ample'dan trafik o'tmaydi.
+# EN: builds the yt-dlp bot and publishes the binary to the public `ytbot-latest` release; the Actions worker downloads it from there instead of Ample.
+# RU: sobiraet yt-dlp bota i publikuet binarnik v relize; worker beret ego ottuda, a ne cherez Ample.
+name: ytbot yig'ish
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/ytbot/**'
+      - '.github/workflows/ytbot-build.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/ytbot
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/ytbot -> target"
+      - name: Testlar
+        run: cargo test --release
+      - name: Yig'ish
+        run: cargo build --release
+      - name: Release'ga qo'yish (ytbot-latest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp target/release/ytbot ./ytbot
+          sha256sum ytbot | tee ytbot.sha256
+          gh release view ytbot-latest >/dev/null 2>&1 || gh release create ytbot-latest --title "ytbot (so'nggi)" --notes "UZ: yt-dlp boti, avtomatik yig'ilgan. EN: auto-built yt-dlp bot binary." --repo "$GITHUB_REPOSITORY"
+          gh release upload ytbot-latest ytbot ytbot.sha256 --clobber --repo "$GITHUB_REPOSITORY"
