@@ -7566,3 +7566,8 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 
 - Muammo: video R2'ga topshirilgach panel eski matn ("🧩 Bo'laklar mp4 ga yig'ilmoqda...") bilan qotib qolardi, yakuniy holat panelga yetmasdi (`close` oldidan yuborilmasdi) — yuklangan qism ham "yuklanmagandek" ko'rinardi.
 - `tool/anibla/download.py`: yuklab olingach "kadr tayyorlanmoqda", "R2'ga yozilmoqda (N MB)", "Telegram'ga yuklovchi workflow yetkazadi (navbatda)" bosqichlari ko'rinadi va yakuniy holat albatta yuboriladi; qaytarish matni eski loglarsiz qisqa. Worker `done` qatori: "asl video Telegram'ga qo'yildi (N qismda), kodlash navbatida".
+
+## "Tomosha qilish" havolasidan `w` olib tashlandi (2026-11-18)
+
+- E'londagi tugma havolasi endi `https://t.me/<bot>?start=<anime>_<bo'lim>_<qism>` (faqat raqamlar, `w` yo'q) — `worker/src/announce.rs`. Eski `w<anime>_...` havolalar ham ishlaydi (`parse_watch`). Kirish tokenlari (tasodifiy hex, `_` yo'q) bilan to'qnashmaydi (test).
+- Oxirgi raqam (masalan `30`) — qism RAQAMI emas, bazadagi qism ID'si (`epizod_id`).

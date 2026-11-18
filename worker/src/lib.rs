@@ -5182,7 +5182,7 @@ async fn handle_tg_webhook(env: &Env, mut req: Request) -> Result<Response> {
         return ok(json!({"ok": true}));
     }
 
-    // E'londagi "Tomosha qilish" (`announce.rs`): /start w<anime>_<bo'lim>_<qism> — anime kartasi va Mini App tugmasi.
+    // E'londagi "Tomosha qilish" (`announce.rs`): /start <anime>_<bo'lim>_<qism> (eski: w<anime>_...) — anime kartasi va Mini App tugmasi.
     if let Some((a, s, e)) = announce::parse_watch(&arg) {
         announce::watch_card(env, chat_id, a, s, e).await;
         return ok(json!({"ok": true}));

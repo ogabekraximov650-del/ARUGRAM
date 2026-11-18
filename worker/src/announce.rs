@@ -122,7 +122,7 @@ async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result
     // "Tomosha qilish" — asosiy botga /start (Mini App tugmasi bilan javob beradi).
     let markup = json!({"inline_keyboard": [[{
         "text": "Tomosha qilish",
-        "url": format!("https://t.me/{bot}?start=w{a}_{s}_{e}"),
+        "url": format!("https://t.me/{bot}?start={a}_{s}_{e}"),
     }]]});
 
     let photo = bare_name(season["photo_url"].as_str().unwrap_or(""));
@@ -257,9 +257,11 @@ async fn upload_photo(env: &Env, ch: i64, bytes: &[u8]) -> std::result::Result<V
     Ok(v)
 }
 
-/// `/start w<anime>_<bo'lim>[_<qism>]` (e'londagi "Tomosha qilish") -> (anime, bo'lim, qism).
+/// `/start <anime>_<bo'lim>[_<qism>]` (e'londagi "Tomosha qilish"; faqat raqamlar) -> (anime, bo'lim, qism). Eski havolalar (`w<anime>_...`) ham ishlaydi.
+/// UZ: `qism` — qismning bazadagi ID'si (`epizod_id`), qism RAQAMI emas. EN: the last number is the episode ID, not the episode number.
 pub(crate) fn parse_watch(arg: &str) -> Option<(i64, i64, Option<i64>)> {
-    let rest = arg.trim().strip_prefix('w')?;
+    let arg = arg.trim();
+    let rest = arg.strip_prefix('w').unwrap_or(arg);
     let parts: Vec<&str> = rest.split('_').collect();
     if parts.len() < 2 || parts.len() > 3 || parts.iter().any(|p| p.is_empty() || !p.chars().all(|c| c.is_ascii_digit())) {
         return None;
@@ -352,5 +354,30 @@ pub(crate) async fn watch_card(env: &Env, chat: i64, a: i64, s: i64, e: Option<i
         // Rasm yoki matn rad etilsa — hech bo'lmasa tugmali oddiy xabar.
         let _ = tg_api(env, "sendMessage", json!({"chat_id": chat, "text": t, "parse_mode": "HTML",
             "reply_markup": markup})).await;
+    }
+}
+
+#[cfg(test)]
+mod watch_link_tests {
+    use super::parse_watch;
+
+    #[test]
+    fn parses_numeric_and_legacy_links() {
+        assert_eq!(parse_watch("3_1_30"), Some((3, 1, Some(30))));
+        assert_eq!(parse_watch("3_1"), Some((3, 1, None)));
+        // Eski havolalar (`w` bilan) ishlashda davom etadi.
+        assert_eq!(parse_watch("w3_1_30"), Some((3, 1, Some(30))));
+        assert_eq!(parse_watch(" 12_4_900 "), Some((12, 4, Some(900))));
+    }
+
+    #[test]
+    fn rejects_login_tokens_and_garbage() {
+        assert_eq!(parse_watch("0123456789abcdef0123456789abcdef"), None); // kirish tokeni (underscore yo'q)
+        assert_eq!(parse_watch("1234567890123456"), None); // bitta raqam — havola emas
+        assert_eq!(parse_watch("3_1_x"), None);
+        assert_eq!(parse_watch("3__1"), None);
+        assert_eq!(parse_watch("3_1_2_3"), None);
+        assert_eq!(parse_watch("w"), None);
+        assert_eq!(parse_watch(""), None);
     }
 }
