@@ -874,7 +874,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
     const Q: [&str; 4] = ["360", "480", "720", "1080"];
     let cols: Vec<String> = Q.iter().flat_map(|q| [format!("q{q}_vd_msgs"), format!("q{q}_vd_name"), format!("url_{q}p")]).collect();
     let any = Q.iter().map(|q| format!("COALESCE(q{q}_vd_msgs,'')<>''")).collect::<Vec<_>>().join(" OR ");
-    let r = turso_exec(env, &format!("SELECT anime_id,season_id,epizod_id,{} FROM epizod_db WHERE {any} LIMIT 3", cols.join(",")), vec![]).await?;
+    let r = turso_exec(env, &format!("SELECT anime_id,season_id,epizod_id,{} FROM epizod_db WHERE {any} LIMIT 2", cols.join(",")), vec![]).await?;
     for row in rows_of(&r) {
         let mut set = Vec::new();
         for q in Q {
@@ -884,8 +884,8 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
                 if del_msgs(env, vd_channel(env), part).await { deleted += part.len() as i64 } else { failed += part.len() as i64; ok_all = false }
             }
             for n in [row[format!("q{q}_vd_name")].as_str().unwrap_or(""), row[format!("url_{q}p")].as_str().unwrap_or("")] {
+                // Tayyor fayl Telegram'da; R2 da bo'lak qolmaydi (so'rovlar chegarasi ~50 — R2 ga tegilmaydi), faqat kesh.
                 if tg_safe_name(n) {
-                    r2_delete_all(bk, n).await;
                     meta_drop(n).await;
                 }
             }
@@ -898,7 +898,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
                 vec![TursoArg::int(jint(&row, "anime_id")), TursoArg::int(jint(&row, "season_id")), TursoArg::int(jint(&row, "epizod_id"))]).await?;
         }
     }
-    for _ in 0..3 {
+    for _ in 0..1 {
         let r = turso_exec(env, "SELECT name,msg_ids FROM vd_queue WHERE name LIKE 'ep\\_%' ESCAPE '\\' OR name LIKE 'orig\\_%' ESCAPE '\\' LIMIT 1", vec![]).await?;
         let Some(row) = first_row(&r) else { break };
         let name = row["name"].as_str().unwrap_or("").to_string();
