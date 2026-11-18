@@ -7599,3 +7599,10 @@ Foydalanuvchi talabi: takroriy ustunlarni olib tashlab, qolganini ketma-ket tart
 - Yangi tartib: qism (`anime_id, season_id, epizod_id, epizod_number, epizod_name`) -> har sifat uchun `url, size, key, q<sifat>_vd_chunks, q<sifat>_vd_ids, q<sifat>_vd_msgs` (360p, 480p, 720p, 1080p) -> `intro_1..10` -> `origin_video, origin_key, origin_size, origin_height` -> `views_total, watch_ms_total, created_at, ready_at`.
 - `worker/src/lib.rs`: `epizod_cols!` makrosi (yaratish va qayta qurish uchun bitta manba), `EPIZOD_COL_NAMES`, bir martalik `mig_epizod_cols_v3` (yangi jadval yaratiladi, ma'lumot ko'chadi, qator soni teng bo'lsa eski jadval almashtiriladi; xato bo'lsa eski jadval qoladi).
 - `worker/src/vd.rs`: `OwnerRef::plain` — `epizod_db` da fayl nomi `url_<sifat>p` orqali tekshiriladi, hajm/kalit `size_<sifat>p`/`key_<sifat>p` ga yoziladi; `<ref>_vd_chunks/ids/msgs` o'z joyida. `owner_alter_sqls` `epizod_db` uchun takroriy ustun qo'shmaydi.
+
+## Kanal hujjati nomi: qism fayllari (2026-11-18)
+
+Foydalanuvchi talabi: kanalga yuklanadigan qism fayli `vid_<sifat>_<anime_id>_<bo'lim_id>_<qism_id>_<bo'lak>.mp4` ko'rinishida bo'lsin (masalan `vid_360p_3_1_21_1.mp4`).
+- `worker/src/vd.rs`: `doc_stem(name, vid)` — qism fayli (`ep_<a>_<s>_<e>_<sifat>p_<vaqt>.mp4`) uchun `vid_<sifat>p_<a>_<s>_<e>` + `mp4`; boshqa fayllar eski `<tur>_<raqam>` + `bin`. `/api/vd/claim` javobiga `doc`, `docext` qo'shildi; worker o'zi yuboradigan bitta bo'lakli yo'l ham shuni ishlatadi. Bo'lak raqami 1 dan boshlanadi (avvalgidek).
+- `tool/vd/store.py` (ikkinchi repoga `sync-packs.yml` ko'chiradi): `doc`/`docext` bo'lsa shu nom, bo'lmasa eski.
+- Eslatma: kanal xabarlari `epizod_db.q<sifat>_vd_msgs` dagi raqamlar bo'yicha topiladi, nom bog'lanishga ta'sir qilmaydi; avval yuklangan fayllar eski nomda qoladi.

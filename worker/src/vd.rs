@@ -687,7 +687,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             let have = ids(r["chunk_ids"].as_str().unwrap_or("")).len() as i64;
             let done: Vec<i64> = (0..have).collect();
             ok(json!({
-                "name": nm, "vid": r["vid"], "kind": doc_prefix(&nm), "label": label(&nm), "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
+                "name": nm, "vid": r["vid"], "kind": doc_prefix(&nm), "doc": doc_stem(&nm, jint(&r, "vid")).0, "docext": doc_stem(&nm, jint(&r, "vid")).1, "label": label(&nm), "size": r["size"], "chunks": r["chunks"], "chunk": CHUNK, "layout": r["layout"], "done": done,
                 "bot_token": tg_secret(env, "TELEGRAM_BOT_TOKEN"), "channel": vd_channel(env),
             }))
         }
@@ -1368,6 +1368,21 @@ pub(crate) fn doc_kind(name: &str) -> &'static str {
 
 /// Kanal hujjati nomining boshi (sifat bilan): qism fayli (`ep_<a>_<s>_<e>_<sifat>_...`) uchun `vid_1080p`, `vid_720p` ...; boshqalar uchun `doc_kind`.
 /// To'liq nom: `<bosh>_<raqam>_<bo'lak>.bin` (masalan `vid_1080p_17_1.bin`).
+/// Kanal hujjati nomining boshi (bo'lak raqamisiz) va kengaytmasi (foydalanuvchi talabi, 2026-11-18):
+/// qism fayli (`ep_<anime>_<bo'lim>_<qism>_<sifat>p_<vaqt>.mp4`) -> `vid_<sifat>p_<anime>_<bo'lim>_<qism>` + `mp4`
+/// (to'liq nom: `vid_360p_3_1_21_1.mp4`); qolgan fayllar -> `<tur>_<raqam>` + `bin` (eski ko'rinish).
+pub(crate) fn doc_stem(name: &str, vid: i64) -> (String, &'static str) {
+    if let Some(rest) = name.strip_prefix("ep_") {
+        let p: Vec<&str> = rest.split('.').next().unwrap_or("").split('_').collect();
+        if name.ends_with(".mp4") && p.len() == 5 && p[..3].iter().all(|x| all_digits(x)) && all_digits(p[4]) {
+            if let Some(q) = p[3].strip_suffix('p').filter(|d| all_digits(d) && d.len() <= 4) {
+                return (format!("vid_{q}p_{}_{}_{}", p[0], p[1], p[2]), "mp4");
+            }
+        }
+    }
+    (format!("{}_{vid}", doc_prefix(name)), "bin")
+}
+
 pub(crate) fn doc_prefix(name: &str) -> String {
     let kind = doc_kind(name);
     if kind == "vid" && name.starts_with("ep_") {
@@ -1413,7 +1428,8 @@ async fn store_small(env: &Env, name: &str, mut bytes: Vec<u8>) -> Result<(Strin
            chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created RETURNING id AS vid",
         vec![TursoArg::text(name), TursoArg::int(size as i64), TursoArg::text(&key_hex), TursoArg::int(now_ms())]).await?;
     let vid = first_row(&r).map(|x| jint(&x, "vid")).unwrap_or(0);
-    let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("{}_{vid}_1.bin", doc_prefix(name)),
+    let (stem, ext) = doc_stem(name, vid);
+    let sent = tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("{stem}_1.{ext}"),
         "", &bytes).await;
     let (fid, mid) = match sent {
         Ok(v) => v,
@@ -1696,6 +1712,11 @@ mod tests {
         assert_eq!(doc_prefix("ep_3_1_12_1080p_1794221272.mp4"), "vid_1080p");
         assert_eq!(doc_prefix("ep_3_1_12_720p_1794221272.mp4"), "vid_720p");
         assert_eq!(doc_prefix("orig_5.mp4"), "vid");
+        assert_eq!(doc_stem("ep_3_1_21_360p_1794890313239.mp4", 214), ("vid_360p_3_1_21".to_string(), "mp4"));
+        assert_eq!(doc_stem("ep_11_2_5_1080p_1794890313239.mp4", 7), ("vid_1080p_11_2_5".to_string(), "mp4"));
+        assert_eq!(doc_stem("orig_5.mp4", 9), ("vid_9".to_string(), "bin"));
+        assert_eq!(doc_stem("avatar_7_1794.jpg", 3), ("img_3".to_string(), "bin"));
+        assert_eq!(doc_stem("ep_3_1_21_360p_1794890313239_f.mp4", 1).1, "bin"); // fMP4 / noto'g'ri nom -> eski ko'rinish
         assert_eq!(doc_prefix("avatar_7_1794.jpg"), "img");
     }
 
