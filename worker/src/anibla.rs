@@ -2235,7 +2235,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 } else {
                     "\u{274C} Anime yoki bo'lim topilmadi (o'chirilgan bo'lishi mumkin) \u{2014} video yopiq kanalda qoldi.".into()
                 };
-                let ok_line = if res.starts_with('\u{2705}') { format!("\u{2705} Ilovaga {n}-qism bo'lib qo'shildi \u{2014} kodlash navbatida.") }
+                let ok_line = if res.starts_with('\u{2705}') { format!("\u{2705} Ilovaga {n}-qism bo'lib qo'shildi \u{2014} asl video Telegram'ga qo'yildi{}, kodlash navbatida.", if parts.len() > 1 { format!(" ({} qismda)", parts.len()) } else { String::new() }) }
                               else { "\u{26A0}\u{FE0F} Ilovaga qo'shilmadi \u{2014} sababi pastda.".to_string() };
                 { let body = status(ok_line); mirror(body.clone()).await; let _ = encbot_api(env, "editMessageText", body).await; }
                 encbot_send(env, chat, &res, None).await;

@@ -7561,3 +7561,8 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 - **2 GB dan katta:** `tool/anibla/stage.py` — BAYT bo'yicha 1900 MiB li qismlar, butun fayl bitta AES-128-CTR kalit bilan shifrlanadi (hisoblagich fayl bo'ylab davom etadi). Qismlar `tg_files` da `<asl>.p0..pN` nomi bilan, kalit asl nomda (`file_key`). Claim javobida `origin_parts` (tartibli xabar raqamlari); `tool/encode/run.py` qismlarni yuklab ulaydi va bir marta ochadi. `tg_forget_file` hamma qismni kanaldan o'chiradi.
 - **Sinovlar:** `python3 tool/anibla/test_stage.py` (bo'lish/shifrlash/ulash/`run.py::ctr_file` mosligi), worker `origin_parts_tests`. To'liq zanjir (Anibla hisobi + Telegram sessiyasi) Actions'da sinalmagan: birinchi haqiqiy qismni kuzating.
 - Fayllar: `worker/src/{anibla.rs,lib.rs}`, `tool/anibla/{download.py,stage.py,test_stage.py}`, `tool/encode/run.py`, `tool/packs/sync_repo.py`, `tool/encode/setup_repo.py`, `.github/workflows/sync-packs.yml`.
+
+## Anibla paneli: yuklashdan keyingi bosqichlar to'g'ri ko'rinadi (2026-11-18)
+
+- Muammo: video R2'ga topshirilgach panel eski matn ("🧩 Bo'laklar mp4 ga yig'ilmoqda...") bilan qotib qolardi, yakuniy holat panelga yetmasdi (`close` oldidan yuborilmasdi) — yuklangan qism ham "yuklanmagandek" ko'rinardi.
+- `tool/anibla/download.py`: yuklab olingach "kadr tayyorlanmoqda", "R2'ga yozilmoqda (N MB)", "Telegram'ga yuklovchi workflow yetkazadi (navbatda)" bosqichlari ko'rinadi va yakuniy holat albatta yuboriladi; qaytarish matni eski loglarsiz qisqa. Worker `done` qatori: "asl video Telegram'ga qo'yildi (N qismda), kodlash navbatida".

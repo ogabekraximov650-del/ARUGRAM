@@ -662,6 +662,8 @@ async def process(app, job):
         size = out.stat().st_size
         w, h, dur = ffprobe(out, "width", "v:0"), ffprobe(out, "height", "v:0"), ffprobe(out, "duration")
         live.done(f"Yuklab olindi: {size / 1048576:.1f} MB · {w or '?'}x{h or '?'} · {hms(dur or 0)} · {hms(el)} da")
+        # Eski bosqich matni ("🧩 Bo'laklar mp4 ga yig'ilmoqda...") panelda qolib ketmasin.
+        live.send("\U0001F5BC kadr tayyorlanmoqda...", force=True)
         log(f"  yuklab olindi: {size / 1048576:.1f} MB")
         if size > MAX_BYTES:
             if not job.target:
@@ -690,18 +692,24 @@ async def process(app, job):
         if r2client is not None:
             import base64
             ex = {k: v for k, v in (("duration", ffprobe(out, "duration")), ("width", w), ("height", h)) if v}
+            live.send(f"\U0001F4E6 R2'ga yozilmoqda ({size / 1048576:.0f} MB)...", force=True)
+            # Qaytarish (`done`) matni: yuklab olish bosqichlari qisqa; eski log qatorlari (R2/Telegram'dan oldingi) qo'shilmaydi.
+            steps_txt = "\n".join(live.steps)
             dest = {"mode": "video", "to": int(job.channel), "caption": job.caption[:1024], "file_name": f"{job.file_name}.mp4",
                     "supports_streaming": True, "disable_notification": True, "lease": {"t": "anibla_jobs", "id": int(job.id)},
                     "callback": {"path": "/api/anibla/done", "on_lost_delete": True,
                                  "body": {**job.ident(), "ok": True, "channel_msg": "$MSG_ID", "size": size,
-                                          "height": int(h or 0), "text": live.text(f"✅ Tayyor ({size / 1048576:.1f} MB)")}},
+                                          "height": int(h or 0), "text": f"{steps_txt}\n\u2705 R2 \u2192 Telegram'ga yetkazildi ({size / 1048576:.1f} MB)".strip()}},
                     **ex}
             if thumb.exists() and 0 < thumb.stat().st_size < 200_000:
                 dest["thumb_b64"] = base64.b64encode(thumb.read_bytes()).decode()
             ok_r2 = await asyncio.to_thread(r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], out,
                                            f"anibla_{job.id}_{int(time.time())}.mp4", dest, log, "arumediatv-anibla")
             if ok_r2:
-                live.done("R2'ga yozildi · Telegram'ga yuklovchi workflow yetkazadi")
+                live.done("R2'ga yozildi")
+                # Yakuniy holat panelga ALBATTA yetsin (avval `close` undan oldin yuborilmasdi) — yetkazish yuklovchi workflow'da, shu panelni u tugagach worker yangilaydi.
+                live.send("\U0001F4E4 Telegram'ga yuklovchi workflow yetkazadi (navbatda). Tayyor bo'lgach shu xabar yangilanadi.", force=True)
+                live._push()
                 live.close()
                 log(f"  #{job.id} R2'ga topshirildi")
                 return
