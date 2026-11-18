@@ -7530,3 +7530,8 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 ## Reklama "hali tayyor emas": sabab ekranda va qayta urinish (2026-11-17)
 
 - `RewardedAds`: yuklanmasa 30 soniyadan keyin qayta uriniladi; SDK qaytarmasa 8 soniyadan keyin zaxira yuklash; `reason()` — ekranda sabab (SDK ishga tushmagan / yuklanmoqda / AdMob xato kodi, masalan `3: No fill`). Paywall ekrani har 2 soniyada yangilanadi.
+
+## Reklamani Actions'da sinash (emulyator) (2026-11-18)
+
+- `ARUmultiplatform/adtest/` — kichik alohida ilova (faqat AdMob), `.github/workflows/ad-test.yml` uni emulyatorda (API 34, google_apis, x86_64) ishga tushiradi va logcat'dan natijani o'qiydi: "control" (Google sinov bloki) va "real" (bizning blok). Faqat shu papka/fayl o'zgarganda `push` bilan ishlaydi (qo'lda ishga tushirilmaydi).
+- Cheklov: emulyator AdMob uchun sinov qurilma, haqiqiy telefondagi "No fill" (kod 3) ni ko'rsatmaydi; sozlama/ID xatolarini aniqlaydi.
