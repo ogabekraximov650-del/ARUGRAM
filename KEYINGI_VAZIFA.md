@@ -7578,3 +7578,11 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 - **Server:** `worker/src/dbview.rs` — `GET /api/admin/db/tables`, `GET /api/admin/db/rows?table=&offset=&limit=&order=&dir=&col=&q=` (faqat admin, `admin_only`). Jadval/ustun nomi `sqlite_master`/`PRAGMA table_info` bilan tekshiriladi, qiymatlar bog'lanadi (SQL qo'shib bo'lmaydi); hech narsa yozilmaydi; bir so'rovda ko'pi bilan 50 qator (Turso o'qishlari pul turadi; qator soni `COUNT` bilan sanalmaydi).
 - **Qiymatlar to'liq ko'rinadi** (foydalanuvchi talabi: admin panelida sir yo'q; faqat 4000 belgidan uzun matn ekran uchun kesiladi).
 - **Ilova:** `data/AdminDb.kt`, `ui/admin/AdminDbScreen.kt`, `AdminHubScreen` ("DB" bo'limi), `MainActivity` (`Page.AdminDb`).
+
+## Qism videolarini tozalash (2026-11-18)
+
+Foydalanuvchi talabi: kanaldagi va bazadagi barcha QISM videolari + `epizod_db` qatorlari o'chsin; rasm, foydalanuvchi, to'lov, anime/bo'lim qoladi.
+- `worker/src/vd.rs`: `/api/vd/wipe` ga `stage: "episodes"` (`wipe_episodes`) — `epizod_db.q<sifat>_vd_msgs` dagi kanal xabarlari, R2/kesh, `vd_queue` dagi `ep_`/`orig_` fayllar, `tg_files` dagi `orig*` (asl video va `.p<i>` qismlari). Qatorlarni o'chirmaydi, xabar ro'yxatini bo'shatadi; qolgani `left`.
+- `ci/ep_wipe.py` + `.github/workflows/ep-wipe.yml`: `ci/EP_WIPE_ONCE` o'zgarganda (BIR MARTA, belgi `app_config.ep_wipe_done`). Avval ZAXIRA (shifrlangan artifact, 14 kun), keyin kanal/R2, so'ng `epizod_db`, `encode_jobs`, `encode_q` bo'shatiladi, `season_db` hisoblagichlari 0.
+- Tartib: avval worker deploy (yangi stage), KEYIN `EP_WIPE_ONCE` push qilinadi.
+- Eslatma: `epizod_db` da `url/size/key_<sifat>` va `q<sifat>_vd_name/size/key` ustunlari takrorlanadi — hali tartibga solinmagan.

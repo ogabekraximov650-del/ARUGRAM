@@ -558,6 +558,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
         "/api/vd/wipe" => match b["stage"].as_str().unwrap_or("") {
             "cancel" => ok(json!({"cancelled": cancel_runs(env).await})),
             "files" => ok(wipe_files(env, &bk).await?),
+            // Faqat qism videolari (foydalanuvchi talabi, 2026-11): kanal xabarlari + R2; `epizod_db` qatorlarini Actions (`ep-wipe.yml`) o'chiradi.
+            "episodes" => ok(wipe_episodes(env, &bk).await?),
             // Baza Actions orqali to'g'ridan-to'g'ri tozalangach: "o'zgarish bormi?" belgilari yangilanadi (ilova/Mini App eski ro'yxatni ushlab qolmasin).
             "marks" => {
                 let t: Vec<String> = b["tables"].as_array().map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect()).unwrap_or_default();
@@ -859,6 +861,78 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
     let l = first_row(&left).unwrap_or(json!({}));
     let total = jint(&l, "tg") + jint(&l, "vd") + jint(&l, "r2") + jint(&l, "dlv");
     Ok(json!({"deleted": deleted, "failed": failed, "left": total, "tg_files": l["tg"], "vd_queue": l["vd"], "r2_files": l["r2"]}))
+}
+
+/// UZ: faqat QISM videolari: `epizod_db` dagi sifat fayllarining kanal xabarlari (`q<sifat>_vd_msgs`), R2 va kesh; `vd_queue` dagi `ep_`/`orig_` fayllar; `tg_files` dagi `orig*` (asl video va `.p<i>` qismlari).
+/// Rasm, avatar, yozishma va boshqa fayllarga TEGILMAYDI. Qatorlarni o'chirmaydi — faqat xabar ro'yxatini bo'shatadi (qayta chaqirilsa takrorlanmaydi). Qolgan ish soni `left`.
+/// EN: episode videos only; leaves images/avatars/chat files alone. Clears the message lists instead of deleting rows so repeat calls make progress.
+/// RU: tolko video serij.
+async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
+    ensure(env).await?;
+    let channel = tg_channel_id(env);
+    let (mut deleted, mut failed) = (0i64, 0i64);
+    const Q: [&str; 4] = ["360", "480", "720", "1080"];
+    let cols: Vec<String> = Q.iter().flat_map(|q| [format!("q{q}_vd_msgs"), format!("q{q}_vd_name"), format!("url_{q}p")]).collect();
+    let any = Q.iter().map(|q| format!("COALESCE(q{q}_vd_msgs,'')<>''")).collect::<Vec<_>>().join(" OR ");
+    let r = turso_exec(env, &format!("SELECT anime_id,season_id,epizod_id,{} FROM epizod_db WHERE {any} LIMIT 3", cols.join(",")), vec![]).await?;
+    for row in rows_of(&r) {
+        let mut set = Vec::new();
+        for q in Q {
+            let msgs: Vec<i64> = ids(row[format!("q{q}_vd_msgs")].as_str().unwrap_or("")).iter().filter_map(|x| x.parse().ok()).collect();
+            let mut ok_all = true;
+            for part in msgs.chunks(100) {
+                if del_msgs(env, vd_channel(env), part).await { deleted += part.len() as i64 } else { failed += part.len() as i64; ok_all = false }
+            }
+            for n in [row[format!("q{q}_vd_name")].as_str().unwrap_or(""), row[format!("url_{q}p")].as_str().unwrap_or("")] {
+                if tg_safe_name(n) {
+                    r2_delete_all(bk, n).await;
+                    meta_drop(n).await;
+                }
+            }
+            if ok_all {
+                set.push(format!("q{q}_vd_msgs=''"));
+            }
+        }
+        if !set.is_empty() {
+            turso_exec(env, &format!("UPDATE epizod_db SET {} WHERE anime_id=? AND season_id=? AND epizod_id=?", set.join(",")),
+                vec![TursoArg::int(jint(&row, "anime_id")), TursoArg::int(jint(&row, "season_id")), TursoArg::int(jint(&row, "epizod_id"))]).await?;
+        }
+    }
+    for _ in 0..3 {
+        let r = turso_exec(env, "SELECT name,msg_ids FROM vd_queue WHERE name LIKE 'ep\\_%' ESCAPE '\\' OR name LIKE 'orig\\_%' ESCAPE '\\' LIMIT 1", vec![]).await?;
+        let Some(row) = first_row(&r) else { break };
+        let name = row["name"].as_str().unwrap_or("").to_string();
+        let msgs: Vec<i64> = ids(row["msg_ids"].as_str().unwrap_or("")).iter().filter_map(|x| x.parse().ok()).collect();
+        let mut ok_all = true;
+        for part in msgs.chunks(100) {
+            if del_msgs(env, vd_channel(env), part).await { deleted += part.len() as i64 } else { failed += part.len() as i64; ok_all = false }
+        }
+        r2_delete_all(bk, &name).await;
+        meta_drop(&name).await;
+        if !ok_all {
+            break;
+        }
+        turso_exec(env, "DELETE FROM vd_queue WHERE name=?", vec![TursoArg::text(&name)]).await?;
+    }
+    let r = turso_exec(env, "SELECT file_name,msg_id FROM tg_files WHERE file_name LIKE 'orig%' LIMIT 100", vec![]).await?;
+    let rows = rows_of(&r);
+    if !rows.is_empty() {
+        let msgs: Vec<i64> = rows.iter().map(|x| jint(x, "msg_id")).filter(|m| *m > 0).collect();
+        if del_msgs(env, channel, &msgs).await {
+            deleted += msgs.len() as i64;
+            let names: Vec<String> = rows.iter().filter_map(|x| x["file_name"].as_str().map(String::from)).collect();
+            let marks = vec!["?"; names.len()].join(",");
+            turso_exec(env, &format!("DELETE FROM tg_files WHERE file_name IN ({marks})"), names.iter().map(|n| TursoArg::text(n)).collect()).await?;
+        } else {
+            failed += msgs.len() as i64;
+        }
+    }
+    let left = turso_exec(env, &format!(
+        "SELECT (SELECT COUNT(*) FROM epizod_db WHERE {any}) AS ep,
+                (SELECT COUNT(*) FROM vd_queue WHERE name LIKE 'ep\\_%' ESCAPE '\\' OR name LIKE 'orig\\_%' ESCAPE '\\') AS vd,
+                (SELECT COUNT(*) FROM tg_files WHERE file_name LIKE 'orig%') AS tg"), vec![]).await?;
+    let l = first_row(&left).unwrap_or(json!({}));
+    Ok(json!({"deleted": deleted, "failed": failed, "left": jint(&l, "ep") + jint(&l, "vd") + jint(&l, "tg"), "epizod_db": l["ep"], "vd_queue": l["vd"], "tg_files": l["tg"]}))
 }
 
 // ── Foydalanuvchi yo'llari (sessiya bilan) ───────────────────
