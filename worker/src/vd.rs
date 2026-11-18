@@ -875,7 +875,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
     let channel = tg_channel_id(env);
     let (mut deleted, mut failed) = (0i64, 0i64);
     let mut err = String::new();
-    let mut budget: i32 = 40;
+    let mut budget: i32 = 24;
     const Q: [&str; 4] = ["360", "480", "720", "1080"];
     let cols: Vec<String> = Q.iter().flat_map(|q| [format!("q{q}_vd_msgs"), format!("q{q}_vd_name"), format!("url_{q}p")]).collect();
     let any = Q.iter().map(|q| format!("COALESCE(q{q}_vd_msgs,'')<>''")).collect::<Vec<_>>().join(" OR ");
@@ -918,12 +918,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
                 }
             }
             set.push(format!("q{q}_vd_msgs='{}'", rest.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(",")));
-            for n in [row[format!("q{q}_vd_name")].as_str().unwrap_or(""), row[format!("url_{q}p")].as_str().unwrap_or("")] {
-                // Tayyor fayl Telegram'da; R2 da bo'lak qolmaydi (so'rovlar chegarasi ~50 — R2 ga tegilmaydi), faqat kesh.
-                if tg_safe_name(n) {
-                    meta_drop(n).await;
-                }
-            }
+            // Kesh (`meta_drop`) va R2 ga tegilmaydi: har biri so'rov hisoblanadi (chegara ~50); keshdagi eski ma'lumot o'zi eskiradi, tayyor fayl R2 da bo'lak qoldirmaydi.
         }
         if !set.is_empty() {
             turso_exec(env, &format!("UPDATE epizod_db SET {} WHERE anime_id=? AND season_id=? AND epizod_id=?", set.join(",")),
