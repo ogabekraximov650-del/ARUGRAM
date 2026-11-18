@@ -14,8 +14,11 @@ val ciStorePass = System.getenv("KS_PASS")?.takeIf { it.isNotBlank() } ?: "arume
 val testAdmobApp = "ca-app-pub-3940256099942544~3347511713"
 val prodAdmobApp = "ca-app-pub-8901205768474122~2994428955"
 val prodAdmobRewarded = "ca-app-pub-8901205768474122/4115938931"
-val admobApp = System.getenv("ADMOB_APP_ID")?.takeIf { it.isNotBlank() } ?: prodAdmobApp
-val admobRewarded = System.getenv("ADMOB_REWARDED_ID")?.takeIf { it.isNotBlank() } ?: prodAdmobRewarded
+val testAdmobRewarded = "ca-app-pub-3940256099942544/5224354917"
+// VAQTINCHA: AdMob akkaunti hali tasdiqlanmagan ("Account not approved yet"), shuning uchun standart — Google SINOV ID'lari (reklama oqimini sinash uchun, pul keltirmaydi).
+// Akkaunt tasdiqlangach: quyidagi ikki qatorda `testAdmobApp`/`testAdmobRewarded` ni `prodAdmobApp`/`prodAdmobRewarded` ga almashtiring.
+val admobApp = System.getenv("ADMOB_APP_ID")?.takeIf { it.isNotBlank() } ?: testAdmobApp
+val admobRewarded = System.getenv("ADMOB_REWARDED_ID")?.takeIf { it.isNotBlank() } ?: testAdmobRewarded
 
 // `-PonlyAbi=armeabi-v7a` — faqat 32 bitli APK (CI'da "Admin 32 bit" uchun); bo'lmasa 32+64 bit.
 val onlyAbi = (project.findProperty("onlyAbi") as String?)?.takeIf { it.isNotBlank() }

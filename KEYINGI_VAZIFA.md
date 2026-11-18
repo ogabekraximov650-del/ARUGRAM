@@ -7535,3 +7535,8 @@ Eslatma: xato yozuvchisi `attachBaseContext` da o'rnatilgani uchun ContentProvid
 
 - `ARUmultiplatform/adtest/` — kichik alohida ilova (faqat AdMob), `.github/workflows/ad-test.yml` uni emulyatorda (API 34, google_apis, x86_64) ishga tushiradi va logcat'dan natijani o'qiydi: "control" (Google sinov bloki) va "real" (bizning blok). Faqat shu papka/fayl o'zgarganda `push` bilan ishlaydi (qo'lda ishga tushirilmaydi).
 - Cheklov: emulyator AdMob uchun sinov qurilma, haqiqiy telefondagi "No fill" (kod 3) ni ko'rsatmaydi; sozlama/ID xatolarini aniqlaydi.
+
+## AdMob: vaqtincha Google sinov ID'lari (2026-11-18)
+
+- `ad-test.yml` natijasi: haqiqiy blok `code=3 Account not approved yet` (AdMob akkaunti tasdiqlanmagan), Google sinov bloki esa yuklandi. Shuning uchun `app/build.gradle.kts` da standart ID'lar VAQTINCHA Google sinov ID'lariga almashtirildi (`testAdmobApp`, `testAdmobRewarded`): reklama oqimi (ko'rsatish → serverda +1 soat) sinov reklamalari bilan ishlaydi, pul keltirmaydi.
+- **Akkaunt tasdiqlangach qaytarish:** `?: testAdmobApp` → `?: prodAdmobApp` va `?: testAdmobRewarded` → `?: prodAdmobRewarded`.
