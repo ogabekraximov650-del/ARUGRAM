@@ -7586,3 +7586,7 @@ Foydalanuvchi talabi: kanaldagi va bazadagi barcha QISM videolari + `epizod_db` 
 - `ci/ep_wipe.py` + `.github/workflows/ep-wipe.yml`: `ci/EP_WIPE_ONCE` o'zgarganda (BIR MARTA, belgi `app_config.ep_wipe_done`). Avval ZAXIRA (shifrlangan artifact, 14 kun), keyin kanal/R2, so'ng `epizod_db`, `encode_jobs`, `encode_q` bo'shatiladi, `season_db` hisoblagichlari 0.
 - Tartib: avval worker deploy (yangi stage), KEYIN `EP_WIPE_ONCE` push qilinadi.
 - Eslatma: `epizod_db` da `url/size/key_<sifat>` va `q<sifat>_vd_name/size/key` ustunlari takrorlanadi — hali tartibga solinmagan.
+
+### Qism tozalash: bot o'chira olmadi — asosiy hisob bilan (2026-11-18)
+Worker orqali tozalash 7 ta qismdan keyin to'xtadi: Telegram `message can't be deleted` (botda o'chirish huquqi yo'q). Foydalanuvchi talabi: kanal egasi sessiyasi bilan o'chirilsin.
+- `ci/ep_wipe_tg.py` + `.github/workflows/ep-wipe-tg.yml` (trigger `ci/EP_WIPE_TG_ONCE`): `tool/encode/session.enc` (kalit `ENCODE_TOKEN`) bilan Pyrogram, xabarlar `epizod_db.q*_vd_msgs`, `tg_files orig%`, `vd_queue ep_/orig_`; so'ng `epizod_db`, `encode_jobs`, `encode_q` bo'shatiladi. Avval zaxira.
