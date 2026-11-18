@@ -83,7 +83,7 @@ if mode == "backup":
 
 print("1) Saqlash/migratsiya run'larini bekor qilish:", worker({"stage": "cancel"}))
 time.sleep(10)
-for i in range(600):
+for i in range(1500):
     r = worker({"stage": "episodes"})
     print(f"   kanal/R2: o'chirildi {r.get('deleted')}, xato {r.get('failed')}, qoldi {r.get('left')} (epizod_db {r.get('epizod_db')}, vd_queue {r.get('vd_queue')}, tg_files {r.get('tg_files')}) {r.get('err') or ''}")
     if int(r.get("left", 1)) == 0:

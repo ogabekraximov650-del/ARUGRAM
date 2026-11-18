@@ -871,11 +871,10 @@ async fn wipe_files(env: &Env, bk: &Bucket) -> Result<Value> {
 /// EN: episode videos only; leaves images/avatars/chat files alone. Clears the message lists instead of deleting rows so repeat calls make progress.
 /// RU: tolko video serij.
 async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
-    ensure(env).await?;
     let channel = tg_channel_id(env);
     let (mut deleted, mut failed) = (0i64, 0i64);
     let mut err = String::new();
-    let mut budget: i32 = 24;
+    let mut budget: i32 = 14;
     const Q: [&str; 4] = ["360", "480", "720", "1080"];
     let cols: Vec<String> = Q.iter().flat_map(|q| [format!("q{q}_vd_msgs"), format!("q{q}_vd_name"), format!("url_{q}p")]).collect();
     let any = Q.iter().map(|q| format!("COALESCE(q{q}_vd_msgs,'')<>''")).collect::<Vec<_>>().join(" OR ");
@@ -918,6 +917,7 @@ async fn wipe_episodes(env: &Env, bk: &Bucket) -> Result<Value> {
                 }
             }
             set.push(format!("q{q}_vd_msgs='{}'", rest.iter().map(|m| m.to_string()).collect::<Vec<_>>().join(",")));
+            break; // har chaqiruvda bitta sifat: so'rovlar chegarasi (~50) uchun
             // Kesh (`meta_drop`) va R2 ga tegilmaydi: har biri so'rov hisoblanadi (chegara ~50); keshdagi eski ma'lumot o'zi eskiradi, tayyor fayl R2 da bo'lak qoldirmaydi.
         }
         if !set.is_empty() {
