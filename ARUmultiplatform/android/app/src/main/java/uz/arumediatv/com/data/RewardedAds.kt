@@ -30,6 +30,7 @@ object RewardedAds {
     @Volatile private var initDone = false
     @Volatile private var loadStart = 0L
     @Volatile private var startedAt = 0L
+    @Volatile private var failures = 0
 
     /**
      * UZ: SDK ilova ochilganda EMAS, birinchi kerak bo'lganda (obuna so'raladigan ekran) fonda ishga tushadi — reklama kutubxonasi ilovaning ochilishiga hech qachon xalaqit bermasin.
@@ -62,7 +63,10 @@ object RewardedAds {
 
     /** UZ: yuklanmasa (masalan yangi reklama bloki hali to'lmagan) 30 soniyadan keyin qayta uriniladi. EN: retry a failed load after 30 s. */
     private fun retryLater(app: Context) {
-        main.postDelayed({ preload(app) }, 30_000L)
+        // Har xatoda kutish ikki baravar oshadi (30 s -> 60 -> 120 ... eng ko'pi 10 daqiqa): reklama bo'lmasa har 30 soniyada asosiy oqimda yuklash urinishi ilovani qotirmasin.
+        val wait = (30_000L shl failures.coerceAtMost(5)).coerceAtMost(10 * 60_000L)
+        failures++
+        main.postDelayed({ preload(app) }, wait)
     }
 
     /** Oxirgi xato (bo'sh — yo'q): ekranda sababni ko'rsatish uchun. */
@@ -84,7 +88,7 @@ object RewardedAds {
             RewardedAd.load(
                 ctx.applicationContext, BuildConfig.ADMOB_REWARDED_ID, AdRequest.Builder().build(),
                 object : RewardedAdLoadCallback() {
-                    override fun onAdLoaded(loaded: RewardedAd) { ad = loaded; loading = false; lastError = "" }
+                    override fun onAdLoaded(loaded: RewardedAd) { ad = loaded; loading = false; lastError = ""; failures = 0 }
                     override fun onAdFailedToLoad(e: LoadAdError) { ad = null; loading = false; lastError = "${e.code}: ${e.message}"; retryLater(ctx.applicationContext) }
                 },
             )

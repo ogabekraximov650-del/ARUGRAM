@@ -7650,3 +7650,9 @@ Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'l
 - **Sifat tarixda**: `last_quality` allaqachon serverga yoziladi; endi boshqa qurilmada davom etganda eslab qolingan sifat qurilmadagi va TARIXDAGI sifatdan YANGIROG'I bo'yicha tanlanadi (`ResumePoint` mantig'i kabi: tarix yangi bo'lsa tarix, aks holda mahalliy).
 - Testlar: `LowestQualityTest`. Tekshiruv faqat GitHub Actions'da (`android-native.yml`).
 
+## Kotlin ilova: Profilda surilganda qotish — reklama kutubxonasini kechiktirish (2026-11-19)
+
+- **Shikoyat:** Profil bo'limiga o'tib ekran yuqoriga surilganda ilova qotadi (Android 10, kuchsiz telefon). Profil kodi o'qib chiqildi (`ProfileScreen.kt`): ro'yxat oddiy `Column` + `verticalScroll`, og'ir chizish yoki surishga bog'liq qayta kompozitsiya YO'Q (trafik 30 soniyada bir marta, hisob 1 soniyalik taymer faqat tugmada). Eng ishonchli gumon: `AdButton` Profilga kirgan zahoti `RewardedAds.ensureInit` ni ishga tushirardi (reklama tugmasi `68694ba5` commit'da qo'shilgan) — AdMob `MobileAds.initialize` va `RewardedAd.load` (WebView yaratadi) asosiy oqimda og'ir, xato bo'lsa har 30 soniyada qayta urinardi.
+- **Qilingan (taxminiy tuzatish, TELEFONDA TEKSHIRILMAGAN):** `AdButton` reklama SDK sini Profilga kirgach 3 soniya kutib, surilmayotgan paytda ishga tushiradi; `RewardedAds.retryLater` ikki baravar oshib boradigan kutish (30 s -> 60 -> ... eng ko'pi 10 daqiqa), muvaffaqiyatli yuklangach tiklanadi. Telefon sinovida qotish davom etsa — sabab boshqa joyda (keyingi qadam: Profil sahifasini bo'laklab o'chirib sinash yoki `adb`/Perfetto izi).
+- Fayllar: `ui/profile/ProfileScreen.kt`, `data/RewardedAds.kt`.
+

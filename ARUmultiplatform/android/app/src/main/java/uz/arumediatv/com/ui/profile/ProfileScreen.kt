@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uz.arumediatv.com.AppServices
@@ -137,8 +138,9 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
         }
     }
 
+    val profileScroll = rememberScrollState()
     Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+        Modifier.fillMaxSize().verticalScroll(profileScroll)
             .padding(start = 16.dp, end = 16.dp, top = LocalBarPad.current.calculateTopPadding()),
     ) {
         if (accounts.isNotEmpty() || user != null) {
@@ -188,7 +190,7 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
             Spacer(Modifier.height(16.dp))
             BillingButton(onBilling)
             Spacer(Modifier.height(10.dp))
-            AdButton()
+            AdButton(profileScroll)
             Spacer(Modifier.height(12.dp))
             StatsGrid(stats, cacheBytes, onOpenStat, onStorage)
             Spacer(Modifier.height(12.dp))
@@ -470,14 +472,20 @@ private fun BillingButton(onClick: () -> Unit) {
 
 /** Bepul tomosha: reklama oxirigacha ko'rilsa server obuna muddatiga 1 soat qo'shadi (har safar oldingisining ustiga; boshqa qurilmada ham ishlaydi). */
 @Composable
-private fun AdButton() {
+private fun AdButton(scroll: androidx.compose.foundation.ScrollState) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     val st by AppServices.billing.state.collectAsStateWithLifecycle()
     var busy by remember { mutableStateOf(false) }
     var msg by remember { mutableStateOf<String?>(null) }
     var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { uz.arumediatv.com.data.RewardedAds.ensureInit(ctx) }
+    // UZ: reklama kutubxonasi (WebView + reklama yuklash asosiy oqimda og'ir ishlaydi) Profilga kirgan zahoti EMAS: ekran 3 soniya tinch tursa va
+    //     surilmayotgan paytda ishga tushadi — surish paytida qotib qolmasin. EN: the ad SDK starts only when the screen has been idle (not scrolling).
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(3000)
+        androidx.compose.runtime.snapshotFlow { scroll.isScrollInProgress }.first { !it }
+        uz.arumediatv.com.data.RewardedAds.ensureInit(ctx)
+    }
     // Obuna (yoki reklama vaqti) tugaguncha yangi reklama ko'rib bo'lmaydi: muddat tugagan zahoti tugma yana ochiladi.
     LaunchedEffect(st.until) {
         now = System.currentTimeMillis()
