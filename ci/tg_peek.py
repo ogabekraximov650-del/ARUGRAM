@@ -7,7 +7,13 @@ from pyrogram import Client
 pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 SESSION = os.environ["SESSION_PATH"]
 chan = int(open("ci/VD_CHANNEL_ID").read().strip())
-ids = [int(x) for x in open("ci/TG_PEEK").read().split() if x.strip().lstrip("-").isdigit()]
+ids = []
+for tok in open("ci/TG_PEEK").read().split():
+    if "-" in tok.strip("-"):
+        a, b = tok.split("-", 1)
+        ids += list(range(int(a), int(b) + 1))
+    elif tok.lstrip("-").isdigit():
+        ids.append(int(tok))
 
 
 def api_id():
@@ -39,9 +45,18 @@ async def main():
         for i in ids:
             m = await app.get_messages(chan, i)
             print(f"  xabar {i}: {brief(m)}")
-        print("--- oxirgi 25 xabar ---")
-        async for m in app.get_chat_history(chan, limit=25):
+        print("--- oxirgi 5 xabar ---")
+        async for m in app.get_chat_history(chan, limit=5):
             print(f"  #{m.id}: {brief(m)}")
+        print("--- 'ARUSTAGE' (anibla bosqichi) xabarlari va .p0/.p1 hujjatlar (oxirgi 1500 xabar) ---")
+        n = 0
+        async for m in app.get_chat_history(chan, limit=1500):
+            d = m.document or m.video
+            nm = (getattr(d, "file_name", "") or "") if d else ""
+            if (m.caption or "").startswith("ARUSTAGE") or ".p0" in nm or ".p1" in nm:
+                print(f"  #{m.id}: {brief(m)}")
+                n += 1
+        print("topilgan:", n)
 
 
 asyncio.run(main())
