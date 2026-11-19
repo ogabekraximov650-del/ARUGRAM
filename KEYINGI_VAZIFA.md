@@ -7635,3 +7635,9 @@ Foydalanuvchi: ko'rmasam ham xotiraga yig'ilyapti (Videolar 1,00 MB, Vaqtinchali
 - Sabab (Videolar): tomosha tarixi kartalari kadrni `ThumbStore` -> `VdFrameSource` -> `VdBlocks.get` orqali oladi va tarmoqdan kelgan 1 MiB bloklar `BlockCache` ("Videolar") ga yozilardi — video ko'rilmagan bo'lsa ham. Endi `persist = false`: kadr uchun olingan blok telefonga yozilmaydi (telefonda bor bo'lsa o'qiladi).
 - "Xotiradan foydalanish" ekrani noto'g'ri o'lchardi: "Posterlar" `cacheDir/aru_img` ni ko'rardi (rasmlar aslida `filesDir/aru_img`), "Tarix kadrlari" (`aru_thumb`) umuman hisoblanmasdi va tozalanmasdi. Endi `images.diskBytes()`/`thumbs.diskBytes()`; "Keshni tozalash" kadrlarni ham o'chiradi.
 - Qotish sababi hali aniqlanmadi (qaysi ekranda qotishi kerak).
+
+## Ilova qotishi: kod skanerlandi, topilgan sabablar (2026-11-19)
+Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'lmadi — kod skanerlandi (`runBlocking`, `Thread.sleep` asosiy oqimda, disk/IO kompozitsiyada, doimiy sikllar).
+- Asosiy topilma: pleyer ochiq paytda HAR SONIYADA `flushHistory` -> `LibraryStore.applyHistory` butun tarix ro'yxatini yangilab, `library.json` ni to'liq qayta yozardi; Kutubxona ekrani (pleyer ostida turadi) ham har soniyada qayta chizilardi. Endi: `SeasonScreen` joy/tarixni 5 soniyada bir marta yozadi (chiqishda/qism almashganda darhol), `LibraryStore.saveSoon()` fayl yozishni 4 soniya jim turgach qiladi, `flushNow()` ilova fonga ketganda (`MainActivity.onStop`) yozadi.
+- Qolganlari ko'rilib muammo topilmadi: `TgImage`/`ImageStore` (fon oqim, semafor), `SeasonGrid` (kalitli), `Live` (long-poll), `DownloadsIndex.collect` (IO), `Thread.sleep` lar fon oqimlarda.
+- Hali o'zgartirilmagan: `AppServices.init` sovuq ishga tushishda asosiy oqimda ko'p narsa yaratadi (Rust yadro, Keystore, omborlar) — sekin telefonda birinchi ochilish kechikishi mumkin.

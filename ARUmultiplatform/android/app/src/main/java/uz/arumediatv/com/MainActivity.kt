@@ -181,7 +181,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         // Ilova fonga ketdi: navbatdagi yozuvlar (sozlamalar, sevimlilar...) darhol bitta paket bo'lib yuboriladi.
-        if (AppServices.ready) AppServices.sync.flushAsync(force = true)
+        if (AppServices.ready) { AppServices.sync.flushAsync(force = true); AppServices.library.flushNow() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

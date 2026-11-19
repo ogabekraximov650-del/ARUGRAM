@@ -339,7 +339,8 @@ fun SeasonScreen(
                 d.durationMs = player.durationMs
                 if (player.playing) d.watchedMs = (d.watchedMs + 500).coerceAtMost(player.durationMs)
             }
-            if (++n % 2 == 0) { saveProgress(); flushHistory(sync = n % 20 == 0) } // har 1 soniyada: joy + Tarix ro'yxati + telefon xotirasi; serverga yuborish navbati 10 soniyada (tick 500 ms)
+            // Har 5 soniyada (tick 500 ms): joy + Tarix ro'yxati + telefon xotirasi; serverga yuborish navbati 10 soniyada. Ilgari HAR SONIYADA edi: Kutubxona ro'yxati (pleyer ostida turadi) va butun tarix fayli har soniyada qayta yozilib, ijro paytida ilova sekinlashardi. Chiqishda/qism almashganda baribir darhol yoziladi.
+            if (++n % 10 == 0) { saveProgress(); flushHistory(sync = n % 20 == 0) }
             // Intro: avto o'tkazish
             val ep = current
             if (ep != null && autoSkipIntro) {

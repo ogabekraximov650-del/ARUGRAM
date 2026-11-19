@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -173,7 +175,23 @@ class LibraryStore(
             val prev = s.history.firstOrNull { it.animeId == item.animeId && it.seasonId == item.seasonId && it.epizodId == item.epizodId }
             s.copy(history = listOf(item.copy(views = maxOf(item.views, prev?.views ?: 0), thumbUrl = item.thumbUrl.ifBlank { prev?.thumbUrl ?: "" })) + rest)
         }
-        scope.launch { saveCurrent() }
+        saveSoon()
+    }
+
+    private var saveJob: Job? = null
+
+    /** Tarix pleyerda tez-tez yangilanadi: butun fayl har safar emas, 4 soniya jim turgach (yoki [flushNow] da) yoziladi. */
+    private fun saveSoon() {
+        saveJob?.cancel()
+        saveJob = scope.launch { delay(4_000); saveCurrent() }
+    }
+
+    /** Kutilayotgan yozuvni darhol diskka yozadi (ilova fonga ketganda). */
+    fun flushNow() {
+        if (saveJob?.isActive == true) {
+            saveJob?.cancel()
+            scope.launch { saveCurrent() }
+        }
     }
 
     /** Pleyerda yurakcha bosildi: ro'yxat server javobini kutmasdan o'zgaradi (60 soniyalik "yangi" belgisi ham tushadi). */
