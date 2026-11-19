@@ -1,0 +1,47 @@
+#!/usr/bin/env python3
+# ci/tg_peek.py — FAQAT O'QISH: saqlash kanalidagi xabarlar (raqam, tur, hajm, nom, sana) va sessiya egasi. Kodlash xatosi ("asl video kanalda topilmadi") tashxisi uchun.
+import asyncio, os, sqlite3
+import pyrogram.utils
+from pyrogram import Client
+
+pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
+SESSION = os.environ["SESSION_PATH"]
+chan = int(open("ci/VD_CHANNEL_ID").read().strip())
+ids = [int(x) for x in open("ci/TG_PEEK").read().split() if x.strip().lstrip("-").isdigit()]
+
+
+def api_id():
+    try:
+        c = sqlite3.connect(f"file:{SESSION}.session?mode=ro", uri=True)
+        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
+    except Exception:
+        return 0
+
+
+def brief(m):
+    if not m or m.empty:
+        return "BO'SH (xabar yo'q yoki ko'rinmaydi)"
+    d = m.document or m.video
+    nm = getattr(d, "file_name", "") if d else ""
+    sz = getattr(d, "file_size", 0) if d else 0
+    cap = (m.caption or m.text or "")[:60].replace("\n", " ")
+    return f"{'hujjat/video' if d else 'boshqa'} nom={nm!r} hajm={sz} sana={m.date} izoh={cap!r} kimdan={getattr(m.from_user, 'id', None) or getattr(m.sender_chat, 'id', None)}"
+
+
+async def main():
+    app = Client(SESSION, api_id=api_id() or int(os.environ["TG_API_ID"]), api_hash=os.environ["TG_API_HASH"], no_updates=True)
+    async with app:
+        async for _ in app.get_dialogs():
+            pass
+        print("sessiya hisobi:", app.me.id, app.me.username)
+        chat = await app.get_chat(chan)
+        print("kanal:", chat.id, chat.title, "a'zolar:", getattr(chat, "members_count", None))
+        for i in ids:
+            m = await app.get_messages(chan, i)
+            print(f"  xabar {i}: {brief(m)}")
+        print("--- oxirgi 25 xabar ---")
+        async for m in app.get_chat_history(chan, limit=25):
+            print(f"  #{m.id}: {brief(m)}")
+
+
+asyncio.run(main())
