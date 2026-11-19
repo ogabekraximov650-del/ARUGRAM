@@ -66,6 +66,17 @@ for i in range(2, 42):
     sql("insert into kv values (?,?)", (i, "x" * 20)); call(SVC, "/replicate", {}, key=ADMIN, method="POST")
 s3 = state(); ok(s3["messages"] <= 40, f"bo'laklar birlashtirildi/aylantirildi: xabarlar {s3['messages']} (40 ta yuklashdan keyin)")
 
+# 3b) to'lib YOPILGAN bo'laklar bitta fayl bo'lib turadi (faqat oxirgi, ochiq bo'lak bir nechta segment bo'lishi mumkin)
+call(SVC, "/replicate", {}, key=ADMIN, method="POST")
+import re
+per = {}
+for n in state()["names"]:
+    m = re.match(r"db_(\d+)_v\d+_\d+\.bin$", n)
+    if m: per.setdefault(int(m.group(1)), []).append(n)
+last = max(per) if per else 0
+ok(len(per) > 1, f"bir nechta jurnal bo'lagi bor: {sorted(per)}")
+ok(all(len(v) == 1 for k, v in per.items() if k != last), f"to'lgan bo'laklar bitta fayl: { {k: len(v) for k, v in sorted(per.items())} } (ochiq bo'lak: {last})")
+
 # 4) snapshot eski bo'laklarni o'chiradi
 r = call(SVC, "/snapshot", {}, key=ADMIN, method="POST"); s4 = state()
 ok(s4["messages"] <= 4, f"snapshotdan keyin kanal toza: xabarlar {s4['messages']} {s4['names']}")

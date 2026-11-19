@@ -125,6 +125,10 @@ pub fn cell(v: &Value) -> J {
     }
 }
 
+/// UZ: TO'LIB YOPILGAN (sealed) bo'lak Telegram'da bir nechta kichik fayl (segment) bo'lib turibdi — bitta butun faylga birlashtirish kerak (kanalda har bir to'lgan bo'lak uchun bitta xabar qolsin).
+/// EN: a sealed chunk held as several small segments must be merged into one whole file. RU: закрытый чанк из нескольких сегментов нужно слить в один файл.
+fn needs_merge(m: &ChunkMeta) -> bool { m.sealed && m.segs.len() > 1 }
+
 fn write_meta(c: &Chunk) { let _ = std::fs::write(c.dir.join("meta.json"), serde_json::to_vec(&c.meta).unwrap()); }
 
 impl Store {
@@ -330,7 +334,7 @@ impl Store {
 
     /// Fayli `up_len` dan uzun bo'lgan (yuklanmagan baytlari bor) jurnal bo'laklari. EN: chunks with bytes not yet backed up.
     pub fn refresh_dirty(&mut self) {
-        self.dirty = self.chunks.iter().filter(|c| std::fs::metadata(c.dir.join("journal.jsonl")).map(|m| m.len()).unwrap_or(0) > c.meta.up_len || (c.meta.up_len == 0 && c.meta.file_id.is_none() && c.meta.last_seq > 0)).map(|c| c.meta.no).collect();
+        self.dirty = self.chunks.iter().filter(|c| std::fs::metadata(c.dir.join("journal.jsonl")).map(|m| m.len()).unwrap_or(0) > c.meta.up_len || (c.meta.up_len == 0 && c.meta.file_id.is_none() && c.meta.last_seq > 0) || needs_merge(&c.meta)).map(|c| c.meta.no).collect();
     }
 
     /// Sxemani qo'llaydi (mavjud jadval/ustun xatolari e'tiborsiz). EN/RU: apply the bootstrap schema.
@@ -352,7 +356,7 @@ pub type Shared = std::sync::Arc<tokio::sync::Mutex<Store>>;
 
 /// UZ: jurnalning YANGI qismini yuklaydi (butun fayl emas), siqilgan va shifrlangan. Muhim yozuv bo'lsa `crit_ms` dan keyin, faqat arzon yozuv bo'lsa `idle_ms` dan keyin; `force` — darhol.
 /// Telegram'ga: bo'lak uchun 1 so'rov + ro'yxatni yangilash uchun 1 so'rov. 24 bo'lakdan oshsa bo'lak butun fayl sifatida bitta bo'lakka birlashtiriladi.
-/// EN: uploads only the NEW journal bytes (compressed + sealed); debounced by importance; compacts after 24 segments.
+/// EN: uploads only the NEW journal bytes (compressed + sealed); debounced by importance; compacts after 24 segments, and a sealed (full) chunk is merged into ONE file.
 pub async fn replicate(st: &Shared, tg: &Tg, key: &[u8; 32], force: bool) -> Result<J> {
     struct Job { no: u64, ver: u64, from: u64, total: u64, bytes: Vec<u8>, replace: bool }
     let now = now_ms();
@@ -370,7 +374,7 @@ pub async fn replicate(st: &Shared, tg: &Tg, key: &[u8; 32], force: bool) -> Res
         s.crit_since = None;
         let jobs: Vec<Job> = s.dirty.iter().filter_map(|no| s.chunks.iter().find(|c| c.meta.no == *no)).filter_map(|c| {
             let all = std::fs::read(c.dir.join("journal.jsonl")).unwrap_or_default();
-            let replace = c.meta.file_id.is_some() || c.meta.segs.len() >= 24;
+            let replace = c.meta.file_id.is_some() || c.meta.segs.len() >= 24 || needs_merge(&c.meta);
             let from = if replace { 0 } else { c.meta.up_len } as usize;
             if all.len() <= from && !replace { return None; }
             Some(Job { no: c.meta.no, ver: c.meta.ver, from: from as u64, total: all.len() as u64, bytes: all[from.min(all.len())..].to_vec(), replace })
@@ -542,6 +546,20 @@ pub async fn recover(cfg: Cfg, tg: &Tg, key: &[u8; 32]) -> Result<(Store, u64)> 
 #[cfg(test)]
 mod cheap_tests {
     use super::is_cheap;
+    #[test]
+    fn sealed_chunk_with_segments_needs_merge() {
+        use super::{needs_merge, ChunkMeta, Seg};
+        let seg = |from| Seg { file_id: "f".into(), msg_id: 1, key: "k".into(), from, len: 10, z: true };
+        let mut m = ChunkMeta { sealed: false, segs: vec![seg(0), seg(10)], ..Default::default() };
+        assert!(!needs_merge(&m), "ochiq bo'lak birlashtirilmaydi");
+        m.sealed = true;
+        assert!(needs_merge(&m), "yopilgan, 2 segment — birlashtirish kerak");
+        m.segs.truncate(1);
+        assert!(!needs_merge(&m), "yopilgan, 1 segment — tayyor");
+        m.segs.clear();
+        assert!(!needs_merge(&m), "yopilgan, segment yo'q — birlashtirish emas, yuklash");
+    }
+
     #[test]
     fn traffic_report_is_cheap() {
         assert!(is_cheap("INSERT INTO stats_hourly (hour,metric,value) VALUES (?,?,?)\n     ON CONFLICT(hour,metric) DO UPDATE SET value=value+excluded.value"));

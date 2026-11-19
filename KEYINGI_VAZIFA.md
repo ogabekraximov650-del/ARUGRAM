@@ -7656,3 +7656,10 @@ Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'l
 - **Qilingan (taxminiy tuzatish, TELEFONDA TEKSHIRILMAGAN):** `AdButton` reklama SDK sini Profilga kirgach 3 soniya kutib, surilmayotgan paytda ishga tushiradi; `RewardedAds.retryLater` ikki baravar oshib boradigan kutish (30 s -> 60 -> ... eng ko'pi 10 daqiqa), muvaffaqiyatli yuklangach tiklanadi. Telefon sinovida qotish davom etsa — sabab boshqa joyda (keyingi qadam: Profil sahifasini bo'laklab o'chirib sinash yoki `adb`/Perfetto izi).
 - Fayllar: `ui/profile/ProfileScreen.kt`, `data/RewardedAds.kt`.
 
+## tgstore (ample-rs): to'lib yopilgan jurnal bo'lagi Telegram'da BITTA faylga birlashadi (2026-11-19)
+
+- **Savol:** "ARUmediaTV Database" kanalida `db_1_v1_0.bin`, `db_1_v1_511375.bin`, ... kabi bir bo'lakning kichik fayllari yig'ilib qolgan edi. Sabab: jurnal bo'lagi (`db_N_vV`, 1 MiB) Telegram'ga har safar FAQAT yangi baytlar bilan (nomdagi oxirgi raqam — bo'lak ichidagi boshlanish joyi) yuklanadi; birlashish faqat 24 segmentda yoki to'liq surat (`snap_`) olinganda bo'lardi, to'lib yopilgan (sealed) bo'lak uchun alohida qadam yo'q edi.
+- **Tuzatish** (`ample-rs/src/store.rs`): `needs_merge(meta)` = yopilgan bo'lak VA 1 dan ko'p segment. `refresh_dirty` bunday bo'lakni "kutayotgan" deb sanaydi, `replicate` uni butun fayl sifatida BITTA xabar qilib qayta yuklaydi (`replace`), eski segment xabarlari manifest yangilangach o'chiriladi. Ochiq (yozilayotgan) bo'lak oldingidek kichik segmentlar bilan yangilanadi, 24 segmentdan keyin birlashadi. Yangi sozlama yo'q; kanalda allaqachon yig'ilib qolgan yopilgan bo'laklar keyingi `replicate` da o'zi birlashadi.
+- **Testlar:** birlik test `sealed_chunk_with_segments_needs_merge`; E2E (`tests/e2e.py`, 3b qadam): 40 yuklashdan keyin faqat OXIRGI bo'lakdan boshqa hamma `db_N` uchun kanalda aynan 1 ta fayl turishi tekshiriladi. CI: `ample-rs.yml`.
+- **Joylash:** Ample'dagi ishlayotgan servis qo'lda qayta joylanguncha eski xulq saqlanadi (bu o'zgarish faqat kodda; `tgstore` SINOV tizimi, production'ga tegilmaydi).
+
