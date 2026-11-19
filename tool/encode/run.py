@@ -1161,9 +1161,22 @@ async def process(app: Client, channel: int, job: dict):
         else:
             # Telegram YUKLAB OLISHNI cheklamaydi (cheklov faqat yuklashda) — asl video kanaldan umumiy sessiya bilan olinadi.
             bot_msg = None
-            m = await app.get_messages(channel, int(job["origin_msg"]))
+            origin_id = int(job["origin_msg"])
+            m, why = None, ""
+            for t in range(3):  # Telegram vaqtincha bo'sh xabar qaytarishi mumkin: 3 marta, sabab yozib boriladi
+                try:
+                    m = await app.get_messages(channel, origin_id)
+                    why = "" if (m and not m.empty) else f"empty={getattr(m, 'empty', None)}"
+                    if m and not m.empty and not (m.document or m.video):
+                        why = "hujjat/video emas"
+                except Exception as ex:  # noqa: BLE001
+                    m, why = None, f"{type(ex).__name__}: {str(ex)[:80]}"
+                if m and not m.empty and (m.document or m.video):
+                    break
+                log(f"  asl video xabari {origin_id} olinmadi ({why}), urinish {t + 1}/3")
+                await asyncio.sleep(4 * (t + 1))
             if not m or m.empty or not (m.document or m.video):
-                raise Fatal("asl video kanalda topilmadi")
+                raise Fatal(f"asl video kanalda topilmadi (xabar {origin_id}, kanal {channel}, hisob {getattr(app.me, 'id', 0)}, sabab: {why})")
             log("  asl video yuklab olinmoqda...")
             await asyncio.to_thread(hb.set, "download", True)
             parts = [int(x) for x in (job.get("origin_parts") or []) if int(x) > 0]

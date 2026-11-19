@@ -7620,3 +7620,6 @@ Foydalanuvchi talabi: Turso veb-paneli kabi bitta jadval (hamma ustun yonma-yon)
 - `AdminDbScreen.kt` -> `DbRowsPage`: sarlavha (ustun nomi + turi, bosilsa tartiblanadi), `#` ustuni, qatorlar jadval katakchalarida; chapga-o'ngga va yuqoriga-pastga surish; `pinchZoom` (0.4x–3x, "100%" tugmasi tiklaydi; shrift va kenglik masshtablanadi); qator bosilsa to'liq ko'rinadi; "oldingi/keyingi" sahifalar olib tashlandi — oxirga yaqinlashganda keyingi 100 ta yoziladi (`step`).
 - `worker/src/dbview.rs`: `MAX_LIMIT` 50 -> 200 (bir so'rovda ko'proq qator).
 - Holat (surilgan joy, tartib, qidiruv, kattalashtirish, yuklangan qatorlar) `AdminKeep` orqali eslab qolinadi.
+
+## Kodlash: "asl video kanalda topilmadi" tashxisi (2026-11-19)
+Anime 4 / bo'lim 1 / qism 2: asl video (2.94 GB, 2 qism: xabar 1100, 1101) — 360p va 480p kodlandi, 720p 5 urinishda "asl video kanalda topilmadi" bilan to'xtadi, 1080p navbatda. Bazada `tg_files` va `encode_jobs` to'g'ri (xabarlar bor), shuning uchun sabab Telegram tomonida (hisob/kanal ko'rinishi). `tool/encode/run.py`: xabar olish 3 marta uriniladi va xato matni xabar raqami, kanal, hisob ID va sababni o'z ichiga oladi (`encode_q.error` da ko'rinadi). Baza so'rovi: `ci/DB_QUERY.sql` + `db-query.yml` (faqat o'qish, kalitlar yashiriladi).
