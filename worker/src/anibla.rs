@@ -2209,6 +2209,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
             let target: Vec<i64> = job["target"].as_str().unwrap_or("").split('/')
                 .filter_map(|p| p.parse().ok()).collect();
             if target.len() >= 2 && msg > 0 {
+                // Ikki marta chaqirilsa (yuklovchi javobni kutolmay `done` ni qayta yuborsa) ikkinchi qism YARATILMASIN: ish qatori AVVAL atomik olinadi.
+                // Aks holda bitta video ikki qism bo'lib qo'shilardi va ikkalasi bir xil kanal xabarlariga qarardi — biri tugagach asl video o'chib, ikkinchisi buzilardi.
+                // EN: claim the job row atomically first so a retried `done` cannot register a second episode that shares the same channel messages.
+                let claimed = turso_exec(env, "DELETE FROM anibla_jobs WHERE id=? RETURNING id", vec![TursoArg::int(id)]).await
+                    .ok().and_then(|r| first_row(&r)).is_some();
+                if !claimed {
+                    return ok(json!({"ok": true, "dup": true}));
+                }
                 let (a, s) = (target[0], target[1]);
                 let n = match target.get(2) {
                     Some(n) => *n,

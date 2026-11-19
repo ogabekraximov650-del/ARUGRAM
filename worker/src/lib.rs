@@ -11684,7 +11684,10 @@ async fn tg_forget_file(env: &Env, value: &str) {
     // 2 GB dan katta asl video qismlarga bo'lingan bo'lsa (`<nom>.p0`, `.p1`, ...) — hamma qism kanaldan o'chadi.
     for (pname, pmsg) in origin_part_rows(env, name).await {
         let channel = tg_channel_id(env);
-        if channel != 0 {
+        // Shu kanal xabariga boshqa asl video ham qarasa (takroriy qism) — xabar O'CHIRILMAYDI, faqat shu nomning qatori ketadi.
+        let shared = turso_exec(env, "SELECT 1 AS x FROM tg_files WHERE msg_id=? AND instr(file_name, ?) <> 1 LIMIT 1",
+            vec![TursoArg::int(pmsg), TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r)).is_some();
+        if channel != 0 && !shared {
             let body = json!({"chat_id": channel, "message_id": pmsg});
             if tg_api(env, "deleteMessage", body.clone()).await.is_err() && !encbot_token(env).is_empty() {
                 let _ = encbot_api(env, "deleteMessage", body).await;
@@ -11698,10 +11701,11 @@ async fn tg_forget_file(env: &Env, value: &str) {
         return;
     };
     let channel = tg_channel_id(env);
-    if channel != 0 {
+    let shared = turso_exec(env, "SELECT 1 AS x FROM tg_files WHERE msg_id=? AND instr(file_name, ?) <> 1 LIMIT 1",
+        vec![TursoArg::int(msg_id), TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r)).is_some();
+    if channel != 0 && !shared {
         let body = json!({"chat_id": channel, "message_id": msg_id});
-        // Post kodlash botiniki bo'lsa-yu, asosiy botda o'chirish huquqi
-        // bo'lmasa — kodlash botining o'zi o'chiradi.
+        // Asosiy botda o'chirish huquqi bo'lmasa — kodlash botining o'zi o'chiradi.
         if tg_api(env, "deleteMessage", body.clone()).await.is_err() && !encbot_token(env).is_empty() {
             let _ = encbot_api(env, "deleteMessage", body).await;
         }

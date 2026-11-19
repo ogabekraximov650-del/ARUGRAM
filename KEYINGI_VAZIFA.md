@@ -7623,3 +7623,9 @@ Foydalanuvchi talabi: Turso veb-paneli kabi bitta jadval (hamma ustun yonma-yon)
 
 ## Kodlash: "asl video kanalda topilmadi" tashxisi (2026-11-19)
 Anime 4 / bo'lim 1 / qism 2: asl video (2.94 GB, 2 qism: xabar 1100, 1101) — 360p va 480p kodlandi, 720p 5 urinishda "asl video kanalda topilmadi" bilan to'xtadi, 1080p navbatda. Bazada `tg_files` va `encode_jobs` to'g'ri (xabarlar bor), shuning uchun sabab Telegram tomonida (hisob/kanal ko'rinishi). `tool/encode/run.py`: xabar olish 3 marta uriniladi va xato matni xabar raqami, kanal, hisob ID va sababni o'z ichiga oladi (`encode_q.error` da ko'rinadi). Baza so'rovi: `ci/DB_QUERY.sql` + `db-query.yml` (faqat o'qish, kalitlar yashiriladi).
+
+## Anibla: bitta video ikki qism bo'lib qo'shilishi tuzatildi (2026-11-19)
+Foydalanuvchi aniqladi: bitta qism ikkita bo'lib qo'shilgan; 1-si to'liq tayyor, 2-si 1080p da asl video o'chgan. Sabab: `/api/anibla/done` (bosqichli oqim) yuklovchi javob kutolmay qayta yuborsa, ikki marta ishlardi — ikkinchi qism yaratilardi va ikkalasi BIR XIL kanal xabarlariga (`orig_bot_..`, `.p0/.p1`) qarardi; 1-qism tugagach `tg_forget_file` xabarlarni o'chirdi, 2-qism asl videosiz qoldi (anime 4, bo'lim 1: qism 1 va 2 — 14 soniya farq bilan yaratilgan).
+- `worker/src/anibla.rs`: `done` boshida ish qatori atomik olinadi (`DELETE ... RETURNING`); qayta chaqiruv hech narsa yaratmaydi (`{"ok":true,"dup":true}`).
+- `worker/src/lib.rs` `tg_forget_file`: kanal xabariga boshqa asl video ham qarasa, xabar o'chirilmaydi (faqat shu nomning qatori ketadi).
+- Mavjud takroriy 4/1/2-qism: asl video yo'q, uni admin panelidan o'chirish kerak (foydalanuvchi qarori).
