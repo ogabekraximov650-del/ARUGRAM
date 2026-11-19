@@ -14,8 +14,8 @@ import androidx.media3.extractor.SeekMap
 @UnstableApi
 object VdAhead {
     const val AHEAD_MS = 60_000L
-    /** Bitta so'rovda olinadigan bo'laklar soni (worker so'rovlari 4 baravar kam; oldinda ba'zan 1 daqiqadan <= 3 MB ko'proq turadi). */
-    private const val RUN = 4
+    /** Bitta so'rovda olinadigan bo'laklar soni: 10 x 1 MiB = 10 MiB (foydalanuvchi talabi; avval 4 MiB). Worker so'rovlari 2,5 baravar kam; oldinda ba'zan 1 daqiqadan <= 9 MB ko'proq turadi. */
+    private const val RUN = 10
 
     private class Target(val ctx: Context, val name: String, val total: Long, val key: ByteArray, val from: Long, val to: Long)
 

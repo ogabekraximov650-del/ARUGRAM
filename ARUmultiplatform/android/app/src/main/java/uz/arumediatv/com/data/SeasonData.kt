@@ -30,6 +30,9 @@ data class Episode(
 ) {
     val qualities: List<String> get() = QUALITIES.filter { !urls[it].isNullOrEmpty() }
 
+    /** Eng past sifat (`QUALITIES` yuqoridan pastga): qism BIRINCHI marta ochilganda shu tanlanadi. */
+    val lowestQuality: String? get() = qualities.lastOrNull()
+
     fun urlFor(q: String?): String {
         if (q != null) urls[q]?.takeIf { it.isNotEmpty() }?.let { return it }
         return qualities.firstOrNull()?.let { urls[it] }.orEmpty()

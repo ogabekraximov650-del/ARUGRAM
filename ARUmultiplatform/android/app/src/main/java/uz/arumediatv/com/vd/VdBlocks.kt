@@ -16,8 +16,8 @@ import java.util.concurrent.TimeUnit
  * kadr oluvchi ([VdFrameSource]) hammasi shu yerdan so'raydi. Trafik tejash qoidalari:
  *  - bo'lak telefonda bo'lsa ([BlockCache]) tarmoqqa borilmaydi;
  *  - bir bo'lakni bir vaqtda ikki joy so'rasa BITTA so'rov ketadi (ikkinchisi kutadi);
- *  - so'rov aniq kerakli bo'lak(lar) uchun (`Range: start-end`, "oxirigacha" emas) — ortiqcha bayt kelmaydi; oldindan olish ([getRun]) 4 tagacha
- *    bo'lakni bitta so'rovda oladi (worker so'rovlari kam bo'lsin);
+ *  - so'rov aniq kerakli bo'lak(lar) uchun (`Range: start-end`, "oxirigacha" emas) — ortiqcha bayt kelmaydi; oldindan olish ([getRun]) 10 tagacha
+ *    bo'lakni (10 MiB) bitta so'rovda oladi (worker so'rovlari kam bo'lsin);
  *  - so'rov alohida oqimda: pleyer surilsa/yopilsa ham boshlangan bo'lak oxirigacha olinib keshga yoziladi (chala bo'lak tashlab yuborilmaydi).
  */
 object VdBlocks {

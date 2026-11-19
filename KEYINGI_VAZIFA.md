@@ -7641,3 +7641,12 @@ Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'l
 - Asosiy topilma: pleyer ochiq paytda HAR SONIYADA `flushHistory` -> `LibraryStore.applyHistory` butun tarix ro'yxatini yangilab, `library.json` ni to'liq qayta yozardi; Kutubxona ekrani (pleyer ostida turadi) ham har soniyada qayta chizilardi. Endi: `SeasonScreen` joy/tarixni 5 soniyada bir marta yozadi (chiqishda/qism almashganda darhol), `LibraryStore.saveSoon()` fayl yozishni 4 soniya jim turgach qiladi, `flushNow()` ilova fonga ketganda (`MainActivity.onStop`) yozadi.
 - Qolganlari ko'rilib muammo topilmadi: `TgImage`/`ImageStore` (fon oqim, semafor), `SeasonGrid` (kalitli), `Live` (long-poll), `DownloadsIndex.collect` (IO), `Thread.sleep` lar fon oqimlarda.
 - Hali o'zgartirilmagan: `AppServices.init` sovuq ishga tushishda asosiy oqimda ko'p narsa yaratadi (Rust yadro, Keystore, omborlar) — sekin telefonda birinchi ochilish kechikishi mumkin.
+
+## Kotlin ilova: ko'rishlar soni, 10 MiB so'rov, birinchi marta eng past sifat, sifat tarixda (2026-11-19)
+
+- **Poster ustidagi ko'rishlar "8 -> 1" nosozligi** (`ui/season/SeasonScreen.kt`): ko'rish qismga kirishning o'zidayoq (to'xtatilgan avto-ochilgan qism ham) mahalliy +1 bo'lardi, qism qayta ochilganda yoki sifat almashganda yana +1 (`HistoryDraft.newView` har safar `true`); server esa odam boshiga BITTA ko'rish sanaydi, shuning uchun keyin ro'yxat yangilanganda 1 ga qaytardi. Endi: ko'rish faqat qism ochilgandan keyin haqiqatan **10 soniya** ko'rilganda hisoblanadi (`startWatched`), oldin ko'rgan bo'lsa (`hist.views > 0`) umuman qo'shilmaydi, Tarix yozuvidagi `views` ko'rilgach qayta 0 ga tushmaydi (`viewsSoFar`).
+- **Bitta so'rovda olish 4 MiB -> 10 MiB** (`vd/VdAhead.kt` `RUN` = 10 bo'lak x 1 MiB): 1 daqiqalik oldindan olish worker'ga 2,5 baravar kam so'rov yuboradi. Yuklab olish (`VdDownloads`) avvaldan 18 MiB oynalarda.
+- **Qism BIRINCHI marta eng past sifatda ochiladi** (`Episode.lowestQuality`, `SeasonScreen.play`): tanlov tartibi — aniq tanlangan > shu qismda tanlangan (`chosenEp`) > eslab qolingan > eng past. Avvalgi "sessiyadagi tanlov barcha qismlarga o'tadi" (`chosenQuality`) endi faqat tanlangan qismga tegishli.
+- **Sifat tarixda**: `last_quality` allaqachon serverga yoziladi; endi boshqa qurilmada davom etganda eslab qolingan sifat qurilmadagi va TARIXDAGI sifatdan YANGIROG'I bo'yicha tanlanadi (`ResumePoint` mantig'i kabi: tarix yangi bo'lsa tarix, aks holda mahalliy).
+- Testlar: `LowestQualityTest`. Tekshiruv faqat GitHub Actions'da (`android-native.yml`).
+

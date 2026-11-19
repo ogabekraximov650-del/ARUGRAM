@@ -1,0 +1,47 @@
+name: APK ni Telegram'ga (Saqlangan xabarlar) yuborish — BIR MARTA
+
+# `ci/SEND_APK` o'zgarganda ishlaydi: 1-qator APK havolasi (GitHub Release), 2-qator izoh. Fayl asosiy hisob sessiyasi (`tool/encode/session.enc`) bilan
+# "Saqlangan xabarlar"ga yuboriladi (oddiy bot 50 MB gacha, hisob 2 GB gacha). `ci/send_apk.py`. Qo'lda ishga tushirilmaydi.
+
+on:
+  push:
+    branches: [main]
+    paths: ['ci/SEND_APK']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: send-apk
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: secret
+    env:
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: Python paketlari
+        run: pip install --no-cache-dir pyrogram==2.0.106 tgcrypto==1.2.5
+      - name: Telegram sessiyasi (asosiy hisob)
+        run: |
+          OUT="$RUNNER_TEMP/pyro_session.session"
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3"
+          echo "SESSION_PATH=$RUNNER_TEMP/pyro_session" >> "$GITHUB_ENV"
+      - name: APK ni yuklab olish va yuborish
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: python3 ci/send_apk.py
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f "$RUNNER_TEMP/pyro_session.session" "$RUNNER_TEMP/app.apk"

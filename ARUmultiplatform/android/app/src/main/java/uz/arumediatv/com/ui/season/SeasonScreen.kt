@@ -96,6 +96,10 @@ private class HistoryDraft(
     val quality: String,
     var watchedMs: Long,
     var newView: Boolean = true,
+    /** Qism ochilgan paytdagi tomosha vaqti: ko'rish faqat SHUNDAN KEYIN haqiqatan 10 soniya ko'rilganda hisoblanadi. */
+    val startWatched: Long = 0,
+    /** Bu foydalanuvchi shu qismni ilgari ko'rgan (1) yoki yo'q (0): Tarix yozuvida saqlanadi, qayta ochilganda +1 bo'lmasin. */
+    var viewsSoFar: Int = 0,
     var positionMs: Long = 0,
     var durationMs: Long = 0,
     var lastStamp: String = "",
@@ -179,6 +183,8 @@ fun SeasonScreen(
     var viaVd by remember { mutableStateOf(false) }
     var viaLocal by remember { mutableStateOf(false) }
     var chosenQuality by remember { mutableStateOf<String?>(null) }
+    // Tanlangan sifat faqat O'SHA qism uchun: yangi qism har doim eng past sifatda ochiladi (foydalanuvchi talabi).
+    var chosenEp by remember { mutableStateOf(0L) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var fullscreen by rememberSaveable { mutableStateOf(false) }
     var locked by remember { mutableStateOf(false) }
@@ -200,15 +206,18 @@ fun SeasonScreen(
     fun flushHistory(sync: Boolean = true) {
         val d = draft ?: return
         if (d.durationMs <= 0 || d.positionMs < 1000) return
-        val stamp = "${d.positionMs}/${d.watchedMs}/${d.quality}/${d.newView}"
+        // UZ: ko'rish faqat haqiqatan 10 soniya ko'rilgach hisoblanadi (sahifa ochilishi/to'xtatilgan qism ko'rish emas) va BIR odam shu qismni
+        //     bir marta ko'radi (server ham shunday): oldin ko'rgan bo'lsa qayta ochilganda +1 bo'lmaydi. EN: count a view only after 10 s of real playback, once per episode.
+        val counted = d.newView && d.watchedMs - d.startWatched >= 10_000
+        val stamp = "${d.positionMs}/${d.watchedMs}/${d.quality}/$counted"
         if (sync && stamp != d.lastSyncStamp) {
             d.lastSyncStamp = stamp
-            AppServices.sync.putHistory(d.animeId, d.seasonId, d.epId, d.url, d.quality, d.positionMs, d.durationMs, d.watchedMs, d.newView)
+            AppServices.sync.putHistory(d.animeId, d.seasonId, d.epId, d.url, d.quality, d.positionMs, d.durationMs, d.watchedMs, counted)
         }
         if (stamp == d.lastStamp) return
         d.lastStamp = stamp
         // UZ: ko'rish (+1) va tomosha vaqti shu zahoti ekranda; baho/ko'rish ro'yxatlari ham. EN: instant local counters.
-        val dv = if (d.newView && !d.viewNoted) 1L else 0L
+        val dv = if (counted && !d.viewNoted) 1L else 0L
         val dm = (d.watchedMs - d.msNoted).coerceAtLeast(0)
         if (dv > 0 || dm >= 5_000) {
             if (dv > 0) d.viewNoted = true
@@ -225,12 +234,13 @@ fun SeasonScreen(
                 HistoryItem(
                     animeId = d.animeId, seasonId = d.seasonId, episodeNo = ep.number, sectionNo = season.sectionNo,
                     title = season.name, photoUrl = season.photoUrl, positionMs = d.positionMs, durationMs = d.durationMs,
-                    views = if (d.newView) 1 else 0, watchedMs = d.watchedMs, quality = d.quality, epizodId = d.epId,
+                    views = if (counted || d.viewsSoFar > 0) 1 else 0, watchedMs = d.watchedMs, quality = d.quality, epizodId = d.epId,
                     updatedAt = System.currentTimeMillis(), videoUrl = d.url,
                 ),
             )
         }
-        if (sync) d.newView = false
+        if (counted) d.viewsSoFar = 1
+        if (sync && counted) d.newView = false
     }
 
     fun saveProgress() {
@@ -245,7 +255,13 @@ fun SeasonScreen(
             val hist = AppServices.library.state.value.history.firstOrNull { it.animeId == season.animeId && it.seasonId == season.seasonId && it.epizodId == ep.id }
             val epKey = "${season.animeId}:${season.seasonId}:${ep.id}"
             val saved = AppServices.progress.episodeState(epKey)
-            var q = quality ?: chosenQuality ?: saved?.second?.takeIf { ep.urls.containsKey(it) } ?: hist?.quality?.takeIf { ep.urls.containsKey(it) }
+            // UZ: sifat: aniq tanlangan > shu qismda tanlangan > eslab qolingan (qurilmada yoki TARIXDA — boshqa qurilmada ham o'sha sifat) > BIRINCHI marta: eng past.
+            //     Mahalliy va tarix sifatidan YANGIROG'I olinadi (boshqa qurilmada sifat o'zgargan bo'lsa).
+            // EN: quality: explicit > chosen for this episode > remembered (device or history: same on another device; the newer wins) > first time: the lowest.
+            val localQ = saved?.second?.takeIf { ep.urls.containsKey(it) }
+            val histQ = hist?.quality?.takeIf { ep.urls.containsKey(it) }
+            val remembered = if (histQ != null && (localQ == null || (hist?.updatedAt ?: 0L) > AppServices.progress.episodeStamp(epKey) + 2000)) histQ else localQ
+            var q = quality ?: chosenQuality?.takeIf { chosenEp == ep.id && ep.urls.containsKey(it) } ?: remembered ?: ep.lowestQuality
             // Internet yo'q: telefonda to'liq bor sifat tanlanadi (aks holda boshqa sifat ochilib, "bu qism yuklab olinmagan" chiqardi va saqlangan joy topilmasdi).
             if (!uz.arumediatv.com.data.Net.isOnline(ctx)) {
                 val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
@@ -263,7 +279,7 @@ fun SeasonScreen(
                 saveProgress()
                 flushHistory()
                 workerRetried = false
-                draft = HistoryDraft(season.animeId, season.seasonId, ep.id, url, ep.qualityOf(url), hist?.watchedMs ?: 0).also { it.msNoted = it.watchedMs }
+                draft = HistoryDraft(season.animeId, season.seasonId, ep.id, url, ep.qualityOf(url), hist?.watchedMs ?: 0, newView = (hist?.views ?: 0) <= 0, startWatched = hist?.watchedMs ?: 0, viewsSoFar = (hist?.views ?: 0).coerceAtMost(1)).also { it.msNoted = it.watchedMs }
                 skippedRanges.clear()
             }
             progressUrl = ""
@@ -315,7 +331,7 @@ fun SeasonScreen(
         val start = wanted ?: list.firstOrNull { it.id == last?.epizodId } ?: list.firstOrNull()
         if (start != null && current == null) {
             if (wanted != null) {
-                startQuality?.let { chosenQuality = it }
+                startQuality?.let { chosenQuality = it; chosenEp = wanted.id }
                 play(wanted, quality = startQuality)
             } else play(start, resumePlaying = false)
         }
@@ -593,9 +609,9 @@ fun SeasonScreen(
                         onNext = { if (idx >= 0 && idx + 1 < sorted.size) play(sorted[idx + 1], resumePlaying = player.exo.playWhenReady) },
                     ) else EpisodesTab(
                         canWatch = canWatch, loading = loadingEps, episodes = episodes,
-                        currentId = current?.id, currentQuality = chosenQuality,
+                        currentId = current?.id, currentQuality = chosenQuality?.takeIf { chosenEp == current?.id },
                         onPlay = { e, q ->
-                            if (q != null) chosenQuality = q
+                            if (q != null) { chosenQuality = q; chosenEp = e.id }
                             play(e, quality = q)
                         },
                         onSubscribe = onOpenBilling,
@@ -639,6 +655,7 @@ fun SeasonScreen(
             speed = player.speed, autoNext = autoNext, autoSkipIntro = autoSkipIntro, sleepEndAt = sleepEndAt,
             onQuality = { q ->
                 chosenQuality = q
+                chosenEp = current?.id ?: 0L
                 current?.let { e -> play(e, quality = q, resumeAt = player.positionMs, resumePlaying = player.playing || !player.ready) }
             },
             onSpeed = { player.changeSpeed(it) },
