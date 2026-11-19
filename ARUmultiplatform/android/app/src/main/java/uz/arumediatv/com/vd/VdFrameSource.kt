@@ -15,12 +15,12 @@ class VdFrameSource(private val info: VdApi.Info) : MediaDataSource() {
 
     override fun getSize(): Long = info.size
 
-    /** Bo'lak pleyer bilan UMUMIY keshdan ([VdBlocks]): pleyer ko'rgan joy qayta yuklanmaydi, bu yerda olingani pleyerga ham yaraydi. */
+    /** Bo'lak pleyer bilan UMUMIY keshdan ([VdBlocks]) o'qiladi (pleyer ko'rgan joy qayta yuklanmaydi); bu yerda tarmoqdan olingani telefonga YOZILMAYDI (video ko'rilmagan). */
     private fun block(i: Long): ByteArray? {
         synchronized(blocks) { blocks[i]?.let { return it } }
         if (i * BLOCK >= info.size) return null
         val plain = try {
-            VdBlocks.get(uz.arumediatv.com.AppServices.appContext, info.name, info.size, key, i)
+            VdBlocks.get(uz.arumediatv.com.AppServices.appContext, info.name, info.size, key, i, persist = false)
         } catch (_: Exception) {
             return null
         }

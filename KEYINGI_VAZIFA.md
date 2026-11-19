@@ -7629,3 +7629,9 @@ Foydalanuvchi aniqladi: bitta qism ikkita bo'lib qo'shilgan; 1-si to'liq tayyor,
 - `worker/src/anibla.rs`: `done` boshida ish qatori atomik olinadi (`DELETE ... RETURNING`); qayta chaqiruv hech narsa yaratmaydi (`{"ok":true,"dup":true}`).
 - `worker/src/lib.rs` `tg_forget_file`: kanal xabariga boshqa asl video ham qarasa, xabar o'chirilmaydi (faqat shu nomning qatori ketadi).
 - Mavjud takroriy 4/1/2-qism: asl video yo'q, uni admin panelidan o'chirish kerak (foydalanuvchi qarori).
+
+## Xotira: "o'zidan o'zi yig'iladi" tuzatishlari (2026-11-19)
+Foydalanuvchi: ko'rmasam ham xotiraga yig'ilyapti (Videolar 1,00 MB, Vaqtinchalik 737 KB); ilova qotyapti.
+- Sabab (Videolar): tomosha tarixi kartalari kadrni `ThumbStore` -> `VdFrameSource` -> `VdBlocks.get` orqali oladi va tarmoqdan kelgan 1 MiB bloklar `BlockCache` ("Videolar") ga yozilardi — video ko'rilmagan bo'lsa ham. Endi `persist = false`: kadr uchun olingan blok telefonga yozilmaydi (telefonda bor bo'lsa o'qiladi).
+- "Xotiradan foydalanish" ekrani noto'g'ri o'lchardi: "Posterlar" `cacheDir/aru_img` ni ko'rardi (rasmlar aslida `filesDir/aru_img`), "Tarix kadrlari" (`aru_thumb`) umuman hisoblanmasdi va tozalanmasdi. Endi `images.diskBytes()`/`thumbs.diskBytes()`; "Keshni tozalash" kadrlarni ham o'chiradi.
+- Qotish sababi hali aniqlanmadi (qaysi ekranda qotishi kerak).

@@ -38,19 +38,22 @@ object VdBlocks {
         }
     }
 
-    /** Ochilgan bo'lak (telefondan yoki tarmoqdan); xatoda [IOException]. */
-    fun get(ctx: Context, name: String, total: Long, key: ByteArray, idx: Long): ByteArray {
+    /**
+     * Ochilgan bo'lak (telefondan yoki tarmoqdan); xatoda [IOException]. [persist] = false — tarmoqdan olingan bo'lak telefon keshiga YOZILMAYDI
+     * (tarix kadri uchun: video ko'rilmagan, xotirada "Videolar" bo'lib yig'ilib qolmasin); telefonda bor bo'lsa undan o'qiladi.
+     */
+    fun get(ctx: Context, name: String, total: Long, key: ByteArray, idx: Long, persist: Boolean = true): ByteArray {
         val len = blockLen(total, idx)
         if (idx < 0 || len <= 0) throw IOException("bo'lak fayldan tashqarida")
         BlockCache.read(ctx, name, idx, len)?.let { return it }
         val app = ctx.applicationContext
-        val k = "$name:$idx"
+        val k = if (persist) "$name:$idx" else "$name:$idx:np"
         val mine = CompletableFuture<ByteArray>()
         val other = inflight.putIfAbsent(k, mine)
         if (other != null) return await(other)
         pool.execute {
             try {
-                mine.complete(BlockCache.read(app, name, idx, len) ?: fetch(name, total, key, idx).also { BlockCache.write(app, name, idx, it) })
+                mine.complete(BlockCache.read(app, name, idx, len) ?: fetch(name, total, key, idx).also { if (persist) BlockCache.write(app, name, idx, it) })
             } catch (e: Throwable) {
                 mine.completeExceptionally(e)
             } finally {
