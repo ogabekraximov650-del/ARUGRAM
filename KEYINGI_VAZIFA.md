@@ -7663,3 +7663,8 @@ Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'l
 - **Testlar:** birlik test `sealed_chunk_with_segments_needs_merge`; E2E (`tests/e2e.py`, 3b qadam): 40 yuklashdan keyin faqat OXIRGI bo'lakdan boshqa hamma `db_N` uchun kanalda aynan 1 ta fayl turishi tekshiriladi. CI: `ample-rs.yml`.
 - **Joylash:** Ample'dagi ishlayotgan servis qo'lda qayta joylanguncha eski xulq saqlanadi (bu o'zgarish faqat kodda; `tgstore` SINOV tizimi, production'ga tegilmaydi).
 
+## Bo'limlar ro'yxati teskari tartibda: ilovaning admin ekrani va kodlash boti (2026-11-20)
+
+- **Talab (foydalanuvchi):** "Ilovadagi va panel botdagi bo'limlar ro'yxati teskari tartibda bo'lsin" — eng katta bo'lim raqami tepada.
+- **Ilova** (`AdminSeasonsScreen`, "Bo'limni boshqarish"): ro'yxat ko'rsatiladigan bo'lim raqami (`bolim_id`, bo'lmasa `season_id`) bo'yicha kamayish tartibida. Server (`GET /api/seasons/anime/:id`) tartibi o'zgarmadi — u bo'limlarning boshqa ro'yxatlarida ham ishlatiladi (foydalanuvchi ko'radigan "Bo'limlar" yorlig'i ham oldingi tartibda qoldi).
+- **Bot** (`worker/src/lib.rs` `encbot_seasons`, "Qaysi bo'limga qism qo'shamiz?"): `ORDER BY COALESCE(NULLIF(bolim_id,0), season_id) DESC, season_id DESC`. Tugmani bosganda bo'lim `bolim_id` bo'yicha topiladi — tartib bunga ta'sir qilmaydi.

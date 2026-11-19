@@ -603,7 +603,8 @@ fun AdminSeasonsScreen(anime: JSONObject, onBack: () -> Unit, onOpenSeason: (JSO
             error != null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(error!!, color = Color(0xB3FFFFFF), fontSize = 14.sp) }
             items.isEmpty() -> MgmtEmpty(AruIcons.VideoLibrary, "Hali bo'lim qo'shilmagan", "Pastdagi + tugmasi orqali qo'sh")
             else -> LazyColumn(Modifier.fillMaxSize(), state = rememberKeptListState("seasons:$animeId"), contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(items, key = { it.optLong("season_id") }) { s ->
+                // Teskari tartib (foydalanuvchi talabi): eng katta bo'lim raqami tepada. Server ro'yxati o'zgarmaydi (u ilovaning boshqa joylarida ham ishlatiladi).
+                items(items.sortedByDescending { it.optInt("bolim_id").takeIf { n -> n > 0 } ?: it.optInt("season_id") }, key = { it.optLong("season_id") }) { s ->
                     val bolim = s.optInt("bolim_id").takeIf { it > 0 } ?: s.optInt("season_id")
                     Row(Modifier.fillMaxWidth().clip(glassRow).background(AruColors.Card).border(1.dp, AruColors.Border, glassRow).clickable { onOpenSeason(s) }.padding(horizontal = 12.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                         MgmtPhoto(s.optString("photo_url"), 64, 12, 192)

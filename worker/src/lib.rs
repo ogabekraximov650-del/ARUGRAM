@@ -13495,7 +13495,7 @@ async fn encbot_anime_page(env: &Env, page: i64) -> (String, Value) {
 async fn encbot_seasons(env: &Env, a: i64) -> (String, Value) {
     let res = turso_many(env, &[
         ("SELECT name FROM anime_db WHERE id=?", vec![TursoArg::int(a)]),
-        ("SELECT season_id, bolim_id, nomi, epizod_count FROM season_db WHERE anime_id=? ORDER BY season_id ASC",
+        ("SELECT season_id, bolim_id, nomi, epizod_count FROM season_db WHERE anime_id=? ORDER BY COALESCE(NULLIF(bolim_id,0), season_id) DESC, season_id DESC",
          vec![TursoArg::int(a)]),
     ]).await;
     let back = vec![ENCBOT_BTN_ANIMES.to_string()];
