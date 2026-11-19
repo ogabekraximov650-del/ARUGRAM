@@ -1,23 +1,45 @@
 package uz.arumediatv.com.vd
 
 import android.content.Context
-import androidx.media3.common.C
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.extractor.SeekMap
 
 /**
- * SIRPANUVCHI OYNA (eski tizimdagi `player_source.rs` kabi): ko'rish paytida telefonda doim "ijro joyi .. +1 daqiqa" oralig'i tayyor turadi.
- * Yetishmayotgan 1 MiB bo'laklar fonda 4 tadan to'plab (bitta so'rovda) olinadi ([VdBlocks] — pleyer bilan bir bo'lak ikki marta yuklanmaydi); oyna to'lsa
- * hech narsa yuklanmaydi. "1 daqiqa" aniq: vaqt -> bayt videoning o'z jadvalidan (`moov`, pleyer o'qigan [SeekMap]) olinadi, o'rtacha bitreytdan emas
- * (aks holda tinch sahnada 4-5 daqiqa yuklanib ketardi).
+ * UZ: Keyingi oynani oldindan olishning sof qoidasi (test qilinadi). Ijro joyidan boshlab keshda KETMA-KET turgan (hali ko'rilmagan) baytlar
+ * [LOW_WATER] bo'lakdan (10 x 1 MiB = 10 MiB) kamaysa — birinchi yetishmayotgan bo'lakdan KANALDAGI 18 MiB oyna oxirigacha bitta so'rovda olinadi.
+ * EN: pure prefetch rule: when fewer than 10 MiB of consecutive unplayed blocks are cached ahead of the playback position, fetch from the first missing block to the end of its 18 MiB window.
+ */
+object AheadPlan {
+    /** Zaxira chegarasi: bo'lak (1 MiB) soni. Foydalanuvchi talabi: 10 MB. */
+    const val LOW_WATER = 10
+
+    /** Bir oynadagi 1 MiB bo'laklar soni (18 MiB). */
+    const val PER_WIN = (VdCtr.CHUNK / BlockCache.BLOCK).toInt()
+
+    /**
+     * @param cur ijro joyidagi bo'lak raqami; @param last faylning oxirgi bo'lagi; @param has bo'lak telefonda bormi.
+     * @return (birinchi yetishmayotgan bo'lak, olinadigan bo'laklar soni) yoki null — hozir hech narsa olinmaydi.
+     */
+    fun next(cur: Long, last: Long, has: (Long) -> Boolean): Pair<Long, Int>? {
+        if (last < 0) return null
+        val from = cur.coerceIn(0, last)
+        var m = from
+        while (m <= last && m - from < LOW_WATER && has(m)) m++
+        if (m > last || m - from >= LOW_WATER) return null // fayl oxiri yoki zaxira yetarli
+        val winEnd = minOf((m / PER_WIN + 1) * PER_WIN - 1, last)
+        return m to (winEnd - m + 1).toInt()
+    }
+}
+
+/**
+ * SIRPANUVCHI OYNA: ko'rish paytida telefonda ijro joyidan oldinda kamida 10 MiB tayyor turadi ([AheadPlan]). Zaxira 10 MiB dan kamaysa keyingi
+ * kanal oynasi (18 MiB, birinchi yetishmayotgan bo'lakdan oyna oxirigacha) BITTA so'rovda, oqim bilan olinadi ([VdBlocks.getRun] — pleyer bilan bir
+ * bo'lak ikki marta yuklanmaydi). Surib yuborilsa u joyda keshda hech narsa yo'q — oyna darhol o'sha joydan olinadi (alohida bekor qilish kerak emas).
+ * Ijro joyi (vaqt -> bayt) videoning o'z jadvalidan ([SeekMap]) olinadi.
  */
 @UnstableApi
 object VdAhead {
-    const val AHEAD_MS = 60_000L
-    /** Bitta so'rovda olinadigan bo'laklar soni: 10 x 1 MiB = 10 MiB (foydalanuvchi talabi; avval 4 MiB). Worker so'rovlari 2,5 baravar kam; oldinda ba'zan 1 daqiqadan <= 9 MB ko'proq turadi. */
-    private const val RUN = 10
-
-    private class Target(val ctx: Context, val name: String, val total: Long, val key: ByteArray, val from: Long, val to: Long)
+    private class Target(val ctx: Context, val name: String, val total: Long, val key: ByteArray, val cur: Long)
 
     private val lock = Object()
     private var target: Target? = null
@@ -31,27 +53,21 @@ object VdAhead {
         map = name to m
     }
 
-    /** Ijro joyi o'zgardi: oyna shu joyga suriladi. Jadval hali o'qilmagan bo'lsa hech narsa qilinmaydi (pleyer o'zi so'rab oladi). */
+    /** Ijro joyi o'zgardi (pleyer ~har soniyada). Jadval hali o'qilmagan bo'lsa hech narsa qilinmaydi (pleyer o'zi so'rab oladi). */
     fun onPosition(ctx: Context, name: String, total: Long, key: ByteArray, posMs: Long) {
         val m = map?.takeIf { it.first == name }?.second ?: return
         if (!m.isSeekable || total <= 0) return
-        val posUs = posMs.coerceAtLeast(0) * 1000
-        val endUs = posUs + AHEAD_MS * 1000
-        val (start, end) = try {
-            val s = m.getSeekPoints(posUs).first.position
-            val dur = m.durationUs
-            val e = if (dur != C.TIME_UNSET && endUs >= dur) total - 1 else m.getSeekPoints(endUs).second.position
-            s to maxOf(s, e)
+        val start = try {
+            m.getSeekPoints(posMs.coerceAtLeast(0) * 1000).first.position
         } catch (_: Exception) {
             return
         }
         val last = (total - 1) / BlockCache.BLOCK
-        val from = (start / BlockCache.BLOCK).coerceIn(0, last)
-        val to = (end / BlockCache.BLOCK).coerceIn(from, last)
+        val cur = (start / BlockCache.BLOCK).coerceIn(0, last)
         synchronized(lock) {
-            val cur = target
-            if (cur != null && cur.name == name && cur.from == from && cur.to == to) return
-            target = Target(ctx.applicationContext, name, total, key, from, to)
+            val t = target
+            if (t != null && t.name == name && t.cur == cur) return
+            target = Target(ctx.applicationContext, name, total, key, cur)
             if (worker == null) worker = Thread({ loop() }, "vd-ahead").apply { isDaemon = true; start() }
             lock.notifyAll()
         }
@@ -66,21 +82,22 @@ object VdAhead {
     }
 
     private fun loop() {
-        var idle: Target? = null // shu oyna to'liq — yangi oyna kelguncha kutiladi
+        var idle: Target? = null // shu joyda zaxira yetarli — ijro joyi o'zgarguncha kutiladi
         var fails = 0
         while (true) {
             val t = synchronized(lock) {
                 while (target == null || target === idle) lock.wait()
                 target!!
             }
-            val idx = (t.from..t.to).firstOrNull { !BlockCache.has(t.ctx, t.name, it) }
-            if (idx == null) {
+            val last = (t.total - 1) / BlockCache.BLOCK
+            val plan = AheadPlan.next(t.cur, last) { BlockCache.has(t.ctx, t.name, it) }
+            if (plan == null) {
                 idle = t
                 fails = 0
                 continue
             }
             try {
-                VdBlocks.getRun(t.ctx, t.name, t.total, t.key, idx, RUN)
+                VdBlocks.getRun(t.ctx, t.name, t.total, t.key, plan.first, plan.second)
                 fails = 0
             } catch (_: Exception) {
                 // Tarmoq yo'q/xato: biroz kutib qayta urinadi (pleyerga ta'sir qilmaydi — u o'zi ham so'rab oladi).

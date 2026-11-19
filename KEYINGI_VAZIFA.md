@@ -7642,13 +7642,13 @@ Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'l
 - Qolganlari ko'rilib muammo topilmadi: `TgImage`/`ImageStore` (fon oqim, semafor), `SeasonGrid` (kalitli), `Live` (long-poll), `DownloadsIndex.collect` (IO), `Thread.sleep` lar fon oqimlarda.
 - Hali o'zgartirilmagan: `AppServices.init` sovuq ishga tushishda asosiy oqimda ko'p narsa yaratadi (Rust yadro, Keystore, omborlar) — sekin telefonda birinchi ochilish kechikishi mumkin.
 
-## Kotlin ilova: ko'rishlar soni, 10 MiB so'rov, birinchi marta eng past sifat, sifat tarixda (2026-11-19)
+## Kotlin ilova: ko'rishlar soni, 10 MiB zaxira qoidasi, birinchi marta 1080p, sifat tarixda (2026-11-19)
 
 - **Poster ustidagi ko'rishlar "8 -> 1" nosozligi** (`ui/season/SeasonScreen.kt`): ko'rish qismga kirishning o'zidayoq (to'xtatilgan avto-ochilgan qism ham) mahalliy +1 bo'lardi, qism qayta ochilganda yoki sifat almashganda yana +1 (`HistoryDraft.newView` har safar `true`); server esa odam boshiga BITTA ko'rish sanaydi, shuning uchun keyin ro'yxat yangilanganda 1 ga qaytardi. Endi: ko'rish faqat qism ochilgandan keyin haqiqatan **10 soniya** ko'rilganda hisoblanadi (`startWatched`), oldin ko'rgan bo'lsa (`hist.views > 0`) umuman qo'shilmaydi, Tarix yozuvidagi `views` ko'rilgach qayta 0 ga tushmaydi (`viewsSoFar`).
-- **Bitta so'rovda olish 4 MiB -> 10 MiB** (`vd/VdAhead.kt` `RUN` = 10 bo'lak x 1 MiB): 1 daqiqalik oldindan olish worker'ga 2,5 baravar kam so'rov yuboradi. Yuklab olish (`VdDownloads`) avvaldan 18 MiB oynalarda.
-- **Qism BIRINCHI marta eng past sifatda ochiladi** (`Episode.lowestQuality`, `SeasonScreen.play`): tanlov tartibi — aniq tanlangan > shu qismda tanlangan (`chosenEp`) > eslab qolingan > eng past. Avvalgi "sessiyadagi tanlov barcha qismlarga o'tadi" (`chosenQuality`) endi faqat tanlangan qismga tegishli.
+- **Oldindan olish: 10 MiB zaxira qoidasi** (`vd/VdAhead.kt`, sof qoida `AheadPlan`): ijro joyidan boshlab keshda KETMA-KET turgan (hali ko'rilmagan) baytlar 10 MiB dan kamaysa, birinchi yetishmayotgan 1 MiB bo'lakdan kanal oynasi (18 MiB) oxirigacha BITTA so'rovda, oqim bilan olinadi. Video ochilganda keshda 0 bayt — birinchi butun oyna olinadi; surilganda u joyda ham 0 — o'sha joydan oyna olinadi (alohida bekor qilish yo'q). Avvalgi "1 daqiqalik oyna" (`AHEAD_MS`, 4 so'rov x 1 MiB) olib tashlandi. So'rovlar oyna chegarasiga to'g'rilangan: har 18 MiB uchun 1 ta so'rov va 1 ta `warm`. Chegara qat'iy 10 MiB (foydalanuvchi qarori; sifatga moslashtirish ataylab qilinmadi). Yuklab olish (`VdDownloads`) avvaldan 18 MiB oynalarda. Test: `AheadPlanTest`.
+- **Qism birinchi marta eng YUQORI sifatda (1080p) ochiladi** (`Episode.highestQuality`, `SeasonScreen.play`): tanlov tartibi — aniq tanlangan > shu qismda tanlangan (`chosenEp`) > eslab qolingan > eng yuqori. (Avval "eng past" deb qilingan edi, foydalanuvchi o'zgartirdi.) Avvalgi "sessiyadagi tanlov barcha qismlarga o'tadi" (`chosenQuality`) endi faqat tanlangan qismga tegishli.
 - **Sifat tarixda**: `last_quality` allaqachon serverga yoziladi; endi boshqa qurilmada davom etganda eslab qolingan sifat qurilmadagi va TARIXDAGI sifatdan YANGIROG'I bo'yicha tanlanadi (`ResumePoint` mantig'i kabi: tarix yangi bo'lsa tarix, aks holda mahalliy).
-- Testlar: `LowestQualityTest`. Tekshiruv faqat GitHub Actions'da (`android-native.yml`).
+- Testlar: `HighestQualityTest`, `AheadPlanTest`. Tekshiruv faqat GitHub Actions'da (`android-native.yml`).
 
 ## Kotlin ilova: Profilda surilganda qotish — reklama kutubxonasini kechiktirish (2026-11-19)
 

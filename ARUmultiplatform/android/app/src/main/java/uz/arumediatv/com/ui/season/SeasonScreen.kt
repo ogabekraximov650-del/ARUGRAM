@@ -183,7 +183,7 @@ fun SeasonScreen(
     var viaVd by remember { mutableStateOf(false) }
     var viaLocal by remember { mutableStateOf(false) }
     var chosenQuality by remember { mutableStateOf<String?>(null) }
-    // Tanlangan sifat faqat O'SHA qism uchun: yangi qism har doim eng past sifatda ochiladi (foydalanuvchi talabi).
+    // Tanlangan sifat faqat O'SHA qism uchun: yangi qism birinchi marta har doim eng yuqori sifatda (1080p) ochiladi (foydalanuvchi talabi).
     var chosenEp by remember { mutableStateOf(0L) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var fullscreen by rememberSaveable { mutableStateOf(false) }
@@ -255,13 +255,13 @@ fun SeasonScreen(
             val hist = AppServices.library.state.value.history.firstOrNull { it.animeId == season.animeId && it.seasonId == season.seasonId && it.epizodId == ep.id }
             val epKey = "${season.animeId}:${season.seasonId}:${ep.id}"
             val saved = AppServices.progress.episodeState(epKey)
-            // UZ: sifat: aniq tanlangan > shu qismda tanlangan > eslab qolingan (qurilmada yoki TARIXDA — boshqa qurilmada ham o'sha sifat) > BIRINCHI marta: eng past.
+            // UZ: sifat: aniq tanlangan > shu qismda tanlangan > eslab qolingan (qurilmada yoki TARIXDA — boshqa qurilmada ham o'sha sifat) > BIRINCHI marta: eng yuqori (1080p).
             //     Mahalliy va tarix sifatidan YANGIROG'I olinadi (boshqa qurilmada sifat o'zgargan bo'lsa).
-            // EN: quality: explicit > chosen for this episode > remembered (device or history: same on another device; the newer wins) > first time: the lowest.
+            // EN: quality: explicit > chosen for this episode > remembered (device or history: same on another device; the newer wins) > first time: the highest (1080p).
             val localQ = saved?.second?.takeIf { ep.urls.containsKey(it) }
             val histQ = hist?.quality?.takeIf { ep.urls.containsKey(it) }
             val remembered = if (histQ != null && (localQ == null || (hist?.updatedAt ?: 0L) > AppServices.progress.episodeStamp(epKey) + 2000)) histQ else localQ
-            var q = quality ?: chosenQuality?.takeIf { chosenEp == ep.id && ep.urls.containsKey(it) } ?: remembered ?: ep.lowestQuality
+            var q = quality ?: chosenQuality?.takeIf { chosenEp == ep.id && ep.urls.containsKey(it) } ?: remembered ?: ep.highestQuality
             // Internet yo'q: telefonda to'liq bor sifat tanlanadi (aks holda boshqa sifat ochilib, "bu qism yuklab olinmagan" chiqardi va saqlangan joy topilmasdi).
             if (!uz.arumediatv.com.data.Net.isOnline(ctx)) {
                 val have = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {

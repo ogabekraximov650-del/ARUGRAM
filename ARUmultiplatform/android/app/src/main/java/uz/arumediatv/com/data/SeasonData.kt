@@ -30,8 +30,8 @@ data class Episode(
 ) {
     val qualities: List<String> get() = QUALITIES.filter { !urls[it].isNullOrEmpty() }
 
-    /** Eng past sifat (`QUALITIES` yuqoridan pastga): qism BIRINCHI marta ochilganda shu tanlanadi. */
-    val lowestQuality: String? get() = qualities.lastOrNull()
+    /** Eng yuqori sifat (`QUALITIES` yuqoridan pastga): qism BIRINCHI marta ochilganda shu tanlanadi (foydalanuvchi talabi: 360p emas, 1080p). */
+    val highestQuality: String? get() = qualities.firstOrNull()
 
     fun urlFor(q: String?): String {
         if (q != null) urls[q]?.takeIf { it.isNotEmpty() }?.let { return it }

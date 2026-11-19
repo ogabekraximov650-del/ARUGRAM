@@ -193,7 +193,7 @@ class AruPlayer(context: Context) {
         try { reporter.execute { uz.arumediatv.com.core.RustCore.playerPosition(n, pos, dur, buf) } } catch (_: Exception) {}
     }
 
-    /** Yangi tizim: telefonda "ijro joyi .. +1 daqiqa" tayyor tursin (yetishmayotgan 1 MiB bo'laklar fonda bittadan olinadi). */
+    /** Yangi tizim: ijro joyidan oldinda 10 MiB dan kam qolsa keyingi 18 MiB oyna fonda olinadi ([uz.arumediatv.com.vd.AheadPlan]). */
     private fun ahead(force: Boolean = false) {
         val n = vdName ?: return
         val k = vdKey ?: return
