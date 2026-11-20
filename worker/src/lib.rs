@@ -12562,7 +12562,8 @@ async fn translate_batch(env: &Env, b: &Value) -> Result<Response> {
     let mut sys = format!(
         "Sen manga va manhwa tarjimonisan. Foydalanuvchi JSON ro'yxat beradi: har element pufakchadagi matn{}. \
          Har birini {dst} tiliga (o'zbekcha bo'lsa — lotin yozuvida) tabiiy, ma'noli va tushunarli qilib tarjima qil. \
-         Gaplar ketma-ket dialog ekanini hisobga ol. Tovush yasovchi so'zlar va undovlarni ham mos ravishda o'gir. \
+         Matn OCR orqali o'qilgan: harflar buzilgan bo'lishi mumkin (masalan HLNTER/KLNTER = HUNTER, 4 = A, 1 = I) — ma'noga qarab o'zing to'g'rila va tarjima qil; \
+         ismlarni (Sung Jin-Woo kabi) tarjima qilma. Gaplar ketma-ket dialog ekanini hisobga ol. Tovush yasovchi so'zlar va undovlarni ham mos ravishda o'gir. \
          FAQAT shu uzunlikdagi JSON ro'yxat qaytar (boshqa matnsiz): tarjimalar asl tartibda.",
         if src.is_empty() { String::new() } else { format!(" ({src} tilida)") });
     if let Some(g) = b["glossary"].as_object().filter(|g| !g.is_empty()) {

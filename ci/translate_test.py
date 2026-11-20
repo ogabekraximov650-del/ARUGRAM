@@ -34,12 +34,7 @@ for zp in sorted(Path("ci/testdata").glob("*.zip")):
     groups = []
     for i, p in enumerate(paths, 1):
         img = np.array(Image.open(p).convert("RGB"))
-        g = tr.group_dets(tr.ocr_image(reader, img), source)
-        try:
-            extra = tr.find_missed(img, g, reader)
-            g = sorted(g + extra, key=lambda x: (x["box"][1], x["box"][0]))
-        except Exception as e:  # noqa: BLE001
-            print("find_missed xato:", e)
+        g = tr.postprocess_groups(img, tr.group_dets(tr.ocr_image(reader, img), source), reader, source)
         groups.append(g)
         print(f"{ch} sahifa {i}: {len(g)} blok ({time.time() - t0:.0f}s)", flush=True)
     flat = [g["text"] for page in groups for g in page]

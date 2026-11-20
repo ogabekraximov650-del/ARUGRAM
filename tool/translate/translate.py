@@ -367,7 +367,7 @@ def group_dets(dets, source):
         letters = sum(1 for c in text if c.isalpha())
         if letters < 2 and len(text) < 4:  # "!", "..", yolg'iz belgilar — tarjima qilinmaydi
             continue
-        out.append({"box": union, "boxes": boxes, "text": text})
+        out.append({"box": union, "boxes": boxes, "text": text, "conf": sum(d["conf"] for d in g) / len(g)})
     out.sort(key=lambda g: (g["box"][1], g["box"][0]))
     return out
 
@@ -683,6 +683,78 @@ def layout_in_bubble(uz, filled, cx, cy, pad, max_size, min_size=9):
     return None
 
 
+JUNK_WORDS = (".com", "www.", "http", "discord", "patreon", "facebook", "twitter", "instagram", "scanlation", "scans", "translator", "proofreader",
+              "typesetter", "redrawer", "credit:", "join our", "read on", "@gmail", "support us", "recruit", "staff")
+OCR_FIX = {"tke": "the", "tbe": "the", "tne": "the", "whal": "what", "wnat": "what", "bul": "but", "yau": "you", "yov": "you"}
+_SPELL = None
+
+
+def keep_group(g) -> bool:
+    """Tarjima qilishga arziydigan matnmi: kamida 2 ta harf, belgilar ko'p emas, ishonch yetarli, reklama/kredit emas."""
+    t = (g.get("text") or "").strip()
+    if not t:
+        return True   # bo'sh (OCR o'qimagan) pufakcha — foydalanuvchi rasmga qarab yozadi
+    letters = sum(1 for c in t if c.isalpha())
+    if letters < 2:
+        return False
+    sym = sum(1 for c in t if not (c.isalnum() or c.isspace() or c in ".,!?'\"-:;()~…"))
+    if sym / max(1, len(t)) > 0.2:
+        return False
+    if g.get("conf", 1.0) < 0.30:
+        return False
+    low = t.lower()
+    return not any(w in low for w in JUNK_WORDS)
+
+
+def fix_ocr_words(text: str) -> str:
+    """Inglizcha OCR xatolarini lug'at bo'yicha tuzatadi (sun'iy intellektsiz: tahrir masofasi): masalan KLNTER -> HUNTER. Faqat 5+ harfli, defis/apostrofga
+    yopishmagan so'zlar (ismlar buzilmasin) va kichik "chalkash harf" ro'yxati (`OCR_FIX`) bo'yicha."""
+    global _SPELL
+    import re as _re
+    try:
+        if _SPELL is None:
+            from spellchecker import SpellChecker
+            _SPELL = SpellChecker(distance=2)
+    except Exception:  # noqa: BLE001
+        return text
+
+    def fix(m):
+        w = m.group(0)
+        pre, post = text[max(0, m.start() - 1):m.start()], text[m.end():m.end() + 1]
+        low = w.lower()
+        if low in OCR_FIX:
+            new = OCR_FIX[low]
+        elif len(w) >= 5 and pre not in ("-", "'") and post not in ("-", "'") and low not in _SPELL:
+            new = _SPELL.correction(low)
+            if not new or new == low:
+                return w
+        else:
+            return w
+        if w.isupper():
+            return new.upper()
+        if w[:1].isupper():
+            return new.capitalize()
+        return new
+    return _re.sub(r"[A-Za-z]+", fix, text)
+
+
+def postprocess_groups(img, groups, reader, source):
+    """OCR guruhlarini yakunlaydi: OCR topmagan pufakchalarni qo'shadi, keraksizlarini (reklama, kredit, shovqin) olib tashlaydi, inglizcha OCR xatolarini tuzatadi."""
+    try:
+        extra = find_missed(img, groups, reader)
+    except Exception as e:  # noqa: BLE001
+        log(f"  qo'shimcha pufakcha izlashda xato ({e})")
+        extra = []
+    out = []
+    for g in sorted(groups + extra, key=lambda x: (x["box"][1], x["box"][0])):
+        if not keep_group(g):
+            continue
+        if source == "english" and g.get("text"):
+            g = dict(g, text=fix_ocr_words(g["text"]))
+        out.append(g)
+    return out
+
+
 def find_bubble(img, box):
     """Matn qutisi (x0,y0,x1,y1) turgan BIR TEKIS FONLI pufakcha/ramkani topadi (oq pufakcha, rangli yoki qora narrator ramkasi):
     (to'ldirilgan niqob, matn izlari niqobi, (ox, oy) kesim boshlanishi, fon rangi RGB, fon to'qmi) yoki None.
@@ -838,6 +910,13 @@ def clean_and_draw(img, grp, uz):
     g_sub = cv2.cvtColor(np.ascontiguousarray(sub), cv2.COLOR_RGB2GRAY).astype(np.float32)
     halo = filled & (np.abs(g_sub - lum) > 14)
     er = er | cv2.dilate(halo.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1).astype(bool) & filled
+    # Pufakcha ichi bir tekis (oq) bo'lsa — matn atrofi to'liq fon rangiga bo'yaladi (JPEG shovqini/"ruh" izlari qolmasin).
+    rest = filled & ~er
+    if rest.any() and float(g_sub[rest].std()) < 9.0:
+        bxm = np.zeros(filled.shape, bool)
+        m0 = max(4, int(0.15 * max(x1 - x0, y1 - y0)))
+        bxm[max(0, y0 - oy - m0):y1 - oy + m0, max(0, x0 - ox - m0):x1 - ox + m0] = True
+        er = er | (bxm & filled)
     sub[er] = bgc
     ink = (255, 255, 255) if dark_bg else (0, 0, 0)
     # 2) Yozuv maydoni: pufakchaga sig'adigan markazlashgan to'g'ri to'rtburchak (egri pufakchada burchaklar chetda qolmasin).
@@ -940,8 +1019,10 @@ def render_all(paths, per_page_groups, uz_by_page, out_dir: Path):
     for i, p in enumerate(paths):
         img = np.array(Image.open(p).convert("RGB"))
         groups_i, uz_i = merge_same_bubble(img, per_page_groups[i], uz_by_page[i])
+        def _norm(t):
+            return "".join(c for c in (t or "").lower() if c.isalnum())
         for grp, uz in zip(groups_i, uz_i):
-            if uz and uz.strip():
+            if uz and uz.strip() and _norm(uz) != _norm(grp.get("text")):   # tarjima asl bilan bir xil (ovoz effekti, nom) — tegilmaydi
                 try:
                     clean_and_draw(img, grp, uz.strip())
                 except Exception as e:  # noqa: BLE001
@@ -1084,13 +1165,10 @@ async def process(app, r, runner):
             for i, p in enumerate(paths, 1):
                 img = np.array(Image.open(p).convert("RGB"))
                 grp_i = group_dets(ocr_image(reader, img), source)
-                try:
-                    extra = find_missed(img, grp_i, reader)
-                    if extra:
-                        live.note(f"{i}-sahifa: OCR topmagan {len(extra)} ta pufakcha qo'shildi")
-                        grp_i = sorted(grp_i + extra, key=lambda g: (g["box"][1], g["box"][0]))
-                except Exception as e:  # noqa: BLE001
-                    log(f"  {i}-sahifa: qo'shimcha pufakcha izlashda xato ({e})")
+                n0 = len(grp_i)
+                grp_i = postprocess_groups(img, grp_i, reader, source)
+                if len(grp_i) != n0:
+                    live.note(f"{i}-sahifa: {n0} blok -> {len(grp_i)} (qo'shimcha topildi / keraksizlari olib tashlandi)")
                 res.append(grp_i)
                 live.note(f"{i}-sahifa: {len(res[-1])} blok")
                 live.send(f"\U0001F50D Matn o'qilmoqda\n{bar(i * 100 / len(paths))} {i}/{len(paths)} "
