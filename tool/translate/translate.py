@@ -117,6 +117,8 @@ def tidy_uz(t: str) -> str:
     """Tarjima matnidagi shriftda yo'q (kvadrat bo'lib chiqadigan) belgilarni oddiylariga almashtiradi: defis variantlari, tipografik tirnoq/apostrof."""
     for a, b in _TIDY.items():
         t = t.replace(a, b)
+    for v in set(GLOSSARY.values()):   # lug'at so'zlari gap o'rtasida kichik harf bilan ("zindon", "topshiriq")
+        t = re.sub(r"(?<![.!?]\s)(?<!^)\b" + re.escape(v) + r"(?=\W|$)", lambda m: m.group(0).lower(), t)
     for i, c in enumerate(t):   # gap boshidagi birinchi harf katta bo'lsin ("[sizning kunlik..." -> "[Sizning kunlik...")
         if c.isalpha():
             t = t[:i] + c.upper() + t[i + 1:]
@@ -810,7 +812,7 @@ def _ocr_candidates(low):
 def fix_ocr_words(text: str) -> str:
     """Inglizcha OCR xatolarini lug'at bo'yicha tuzatadi (sun'iy intellektsiz): faqat OCR HARF CHALKASHLIGIGA o'xshash almashtirishlar (H/K, U/L, P/R...)
     bilan: KLNTER -> HUNTER, SOppy -> SORRY. So'z lug'atda bo'lmasa yoki juda kam uchrasa (soppy) va nomzod ancha ko'p uchrasa almashtiriladi.
-    4+ harfli, defis/apostrofga yopishmagan so'zlar (ismlar buzilmasin) va kichik `OCR_FIX` jadvali (TkE -> THE, SLNG -> SUNG)."""
+    5+ harfli, defis/apostrofga yopishmagan so'zlar (ismlar buzilmasin) va kichik `OCR_FIX` jadvali (TkE -> THE, SLNG -> SUNG)."""
     global _SPELL
     import re as _re
     try:
@@ -832,7 +834,7 @@ def fix_ocr_words(text: str) -> str:
         low = w.lower()
         if low in OCR_FIX:
             new = OCR_FIX[low]
-        elif len(w) >= 4 and pre not in ("-", "'") and post not in ("-", "'"):
+        elif len(w) >= 5 and pre not in ("-", "'") and post not in ("-", "'"):   # 4 harfli so'zlar (HAAH, HUFF) faqat `OCR_FIX` jadvali bilan
             f0 = freq(low) if low in _SPELL else 0.0
             best, new = -1.0, None
             for cand in _ocr_candidates(low):
