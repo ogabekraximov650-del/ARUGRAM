@@ -9,7 +9,7 @@ tr = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tr)
 
 only = (open("ci/TRANSLATE_TEST").read().split() if os.path.exists("ci/TRANSLATE_TEST") else [])
-only = [x for x in only if x and not x.startswith("#")]
+only = [x for x in only if (Path("ci/testdata") / f"{x}.zip").exists()]   # faqat mavjud bob nomlari (izoh/raqamlar tashlanadi)
 OUT = Path("translate-test-out")
 shutil.rmtree(OUT, ignore_errors=True)
 OUT.mkdir()
