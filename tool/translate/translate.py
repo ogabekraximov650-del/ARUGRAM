@@ -374,6 +374,7 @@ def group_dets(dets, source):
 # ── Chizish ──────────────────────────────────────────────────
 
 FONT_CANDIDATES = [
+    "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",  # tor — pufakchaga ko'proq sig'adi
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
@@ -419,28 +420,37 @@ def wrap_lines(text, font, width):
     return lines
 
 
+def _word_ok(text, font, width):
+    """Hech bir so'z qatordan keng emasmi (so'z o'rtasidan uzilmasin)."""
+    return all(font.getlength(w) <= width for w in text.split())
+
+
 def fit_text(text, width, height, max_size):
-    """Qutiga sig'adigan eng katta shrift o'lchami: (font, qatorlar, qator balandligi)."""
+    """Qutiga sig'adigan eng katta shrift o'lchami: (font, qatorlar, qator balandligi).
+    AVVAL so'zlarni UZMAY sig'dirishga harakat qilinadi (kichikroq shriftda); bo'lmasa — oxirgi chora sifatida uzun so'z belgi bo'yicha bo'linadi."""
     width, height = max(width, 12), max(height, 12)
-    lo, hi, best = 8, max(8, min(max_size, int(height))), None
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        f = _font(mid)
-        lines = wrap_lines(text, f, width)
-        lh = int(mid * 1.12)
-        if lines and len(lines) * lh <= height:
-            best = (f, lines, lh)
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    if best is None:
-        f = _font(8)
-        return f, wrap_lines(text, f, width), 9
-    return best
+    MIN = 9
+    for allow_break in (False, True):
+        lo, hi, best = MIN, max(MIN, min(max_size, int(height))), None
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            f = _font(mid)
+            lines = wrap_lines(text, f, width)
+            lh = int(mid * 1.1)
+            fits = bool(lines) and len(lines) * lh <= height and (allow_break or _word_ok(text, f, width))
+            if fits:
+                best = (f, lines, lh)
+                lo = mid + 1
+            else:
+                hi = mid - 1
+        if best is not None:
+            return best
+    f = _font(MIN)
+    return f, wrap_lines(text, f, width), MIN + 1
 
 
-def clean_and_draw(img, grp, uz):
-    """RGB (numpy) rasmda bitta pufakchaning eski matnini o'chirib, o'zbekcha matnni yozadi."""
+def _clean_and_draw_rect(img, grp, uz):
+    """(Zaxira) pufakcha topilmasa: OCR qutisi atrofini tozalab, o'zbekcha matnni yozadi."""
     import cv2
     import numpy as np
     from PIL import Image, ImageDraw
@@ -477,7 +487,8 @@ def clean_and_draw(img, grp, uz):
             strokes[by0:by1, bx0:bx1] = th
         strokes = cv2.dilate(strokes, np.ones((5, 5), np.uint8))
         img[:] = cv2.inpaint(img, strokes, 3, cv2.INPAINT_TELEA)
-        fg, stroke = (255, 255, 255), (0, 0, 0)
+        # Yozuv rangi fonga qarab: och fonda qora (oq chiziq bilan), to'q fonda oq (qora chiziq bilan).
+        fg, stroke = ((0, 0, 0), (255, 255, 255)) if bg.mean() > 140 else ((255, 255, 255), (0, 0, 0))
     # Yozuv maydoni: matn qutisidan biroz kengroq (o'zbekcha matn uzunroq bo'ladi), rasm ichida.
     bw, bh = x1 - x0, y1 - y0
     ex, ey = int(bw * 0.12) + pad, int(bh * 0.08) + pad
@@ -494,6 +505,99 @@ def clean_and_draw(img, grp, uz):
             d.text((x, y), ln, font=font, fill=fg, stroke_width=2, stroke_fill=stroke)
         else:
             d.text((x, y), ln, font=font, fill=fg)
+        y += lh
+    img[:] = np.asarray(pil)
+
+
+def find_bubble(img, box):
+    """Matn qutisi (x0,y0,x1,y1) turgan OQ pufakchani topadi: (to'ldirilgan niqob, matn izlari niqobi, (ox, oy) kesim boshlanishi) yoki None.
+    Pufakcha = matn qutisini o'z ichiga olgan eng katta OCH (>215) bog'langan soha; chiqish yo'lagi yo'q (kesim chetiga tegmaydi),
+    matn harflari esa shu sohadagi "teshiklar" — ularni topib oq bilan to'ldirsak, pufakcha chizig'iga tegmasdan eski matn o'chadi."""
+    import cv2
+    import numpy as np
+    H, W = img.shape[:2]
+    x0, y0, x1, y1 = box
+    m = int(3 * max(x1 - x0, y1 - y0) + 60)
+    cx0, cy0, cx1, cy1 = max(0, x0 - m), max(0, y0 - m), min(W, x1 + m), min(H, y1 + m)
+    crop = img[cy0:cy1, cx0:cx1]
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    bright = (gray > 215).astype(np.uint8)
+    n, lab = cv2.connectedComponents(bright, connectivity=4)
+    roi = lab[y0 - cy0:y1 - cy0, x0 - cx0:x1 - cx0]
+    vals = roi[roi > 0]
+    if vals.size < 30:
+        return None
+    lbl = int(np.bincount(vals).argmax())
+    comp = lab == lbl
+    ys, xs = np.where(comp)
+    # Sahifa foni yoki chiqib ketgan soha — pufakcha emas.
+    if xs.min() == 0 or ys.min() == 0 or xs.max() == comp.shape[1] - 1 or ys.max() == comp.shape[0] - 1:
+        return None
+    bw, bh = xs.max() - xs.min(), ys.max() - ys.min()
+    if bw * bh > 40 * max(1, (x1 - x0) * (y1 - y0)):
+        return None
+    # Teshiklarni to'ldirish: tashqaridan (kesim burchagidan) yetib bo'lmaydigan hamma narsa pufakcha.
+    inv = (~comp).astype(np.uint8)
+    ff = inv.copy()
+    mask = np.zeros((inv.shape[0] + 2, inv.shape[1] + 2), np.uint8)
+    cv2.floodFill(ff, mask, (0, 0), 2)
+    filled = ff != 2
+    holes = filled & ~comp
+    # Matn qutisining katta qismi pufakcha ichida bo'lishi shart.
+    inside = filled[y0 - cy0:y1 - cy0, x0 - cx0:x1 - cx0].mean()
+    if inside < 0.85:
+        return None
+    return filled, holes, (cx0, cy0)
+
+
+def clean_and_draw(img, grp, uz):
+    """RGB (numpy) rasmda bitta pufakchaning eski matnini o'chirib, o'zbekcha matnni PUFAKCHA ICHIGA yozadi (qora, markazda).
+    Pufakcha topilmasa (shovqin/rasm ustidagi yozuv) — eski usul."""
+    import cv2
+    import numpy as np
+    from PIL import Image, ImageDraw
+    x0, y0, x1, y1 = grp["box"]
+    fs = sorted(max(6, min(b[2] - b[0], b[3] - b[1])) for b in grp["boxes"])[len(grp["boxes"]) // 2]
+    found = None
+    try:
+        found = find_bubble(img, (x0, y0, x1, y1))
+    except Exception as e:  # noqa: BLE001
+        log(f"  pufakcha izlashda xato ({e}) — oddiy usul")
+    if found is None:
+        return _clean_and_draw_rect(img, grp, uz)
+    filled, holes, (ox, oy) = found
+    # 1) Eski matn: teshiklar (kengaytirilgan) pufakcha ichida oqqa bo'yaladi.
+    er = cv2.dilate(holes.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool) & filled
+    sub = img[oy:oy + er.shape[0], ox:ox + er.shape[1]]
+    sub[er] = 255
+    # 2) Yozuv maydoni: pufakchaga sig'adigan markazlashgan to'g'ri to'rtburchak (egri pufakchada burchaklar chetda qolmasin).
+    ys, xs = np.where(filled)
+    mx0, my0, mx1, my1 = xs.min(), ys.min(), xs.max(), ys.max()
+    cx, cy = int(xs.mean()), int(ys.mean())
+    bw, bh = mx1 - mx0, my1 - my0
+    rect = None
+    for sc in [x / 100 for x in range(96, 49, -3)]:
+        hw, hh = int(bw * sc / 2), int(bh * sc / 2)
+        rx0, ry0, rx1, ry1 = max(0, cx - hw), max(0, cy - hh), min(filled.shape[1], cx + hw), min(filled.shape[0], cy + hh)
+        if rx1 - rx0 < 10 or ry1 - ry0 < 10:
+            break
+        if filled[ry0:ry1, rx0:rx1].mean() > 0.985:
+            rect = (rx0, ry0, rx1, ry1)
+            break
+    if rect is None:
+        rect = (cx - bw // 4, cy - bh // 4, cx + bw // 4, cy + bh // 4)
+    rx0, ry0, rx1, ry1 = rect
+    pad = max(3, int(min(rx1 - rx0, ry1 - ry0) * 0.04))
+    tw, th = (rx1 - rx0) - 2 * pad, (ry1 - ry0) - 2 * pad
+    font, lines, lh = fit_text(uz, tw, th, max_size=int(fs * 1.35) + 4)
+    pil = Image.fromarray(img)
+    d = ImageDraw.Draw(pil)
+    total = len(lines) * lh
+    y = oy + ry0 + pad + max(0, (th - total) // 2)
+    for ln in lines:
+        w = font.getlength(ln)
+        x = ox + rx0 + pad + max(0, (tw - w) / 2)
+        d.text((x, y), ln, font=font, fill=(0, 0, 0))
         y += lh
     img[:] = np.asarray(pil)
 
