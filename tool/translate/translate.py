@@ -18,6 +18,7 @@ Jarayon botdagi bitta xabarda jonli ko'rinadi (`Live`, `/api/tr/progress`).
 
 import asyncio
 import collections
+import functools
 import io
 import json
 import os
@@ -374,6 +375,8 @@ def group_dets(dets, source):
 # ── Chizish ──────────────────────────────────────────────────
 
 FONT_CANDIDATES = [
+    "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf",         # komiks uslubi (apt: fonts-comic-neue, OFL)
+    "/usr/share/fonts/truetype/comic-neue/ComicNeue-Bold.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",  # tor — pufakchaga ko'proq sig'adi
     "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
@@ -389,6 +392,7 @@ def font_path():
     return None
 
 
+@functools.lru_cache(maxsize=256)
 def _font(size):
     from PIL import ImageFont
     p = font_path()
@@ -509,6 +513,105 @@ def _clean_and_draw_rect(img, grp, uz):
     img[:] = np.asarray(pil)
 
 
+def _balanced_lines(words, font, avails):
+    """So'zlarni `len(avails)` qatorga shunday bo'ladiki, har qator o'z kengligiga (avails[i]) sig'sin va qatorlar bir tekis to'lsin
+    (yig'indi (bo'sh joy)^2 eng kam). Imkoni bo'lmasa None."""
+    n, m = len(avails), len(words)
+    if m == 0 or n == 0 or m < n:
+        return None
+    INF = float("inf")
+    sp = font.getlength(" ")
+    wl = [font.getlength(w) for w in words]
+    pre = [0.0]
+    for w in wl:
+        pre.append(pre[-1] + w)
+
+    def seg(a, b):  # words[a:b] kengligi
+        return pre[b] - pre[a] + sp * (b - a - 1)
+    dp = [[INF] * (m + 1) for _ in range(n + 1)]
+    bk = [[0] * (m + 1) for _ in range(n + 1)]
+    dp[0][0] = 0.0
+    for i in range(1, n + 1):
+        for j in range(i, m + 1):
+            for a in range(i - 1, j):
+                if dp[i - 1][a] == INF:
+                    continue
+                w = seg(a, j)
+                if w > avails[i - 1]:
+                    continue
+                c = dp[i - 1][a] + (avails[i - 1] - w) ** 2
+                if c < dp[i][j]:
+                    dp[i][j], bk[i][j] = c, a
+    if dp[n][m] == INF:
+        return None
+    out, j = [], m
+    for i in range(n, 0, -1):
+        a = bk[i][j]
+        out.append(" ".join(words[a:j]))
+        j = a
+    return out[::-1]
+
+
+def layout_in_bubble(uz, filled, cx, cy, pad, max_size, min_size=9):
+    """Matnni pufakcha SHAKLIGA moslab joylaydi: har qator o'z balandligidagi haqiqiy bo'sh kenglikda (chiziqdan pad masofada), markazi shu
+    qatordagi pufakcha markazida. Qaytadi: (font, [(qator, markaz_x, y)]) yoki None. So'zlar hech qachon uzilmaydi."""
+    import numpy as np
+    words = uz.split()
+    if not words:
+        return None
+    ys = np.where(filled.any(axis=1))[0]
+    top_all, bot_all = int(ys.min()) + pad, int(ys.max()) - pad
+    Hh, Ww = filled.shape
+    L = np.zeros(Hh, int)
+    R = np.zeros(Hh, int)
+    for y in range(Hh):
+        row = filled[y]
+        if not row[cx]:
+            continue
+        l = cx
+        while l > 0 and row[l - 1]:
+            l -= 1
+        r = cx
+        while r < Ww - 1 and row[r + 1]:
+            r += 1
+        L[y], R[y] = l, r
+
+    def span(y0, y1):
+        y0, y1 = max(0, y0), min(Hh - 1, y1)
+        if y1 < y0:
+            return 0, 0
+        ls, rs = L[y0:y1 + 1], R[y0:y1 + 1]
+        if (rs <= ls).any():
+            return 0, 0
+        return int(ls.max()) + pad, int(rs.min()) - pad
+
+    for size in range(max(min_size, min(max_size, 90)), min_size - 1, -1):
+        f = _font(size)
+        lh = int(size * 1.12)
+        if any(f.getlength(w) > (R[cy] - L[cy]) - 2 * pad for w in words):
+            continue
+        # Boshlang'ich taxmin: qatorlar soni to'rtburchak kengligi bo'yicha, keyin pufakcha shakli bilan aniqlanadi.
+        n = max(1, int(sum(f.getlength(w) + f.getlength(" ") for w in words) // max(1, (R[cy] - L[cy]) - 2 * pad)) + 1)
+        for _ in range(6):
+            if n * lh > bot_all - top_all:
+                break
+            top = max(top_all, min(cy - n * lh // 2, bot_all - n * lh))
+            spans = [span(top + i * lh, top + (i + 1) * lh) for i in range(n)]
+            avails = [r - l for l, r in spans]
+            if any(a <= 0 for a in avails):
+                n += 1
+                continue
+            lines = _balanced_lines(words, f, avails)
+            if lines is not None:
+                placed = []
+                for i, ln in enumerate(lines):
+                    l, r = spans[i]
+                    placed.append((ln, (l + r) / 2.0, top + i * lh))
+                return f, placed, lh
+            n += 1
+    return None
+
+
 def find_bubble(img, box):
     """Matn qutisi (x0,y0,x1,y1) turgan OQ pufakchani topadi: (to'ldirilgan niqob, matn izlari niqobi, (ox, oy) kesim boshlanishi) yoki None.
     Pufakcha = matn qutisini o'z ichiga olgan eng katta OCH (>215) bog'langan soha; chiqish yo'lagi yo'q (kesim chetiga tegmaydi),
@@ -588,17 +691,28 @@ def clean_and_draw(img, grp, uz):
         rect = (cx - bw // 4, cy - bh // 4, cx + bw // 4, cy + bh // 4)
     rx0, ry0, rx1, ry1 = rect
     pad = max(4, int(min(rx1 - rx0, ry1 - ry0) * 0.09))  # chiziqqa yopishmasin
-    tw, th = (rx1 - rx0) - 2 * pad, (ry1 - ry0) - 2 * pad
-    font, lines, lh = fit_text(uz, tw, th, max_size=int(fs * 1.35) + 4)
+    max_font = int(fs * 1.35) + 4
     pil = Image.fromarray(img)
     d = ImageDraw.Draw(pil)
-    total = len(lines) * lh
-    y = oy + ry0 + pad + max(0, (th - total) // 2)
-    for ln in lines:
-        w = font.getlength(ln)
-        x = ox + rx0 + pad + max(0, (tw - w) / 2)
-        d.text((x, y), ln, font=font, fill=(0, 0, 0))
-        y += lh
+    lay = None
+    try:
+        lay = layout_in_bubble(uz, filled, cx, cy, max(3, pad // 2), max_font)
+    except Exception as e:  # noqa: BLE001
+        log(f"  pufakcha shakliga joylab bo'lmadi ({e}) — to'rtburchak")
+    if lay is not None:
+        font, placed, lh = lay
+        for ln, xc, y in placed:
+            d.text((ox + xc - font.getlength(ln) / 2, oy + y), ln, font=font, fill=(0, 0, 0))
+    else:
+        tw, th = (rx1 - rx0) - 2 * pad, (ry1 - ry0) - 2 * pad
+        font, lines, lh = fit_text(uz, tw, th, max_size=max_font)
+        total = len(lines) * lh
+        y = oy + ry0 + pad + max(0, (th - total) // 2)
+        for ln in lines:
+            w = font.getlength(ln)
+            x = ox + rx0 + pad + max(0, (tw - w) / 2)
+            d.text((x, y), ln, font=font, fill=(0, 0, 0))
+            y += lh
     img[:] = np.asarray(pil)
 
 

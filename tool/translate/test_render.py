@@ -8,10 +8,11 @@ from PIL import Image, ImageDraw, ImageFont
 
 src = Path(__file__).with_name("translate.py").read_text()
 tree = ast.parse(src)
-names = {"_font", "font_path", "wrap_lines", "_word_ok", "fit_text", "find_bubble", "_clean_and_draw_rect", "clean_and_draw"}
+names = {"_balanced_lines", "layout_in_bubble", "_font", "font_path", "wrap_lines", "_word_ok", "fit_text", "find_bubble", "_clean_and_draw_rect", "clean_and_draw"}
 body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in names)
         or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "FONT_CANDIDATES" for t in n.targets))]
-ns = {"Path": Path, "log": print, "cv2": cv2, "np": np}
+import functools
+ns = {"Path": Path, "log": print, "cv2": cv2, "np": np, "functools": functools}
 exec(compile(ast.Module(body, []), "translate.py", "exec"), ns)
 
 # 1) So'zlar uzilmasligi.
@@ -20,6 +21,20 @@ f, lines, lh = ns["fit_text"](uz, 140, 160, 40)
 words = uz.split()
 assert " ".join(lines).split() == words, lines  # hech bir so'z bo'linmagan
 print("fit_text:", f.size, lines)
+
+# 1b) Pufakcha shakliga moslab joylash: har qator o'z balandligidagi bo'sh joy ichida, so'zlar butun.
+fy, fx = np.mgrid[0:260, 0:400]
+mask = (((fx - 200) / 190.0) ** 2 + ((fy - 130) / 120.0) ** 2) < 1.0
+lay = ns["layout_in_bubble"](uz, mask, 200, 130, 8, 34)
+assert lay is not None, "layout topilmadi"
+font_, placed, lh_ = lay
+assert " ".join(p_[0] for p_ in placed).split() == words, placed
+for ln, xc, y in placed:
+    w = font_.getlength(ln)
+    for yy_ in (y, y + lh_):
+        row = np.where(mask[min(yy_, 259)])[0]
+        assert row.size and row.min() <= xc - w / 2 and xc + w / 2 <= row.max(), (ln, xc, w, yy_)
+print("layout:", font_.size, [(p_[0], int(font_.getlength(p_[0]))) for p_ in placed])
 
 # 2) Sintetik sahifa: kulrang fon, oq ellips pufakcha, qora chiziq, ichida inglizcha matn.
 W, H = 600, 420
