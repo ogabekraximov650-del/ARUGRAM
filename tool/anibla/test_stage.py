@@ -42,7 +42,29 @@ def main():
     joined.write_bytes(sealed)
     dec = Cipher(algorithms.AES(key), modes.CTR(b"\0" * 16)).encryptor()  # run.py ctr_file shu shifrlovchi
     assert dec.update(joined.read_bytes()) + dec.finalize() == data
+    playable()
     print("test_stage: OK")
+
+
+def playable():
+    """Ochiladigan qismlar: kichik sinov video -> split_playable -> concat_parts; davomiylik saqlanadi, har qism o'zi ochiladi (ffprobe)."""
+    import subprocess
+    d = Path(tempfile.mkdtemp())
+    src = d / "src.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=25", "-f", "lavfi", "-i", "sine=frequency=440",
+                    "-t", "40", "-g", "25", "-c:v", "libx264", "-b:v", "400k", "-c:a", "aac", str(src)], check=True)
+    size = src.stat().st_size
+
+    def dur(p):
+        return float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(p)]).decode().strip())
+    total = dur(src)
+    parts = stage.split_playable(src, d / "segs", total, size, target=size // 4, limit=size)
+    assert len(parts) >= 3, len(parts)
+    assert all(dur(p) > 1 for p in parts)  # har qism o'zi ochiladigan video
+    out = d / "joined.mp4"
+    stage.concat_parts(parts, out)
+    assert abs(dur(out) - total) < 2.0, (dur(out), total)
+    print("playable: OK", len(parts), "qism")
 
 
 if __name__ == "__main__":

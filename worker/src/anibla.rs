@@ -2226,7 +2226,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 // 2 GB dan katta video: qismlar (`<asl>.p0..pN`) va umumiy kalit (butun fayl bo'yicha AES-CTR) yozib qo'yiladi; `encbot_register` asl nomni bog'laydi.
                 let parts: Vec<i64> = b["parts"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).filter(|m| *m > 0).collect()).unwrap_or_default();
                 let key = b["key"].as_str().unwrap_or("").trim().to_string();
-                if parts.len() > 1 && valid_file_key(&key) {
+                // Kalit bo'sh — qismlar Telegram'da ochiladigan oddiy mp4 (kodlovchi ffmpeg bilan ulaydi); kalit bor — eski, shifrlangan qismlar.
+                if parts.len() > 1 && (key.is_empty() || valid_file_key(&key)) {
                     for (i, m) in parts.iter().enumerate() {
                         let _ = turso_exec(env,
                             "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')

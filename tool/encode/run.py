@@ -1183,8 +1183,31 @@ async def process(app: Client, channel: int, job: dict):
             if len(parts) > 1:
                 # 2 GB dan katta asl video Telegram'ga qismlab qo'yilgan (`tool/anibla/download.py`): qismlar tartib bilan olinib ulanadi,
                 # shifri esa quyida (butun fayl bo'yicha bitta kalit) ochiladi.
-                got = str(enc)
-                with open(enc, "wb") as fo:
+                plain = not (job.get("origin_key") or "").strip()
+                got = str(src if plain else enc)
+                if plain:
+                    # Qismlar Telegram'da ochiladigan oddiy mp4 (shifrsiz) — ffmpeg `concat` (-c copy) bilan ulanadi.
+                    paths = []
+                    for i, pm in enumerate(parts):
+                        pmsg = await app.get_messages(channel, pm)
+                        if not pmsg or pmsg.empty or not (pmsg.document or pmsg.video):
+                            raise Fatal(f"asl video qismi {i + 1}/{len(parts)} kanalda topilmadi")
+                        log(f"  asl video qismi {i + 1}/{len(parts)} yuklab olinmoqda...")
+                        pgot = await app.download_media(pmsg, file_name=str(WORK / f"opart{i}.mp4"),
+                                                        progress=transfer_progress(f"yuklab olinmoqda ({i + 1}/{len(parts)})"))
+                        if not pgot or Path(pgot).stat().st_size == 0:
+                            raise RuntimeError(f"asl video qismi {i + 1} yuklab olinmadi")
+                        paths.append(Path(pgot))
+                    lst = WORK / "origin.list"
+                    lst.write_text("".join("file '" + str(p_.resolve()).replace("'", "'\\''") + "'\n" for p_ in paths))
+                    r_ = await asyncio.to_thread(subprocess.run, ["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", str(lst), "-c", "copy", str(src)],
+                                                 capture_output=True, text=True)
+                    for p_ in paths:
+                        p_.unlink(missing_ok=True)
+                    if r_.returncode != 0 or not src.exists() or src.stat().st_size == 0:
+                        raise RuntimeError("asl video qismlari ulanmadi: " + (r_.stderr or "")[-200:])
+                else:
+                  with open(enc, "wb") as fo:
                     for i, pm in enumerate(parts):
                         pmsg = await app.get_messages(channel, pm)
                         if not pmsg or pmsg.empty or not (pmsg.document or pmsg.video):

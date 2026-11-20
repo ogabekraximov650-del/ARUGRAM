@@ -7672,3 +7672,7 @@ Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'l
 ## Reklama olib tashlandi (Kotlin ilova)
 
 Foydalanuvchi talabi: ilovadan reklamaga tegishli hamma narsa olib tashlandi — AdMob kutubxonasi (`play-services-ads`), `RewardedAds.kt`, Profildagi "reklama ko'r" tugmasi, "Obuna kerak" ekranidagi reklama tugmasi, to'lovlar tarixidagi "Reklama orqali" yozuvi, manifest/proguard/gradle/CI (`ADMOB_*`) sozlamalari. Ko'rish huquqi faqat obuna bilan. Server tomonidagi `/api/billing/ad-reward` o'zgarmadi (ilova endi chaqirmaydi).
+
+## 2 GB dan katta asl video — Telegram'da ochiladigan qismlar
+
+Foydalanuvchi talabi. Avval katta Anibla videosi BAYT bo'yicha ~1,9 GB li shifrlangan hujjatlarga (`.p0/.p1`) bo'linardi — Telegram'da ochilmasdi. Endi `tool/anibla/stage.py::split_playable` kalit-kadr chegaralarida (`-c copy`, qayta kodlashsiz) ~1,7 GB li mp4 qismlarga bo'ladi; `download.py::upload_parts` ularni `send_video(supports_streaming)` bilan yuklaydi (shifrsiz — ≤2 GB asl videolar ham shunday). Worker (`anibla.rs`, `done`) bo'sh kalitli qismlarni ham ro'yxatga oladi; kodlovchi (`tool/encode/run.py`) kalit bo'sh bo'lsa qismlarni ffmpeg `concat` bilan ulaydi, kalit bor bo'lsa eski (shifrlangan) usul. Sinov: `.github/workflows/anibla-stage-test.yml`.

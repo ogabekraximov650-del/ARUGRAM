@@ -1,0 +1,22 @@
+name: Anibla qismlash sinovi
+
+on:
+  push:
+    branches: [main]
+    paths: ['tool/anibla/**', 'tool/encode/run.py', '.github/workflows/anibla-stage-test.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && pip install -q cryptography
+      - run: python3 tool/anibla/test_stage.py
+      - run: python3 -m py_compile tool/anibla/download.py tool/encode/run.py

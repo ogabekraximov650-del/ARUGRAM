@@ -605,44 +605,54 @@ async def upload_doc(app, job, path, caption, name, live, label):
     return m.id
 
 
-async def upload_parts(app, job, out, size, live):
-    """2 GB dan katta video: BAYT bo'yicha ~1,9 GB li qismlarga bo'linadi, butun fayl bitta kalit bilan shifrlanadi, har qism ketma-ket
-    kanalga yuklanadi (yuklangach diskdan o'chadi). Qaytadi: (xabar raqamlari, kalit hex)."""
-    import secrets
-    key = secrets.token_bytes(16)
-    plan = stage.plan_parts(size)
+async def upload_video_part(app, job, path, name, caption, live, label):
+    """Bo'lakni Telegram'da OCHILADIGAN video (`supports_streaming`) qilib yuklaydi; qaytadi: xabar raqami."""
+    extra = {}
+    for k, v in (("duration", ffprobe(path, "duration")), ("width", ffprobe(path, "width", "v:0")), ("height", ffprobe(path, "height", "v:0"))):
+        if v:
+            extra[k] = v
+    th = Path(str(path) + ".jpg")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", "3", "-i", str(path), "-frames:v", "1", "-vf", "scale='min(320,iw)':-2", "-q:v", "5", str(th)])
+    if th.exists() and 0 < th.stat().st_size < 200_000:
+        extra["thumb"] = str(th)
+    orig = app.save_file
+
+    async def patched(p, progress=None, progress_args=(), file_id=None, file_part=0):
+        return await fast_save_file(app, orig, p, progress, progress_args, file_id, file_part)
+
+    def send():
+        return app.send_video(job.channel, str(path), caption=caption[:1024], file_name=name, supports_streaming=True,
+                              disable_notification=True, progress=live.transfer(label), **extra)
+
+    app.save_file = patched
+    try:
+        m = await send()
+    except Exception as e:  # noqa: BLE001
+        log(f"tez yuklash ishlamadi ({e}) — oddiy usulda qayta urinilmoqda")
+        app.save_file = orig
+        m = await send()
+    finally:
+        app.save_file = orig
+        th.unlink(missing_ok=True)
+    if not m:
+        raise RuntimeError("Telegram'ga yuklanmadi")
+    return m.id
+
+
+async def upload_parts(app, job, out, size, live, duration):
+    """2 GB dan katta video: kalit-kadr chegaralarida (qayta kodlashsiz) ~1,7 GB li OCHILADIGAN mp4 qismlarga bo'linadi (Telegram'da to'g'ridan-to'g'ri
+    ko'riladi, shifrsiz), har qism ketma-ket kanalga video qilib yuklanadi (yuklangach diskdan o'chadi). Qaytadi: xabar raqamlari."""
+    parts = await asyncio.to_thread(stage.split_playable, out, WORK / "segs", float(duration or 0), size)
     ids = []
-    for i, (off, n) in enumerate(plan):
-        part = WORK / f"part{i}.bin"
-        await asyncio.to_thread(stage.encrypt_range, out, key, off, n, part)
-        log(f"  qism {i + 1}/{len(plan)}: {n / 1048576:.0f} MB Telegram'ga yuklanmoqda")
+    for i, part in enumerate(parts):
+        log(f"  qism {i + 1}/{len(parts)}: {part.stat().st_size / 1048576:.0f} MB Telegram'ga yuklanmoqda")
         try:
-            mid = await upload_doc(app, job, part, f"ARUSTAGE {job.file_name} {i + 1}/{len(plan)}", f"{job.file_name}.p{i}",
-                                   live, f"⬆️ Telegram'ga yuklanmoqda (qism {i + 1}/{len(plan)})")
+            mid = await upload_video_part(app, job, part, f"{job.file_name}_p{i + 1}.mp4", f"ARUSTAGE {job.file_name} {i + 1}/{len(parts)}",
+                                          live, f"⬆️ Telegram'ga yuklanmoqda (qism {i + 1}/{len(parts)})")
         finally:
             part.unlink(missing_ok=True)
         ids.append(mid)
-    return ids, key.hex()
-
-
-def session_api_id():
-    """Sessiya faylidagi api_id (sessiya qaysi ilova bilan yaratilgan bo'lsa)."""
-    try:
-        import sqlite3
-        c = sqlite3.connect(f"file:{SESSION}.session?mode=ro", uri=True)
-        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
-    except Exception:
-        return 0
-
-
-def claim():
-    """Navbatdagi video (yo'q bo'lsa — None)."""
-    try:
-        r = api("claim", {"runner": RUNNER})
-    except Exception as e:  # noqa: BLE001
-        log("claim:", e)
-        return None
-    return Job(r) if r.get("job") else None
+    return ids
 
 
 async def process(app, job):
@@ -668,14 +678,14 @@ async def process(app, job):
         if size > MAX_BYTES:
             if not job.target:
                 raise Fatal(f"fayl {size / 1048576:.0f} MB — Telegram chegarasi 2 GB. Pastroq sifatni tanlang.")
-            # Ilova uchun: katta video qismlab shifrlanib Telegram'ga qo'yiladi; qismlar kodlovchilarga `origin_parts` bo'lib beriladi.
-            live.send(f"✂️ {size / 1048576:.0f} MB — 2 GB dan katta: qismlab Telegram'ga yuklanadi", force=True)
+            # Ilova uchun: katta video Telegram'da ochiladigan mp4 qismlarga bo'linib qo'yiladi; qismlar kodlovchilarga `origin_parts` bo'lib beriladi.
+            live.send(f"✂️ {size / 1048576:.0f} MB — 2 GB dan katta: ochiladigan qismlarga bo'lib Telegram'ga yuklanadi", force=True)
             t_up = time.time()
-            ids, key = await upload_parts(app, job, out, size, live)
+            ids = await upload_parts(app, job, out, size, live, dur)
             live.done(f"Telegram'ga {len(ids)} qismda yuklandi · {hms(time.time() - t_up)}")
             live.close()
             try:
-                api("done", {**job.ident(), "ok": True, "channel_msg": ids[0], "parts": ids, "key": key,
+                api("done", {**job.ident(), "ok": True, "channel_msg": ids[0], "parts": ids, "key": "",
                              "size": size, "height": int(h or 0), "text": live.text(f"✅ Tayyor ({size / 1048576:.0f} MB, {len(ids)} qism)")})
             except Lost:
                 for mid in ids:
