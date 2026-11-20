@@ -2070,7 +2070,30 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 }
             }
         }
-        return ok(json!({"msg": kick(env).await, "runs": runs, "latest_jobs": steps}));
+        // Oxirgi run'ning yiqilgan qadamidagi log oxiri (GitHub maskalagan; sirlar ko'rinmaydi).
+        let mut log_tail = String::new();
+        if let Some(jid) = runs.first().and_then(|r| r["id"].as_i64()) {
+            if let Ok((200, j)) = gh_api(env, Method::Get, &format!("/repos/{repo}/actions/runs/{jid}/jobs"), None).await {
+                if let Some(job_id) = j["jobs"][0]["id"].as_i64() {
+                    let token = tg_secret(env, "GH_ACTIONS_TOKEN");
+                    let h = Headers::new();
+                    let _ = h.set("Authorization", &format!("Bearer {token}"));
+                    let _ = h.set("Accept", "application/vnd.github+json");
+                    let _ = h.set("User-Agent", "arumediatv-worker");
+                    let mut init = RequestInit::new();
+                    init.with_method(Method::Get).with_headers(h);
+                    if let Ok(rq) = Request::new_with_init(&format!("https://api.github.com/repos/{repo}/actions/jobs/{job_id}/logs"), &init) {
+                        if let Ok(mut rs) = Fetch::Request(rq).send().await {
+                            if let Ok(t) = rs.text().await {
+                                let cs: Vec<char> = t.chars().collect();
+                                log_tail = cs[cs.len().saturating_sub(3500)..].iter().collect();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return ok(json!({"msg": kick(env).await, "runs": runs, "latest_jobs": steps, "log_tail": log_tail}));
     }
 
     // TASHXIS: webhook holati, sayt so'rovlari va 90 tugmali inline xabarni adminga sinab yuborish.
