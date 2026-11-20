@@ -1,0 +1,32 @@
+name: Anibla yuklashni ishga tushirish (navbat to'xtab qolsa)
+
+
+on:
+  push:
+    branches: [main]
+    paths: ['ci/ANIBLA_KICK']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anibla-kick
+  cancel-in-progress: false
+
+jobs:
+  wipe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: secret
+    env:
+      ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v7
+      # JONLI baza: worker `tool/migrate/new_turso.enc` dagi yangi bazani ishlatadi (deploy uni GitHub Secret'dan USTUN qo'yadi). Birinchi urinish
+      # xato bilan ESKI (secret) bazani tozalagan edi — endi worker ishlatadigan baza tanlanadi. URL/token logda ko'rinmaydi.
+      - name: Yuklashni ishga tushirish
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          curl -fsS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/anibla/kick"; echo

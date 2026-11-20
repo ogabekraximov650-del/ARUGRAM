@@ -2050,6 +2050,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     let b: Value = req.json().await.unwrap_or(json!({}));
     let now = now_ms();
 
+    // Navbatdagi yuklashni QO'LDA ishga tushirish (cron har 10 daqiqada qiladi): `kick` natijasi matni (GitHub xatosi bo'lsa shu yerda ko'rinadi).
+    if path == "/api/anibla/kick" {
+        return ok(json!({"msg": kick(env).await}));
+    }
+
     // TASHXIS: webhook holati, sayt so'rovlari va 90 tugmali inline xabarni adminga sinab yuborish.
     if path == "/api/anibla/diag" {
         let wi = encbot_api(env, "getWebhookInfo", json!({})).await
