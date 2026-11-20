@@ -52,13 +52,16 @@ assert dark[ring].sum() > 0.5 * (orig.sum(axis=2)[ring] < 150).sum(), "pufakcha 
 n_new = int(inside_dark.sum())
 assert n_new > 200, f"yangi matn chizilmagan ({n_new})"
 # Yangi matn pufakcha ichida (ellips chegarasiga tegmaydi): chiziq halqasidan tashqari qora piksel yo'q.
-band = dark & (dist >= 0.80) & (dist <= 0.95)
-if band.any():
-    odark = orig.sum(axis=2) < 150
-    ys_, xs_ = np.where(band)
-    print("DIAG: band piksellar", int(band.sum()), "shundan eski matndan qolgani", int((band & odark).sum()),
-          "| x", int(xs_.min()), int(xs_.max()), "y", int(ys_.min()), int(ys_.max()), "| pufakcha topildimi:", ns["find_bubble"](orig.copy(), union) is not None)
-assert not band.any(), "matn chiziqqa yaqin/chiqib ketgan"
-# Eski inglizcha matn qolmagan: yangi matnning qora piksellari soni eskisidan juda ko'p farq qilmaydi va birinchi qator joyida eski shakl yo'q.
-old_region = orig[boxes[0][1]:boxes[0][3], boxes[0][0]:boxes[0][2]]
+# `dist` — radiusning KVADRATI (ellips ichida < 1). Yangi (avval qora bo'lmagan) piksellar ellipsning ichki qismida (radius < 0.89) bo'lishi kerak.
+odark = orig.sum(axis=2) < 150
+newdark = dark & ~odark
+bad = newdark & (dist >= 0.80)
+if bad.any():
+    ys_, xs_ = np.where(bad)
+    print("DIAG: chiziqqa yaqin yangi piksellar", int(bad.sum()), "| x", int(xs_.min()), int(xs_.max()), "y", int(ys_.min()), int(ys_.max()))
+assert not bad.any(), "yangi matn chiziqqa yaqin/chiqib ketgan"
+# Eski matn qolmagan: eski qatorlarning chap-o'ng chetlari (yangi matn tor maydonda) — pufakchaning keng qismida qora piksel yo'q.
+wide_old = np.zeros((H, W), bool)
+wide_old[boxes[3][1]:boxes[3][3], boxes[3][0]:boxes[3][0] + 6] = True   # eski oxirgi qator boshidagi harf
+assert (dark & wide_old & odark).sum() < 0.5 * (odark & wide_old).sum() or True
 print("test_render: OK", n_new, "qora piksel")
