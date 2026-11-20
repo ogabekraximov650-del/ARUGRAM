@@ -16,7 +16,7 @@ concurrency:
 jobs:
   wipe:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 40
     environment: secret
     env:
       ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
@@ -53,7 +53,22 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.11'
+      - name: Python paketlari
+        run: pip install --no-cache-dir pyrogram==2.0.106 tgcrypto==1.2.5
+      - name: Telegram sessiyasi (kanal egasi)
+        run: |
+          OUT="$RUNNER_TEMP/pyro_session.session"
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$OUT"
+          head -c 16 "$OUT" | grep -q "SQLite format 3"
+          echo "SESSION_PATH=$RUNNER_TEMP/pyro_session" >> "$GITHUB_ENV"
       - name: ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && pip install -q cryptography
-      - name: HLS bo'laklarini tekshirish
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - name: Asl videoni tekshirish
+        env:
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
         run: python3 ci/enc_inspect.py
+      - name: Sessiyani o'chirish
+        if: always()
+        run: rm -f "$RUNNER_TEMP/pyro_session.session"
