@@ -40,7 +40,7 @@ jobs:
             if [ -n "$NU" ] && [ -n "$NK" ]; then U="$NU"; T="$NK"; SRC="new_turso.enc"; fi
           fi
           # ASOSIY ma'lumotlar AMPLE bazasida (`tool/migrate/ample.enc`, worker `db_endpoint`) — Turso'da faqat post/anibla navbatlari. Shuning uchun Ample ustun.
-          if [ -f tool/migrate/ample.enc ]; then
+          if [ -f tool/migrate/ample.enc ] && [ "$(cat ci/DB_QUERY_SRC 2>/dev/null)" != "turso" ]; then
             K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
             AT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/migrate/ample.enc 2>/dev/null || true)
             AU=$(printf '%s' "$AT" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
