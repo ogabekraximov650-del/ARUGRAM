@@ -655,6 +655,26 @@ async def upload_parts(app, job, out, size, live, duration):
     return ids
 
 
+def session_api_id():
+    """Sessiya faylidagi api_id (sessiya qaysi ilova bilan yaratilgan bo'lsa)."""
+    try:
+        import sqlite3
+        c = sqlite3.connect(f"file:{SESSION}.session?mode=ro", uri=True)
+        return int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
+    except Exception:
+        return 0
+
+
+def claim():
+    """Navbatdagi video (yo'q bo'lsa — None)."""
+    try:
+        r = api("claim", {"runner": RUNNER})
+    except Exception as e:  # noqa: BLE001
+        log("claim:", e)
+        return None
+    return Job(r) if r.get("job") else None
+
+
 async def process(app, job):
     live = Live(job)
     shutil.rmtree(WORK, ignore_errors=True)

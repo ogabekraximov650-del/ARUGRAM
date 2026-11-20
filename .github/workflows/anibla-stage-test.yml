@@ -21,3 +21,11 @@ jobs:
       - run: python3 tool/anibla/test_stage.py
       - run: python3 tool/encode/test_collage.py
       - run: python3 -m py_compile tool/anibla/download.py tool/encode/run.py
+      # Yo'qolgan funksiya/nom (NameError) ni CI'da ushlash: download.py ni import qilib, main() ishlatadigan nomlar borligini tekshiradi.
+      - run: |
+          pip install -q pyrogram==2.0.106 tgcrypto==1.2.5
+          cd tool/anibla && python3 -c "
+          import download as d
+          for n in ('session_api_id','claim','process','upload_parts','upload_video_part','upload','upload_doc','main','download'):
+              assert hasattr(d, n), 'yo\'q: ' + n
+          print('download.py nomlari: OK')"
