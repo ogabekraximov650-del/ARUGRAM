@@ -372,6 +372,69 @@ def group_dets(dets, source):
     return out
 
 
+def find_missed(img, groups, reader=None):
+    """OCR topolmagan matnli pufakcha/ramkalarni sun'iy intellektsiz topadi: sahifadagi OCH (>215) bog'langan sohalar orasidan pufakchaga o'xshaganlari
+    (yopiq, to'ldirilganligi yuqori), ichida matnga o'xshash mayda "teshiklar" (harflar) bor, lekin mavjud OCR qutilari bilan qoplanmaganlari.
+    Topilganlar guruh sifatida qaytadi (`reader` berilsa kesim kattalashtirib OCR qilinadi; o'qilmasa matn bo'sh)."""
+    import cv2
+    import numpy as np
+    H, W = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    bright = (gray > 215).astype(np.uint8)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(bright, connectivity=4)
+    covered = [g["box"] for g in groups]
+
+    def cov(bx):
+        a = max(1, (bx[2] - bx[0]) * (bx[3] - bx[1]))
+        tot = 0
+        for c in covered:
+            iw, ih = min(bx[2], c[2]) - max(bx[0], c[0]), min(bx[3], c[3]) - max(bx[1], c[1])
+            if iw > 0 and ih > 0:
+                tot += iw * ih
+        return tot / a
+    out = []
+    for i in range(1, n):
+        x, y, w, h, area = stats[i]
+        if area < 1500 or w < 40 or h < 30 or w > 0.7 * W or h > 0.7 * H or x == 0 or y == 0 or x + w >= W or y + h >= H:
+            continue
+        if area / float(w * h) < 0.45:   # pufakcha ellips/to'rtburchak — to'liq
+            continue
+        comp = (lab[y:y + h, x:x + w] == i)
+        inv = (~comp).astype(np.uint8)
+        ff = np.pad(inv, 1, constant_values=1)
+        mask = np.zeros((ff.shape[0] + 2, ff.shape[1] + 2), np.uint8)
+        cv2.floodFill(ff, mask, (0, 0), 2)
+        holes = (ff[1:-1, 1:-1] != 2) & ~comp
+        if holes.sum() < 0.004 * w * h:
+            continue
+        hn, hl, hs, _ = cv2.connectedComponentsWithStats(holes.astype(np.uint8), connectivity=8)
+        boxes = []
+        for j in range(1, hn):
+            hx, hy, hw, hh, ha = hs[j]
+            # Harfga o'xshash: mayda, juda cho'zinchoq emas, pufakchaning katta qismi emas.
+            if 6 <= hh <= 0.35 * h and 2 <= hw <= 0.9 * w and ha >= 6:
+                boxes.append((x + hx, y + hy, x + hx + hw, y + hy + hh))
+        if len(boxes) < 3:
+            continue
+        union = (min(b[0] for b in boxes), min(b[1] for b in boxes), max(b[2] for b in boxes), max(b[3] for b in boxes))
+        if (union[2] - union[0]) * (union[3] - union[1]) < 0.03 * w * h:
+            continue
+        if cov(union) >= 0.4:
+            continue
+        text = ""
+        if reader is not None:
+            try:
+                crop = img[max(0, union[1] - 6):union[3] + 6, max(0, union[0] - 6):union[2] + 6]
+                big = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+                res = reader.readtext(big, detail=1, paragraph=False)
+                text = " ".join(t for _, t, c in sorted(res, key=lambda r: (r[0][0][1], r[0][0][0])) if c >= 0.2).strip()
+            except Exception as e:  # noqa: BLE001
+                log(f"  qo'shimcha OCR xato ({e})")
+        out.append({"box": union, "boxes": boxes, "text": text})
+        covered.append(union)
+    return out
+
+
 # ── Chizish ──────────────────────────────────────────────────
 
 FONT_CANDIDATES = [
@@ -490,7 +553,7 @@ def _clean_and_draw_rect(img, grp, uz):
                 th = 255 - th
             strokes[by0:by1, bx0:bx1] = th
         strokes = cv2.dilate(strokes, np.ones((5, 5), np.uint8))
-        img[:] = cv2.inpaint(img, strokes, 3, cv2.INPAINT_TELEA)
+        inpaint_mask(img, strokes > 0)   # davriy fon (screentone) uchun maxsus, qolgani Telea
         # Yozuv rangi fonga qarab: och fonda qora (oq chiziq bilan), to'q fonda oq (qora chiziq bilan).
         fg, stroke = ((0, 0, 0), (255, 255, 255)) if bg.mean() > 140 else ((255, 255, 255), (0, 0, 0))
     # Yozuv maydoni: matn qutisidan biroz kengroq (o'zbekcha matn uzunroq bo'ladi), rasm ichida.
@@ -613,9 +676,10 @@ def layout_in_bubble(uz, filled, cx, cy, pad, max_size, min_size=9):
 
 
 def find_bubble(img, box):
-    """Matn qutisi (x0,y0,x1,y1) turgan OQ pufakchani topadi: (to'ldirilgan niqob, matn izlari niqobi, (ox, oy) kesim boshlanishi) yoki None.
-    Pufakcha = matn qutisini o'z ichiga olgan eng katta OCH (>215) bog'langan soha; chiqish yo'lagi yo'q (kesim chetiga tegmaydi),
-    matn harflari esa shu sohadagi "teshiklar" — ularni topib oq bilan to'ldirsak, pufakcha chizig'iga tegmasdan eski matn o'chadi."""
+    """Matn qutisi (x0,y0,x1,y1) turgan BIR TEKIS FONLI pufakcha/ramkani topadi (oq pufakcha, rangli yoki qora narrator ramkasi):
+    (to'ldirilgan niqob, matn izlari niqobi, (ox, oy) kesim boshlanishi, fon rangi RGB, fon to'qmi) yoki None.
+    Fon = matn qutisidagi eng ko'p uchraydigan yorqinlik; pufakcha = shu fonga yaqin eng katta bog'langan soha (chiqish yo'lagi yo'q — kesim
+    chetiga tegmaydi). Matn harflari shu sohadagi "teshiklar": ularni fon rangi bilan to'ldirsak, chiziqqa tegmasdan eski matn o'chadi."""
     import cv2
     import numpy as np
     H, W = img.shape[:2]
@@ -624,9 +688,19 @@ def find_bubble(img, box):
     cx0, cy0, cx1, cy1 = max(0, x0 - m), max(0, y0 - m), min(W, x1 + m), min(H, y1 + m)
     crop = img[cy0:cy1, cx0:cx1]
     gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
-    bright = (gray > 215).astype(np.uint8)
-    n, lab = cv2.connectedComponents(bright, connectivity=4)
-    roi = lab[y0 - cy0:y1 - cy0, x0 - cx0:x1 - cx0]
+    ry0, ry1, rx0, rx1 = y0 - cy0, y1 - cy0, x0 - cx0, x1 - cx0
+    sub = gray[ry0:ry1, rx0:rx1]
+    if sub.size < 30:
+        return None
+    hist = np.bincount((sub // 8).ravel(), minlength=32)
+    mode = int(hist.argmax())
+    bg = float(np.median(sub[(sub // 8) == mode]))
+    if bg >= 215:
+        sel = gray > 215                    # oq/och fon (toza oq pufakcha)
+    else:
+        sel = np.abs(gray.astype(np.int16) - int(bg)) <= 14   # tusli yoki qora ramka
+    n, lab = cv2.connectedComponents(sel.astype(np.uint8), connectivity=4)
+    roi = lab[ry0:ry1, rx0:rx1]
     vals = roi[roi > 0]
     if vals.size < 30:
         return None
@@ -647,10 +721,89 @@ def find_bubble(img, box):
     filled = ff != 2
     holes = filled & ~comp
     # Matn qutisining katta qismi pufakcha ichida bo'lishi shart.
-    inside = filled[y0 - cy0:y1 - cy0, x0 - cx0:x1 - cx0].mean()
-    if inside < 0.85:
+    if filled[ry0:ry1, rx0:rx1].mean() < 0.85:
         return None
-    return filled, holes, (cx0, cy0)
+    bgc = tuple(int(v) for v in np.median(crop[comp], axis=0))
+    return filled, holes, (cx0, cy0), bgc, bg < 110
+
+
+def inpaint_texture(crop, mask):
+    """Takrorlanuvchi fon (yarim ton nuqtalari/to'r — "screentone") uchun sun'iy intellektsiz tiklash: atrofdagi fon avtokorrelyatsiyasidan DAVR
+    (dx,dy) topiladi, niqoblangan piksellar davr masofasidagi qo'shni (niqobsiz) piksellardan nusxalanadi. Davr topilmasa None.
+    crop: RGB uint8, mask: bool (True — tiklanadigan)."""
+    import numpy as np
+    h, w = mask.shape
+    if h < 24 or w < 24 or mask.mean() > 0.5:
+        return None
+    g = crop.astype(np.float32).mean(axis=2)
+    mean = g[~mask].mean()
+    g0 = np.where(mask, mean, g) - mean
+    F = np.fft.rfft2(g0)
+    ac = np.fft.irfft2(F * np.conj(F), s=g0.shape)
+    ac /= max(ac[0, 0], 1e-6)
+    cands = []
+    for dy in range(0, min(h // 2, 31)):
+        for dx in range(-min(w // 2, 31), min(w // 2, 31) + 1):
+            if dy == 0 and dx <= 0:
+                continue
+            if abs(dx) + dy < 3:
+                continue
+            v = ac[dy % h, dx % w]
+            if v > 0.35:
+                cands.append((float(v), dx, dy))
+    if not cands:
+        return None
+    cands.sort(reverse=True)
+    lags = [(cands[0][1], cands[0][2])]
+    for v, dx, dy in cands[1:]:   # birinchisiga parallel bo'lmagan ikkinchi yo'nalish
+        d0 = lags[0]
+        if abs(dx * d0[1] - dy * d0[0]) > 2 and len(lags) < 2:
+            lags.append((dx, dy))
+    out = crop.copy()
+    remaining = mask.copy()
+    known = ~mask
+    ys, xs = np.mgrid[0:h, 0:w]
+    for k in range(1, 7):
+        for (dx, dy) in lags:
+            for sgn in (1, -1):
+                sx, sy = xs + sgn * k * dx, ys + sgn * k * dy
+                ok = remaining & (sx >= 0) & (sx < w) & (sy >= 0) & (sy < h)
+                src_ok = np.zeros_like(ok)
+                src_ok[ok] = known[sy[ok], sx[ok]]
+                sel = ok & src_ok
+                if sel.any():
+                    out[sel] = crop[sy[sel], sx[sel]]
+                    remaining &= ~sel
+                    known = known | sel
+        if not remaining.any():
+            break
+    return out, remaining
+
+
+def inpaint_mask(img, mask):
+    """Niqob (butun rasm o'lchamida bool) ostidagi pikselni tiklaydi: avval davriy fon usuli, qolganini OpenCV Telea bilan. `img` joyida o'zgaradi."""
+    import cv2
+    import numpy as np
+    ys, xs = np.where(mask)
+    if ys.size == 0:
+        return
+    H, W = mask.shape
+    m = 36
+    y0, y1, x0, x1 = max(0, ys.min() - m), min(H, ys.max() + m + 1), max(0, xs.min() - m), min(W, xs.max() + m + 1)
+    crop = img[y0:y1, x0:x1].copy()
+    cm = mask[y0:y1, x0:x1]
+    res = None
+    left = cm
+    try:
+        r = inpaint_texture(crop, cm)
+        if r is not None:
+            res, left = r
+    except Exception as e:  # noqa: BLE001
+        log(f"  davriy tiklash xatosi ({e}) — Telea")
+    base = res if res is not None else crop
+    if left.any():
+        base = cv2.inpaint(base, (left.astype(np.uint8) * 255), 3, cv2.INPAINT_TELEA)
+    img[y0:y1, x0:x1][cm] = base[cm]
 
 
 def clean_and_draw(img, grp, uz):
@@ -668,11 +821,12 @@ def clean_and_draw(img, grp, uz):
         log(f"  pufakcha izlashda xato ({e}) — oddiy usul")
     if found is None:
         return _clean_and_draw_rect(img, grp, uz)
-    filled, holes, (ox, oy) = found
-    # 1) Eski matn: teshiklar (kengaytirilgan) pufakcha ichida oqqa bo'yaladi.
+    filled, holes, (ox, oy), bgc, dark_bg = found
+    # 1) Eski matn: teshiklar (kengaytirilgan) pufakcha ichida FON RANGI bilan bo'yaladi.
     er = cv2.dilate(holes.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool) & filled
     sub = img[oy:oy + er.shape[0], ox:ox + er.shape[1]]
-    sub[er] = 255
+    sub[er] = bgc
+    ink = (255, 255, 255) if dark_bg else (0, 0, 0)
     # 2) Yozuv maydoni: pufakchaga sig'adigan markazlashgan to'g'ri to'rtburchak (egri pufakchada burchaklar chetda qolmasin).
     ys, xs = np.where(filled)
     mx0, my0, mx1, my1 = xs.min(), ys.min(), xs.max(), ys.max()
@@ -702,7 +856,7 @@ def clean_and_draw(img, grp, uz):
     if lay is not None:
         font, placed, lh = lay
         for ln, xc, y in placed:
-            d.text((ox + xc - font.getlength(ln) / 2, oy + y), ln, font=font, fill=(0, 0, 0))
+            d.text((ox + xc - font.getlength(ln) / 2, oy + y), ln, font=font, fill=ink)
     else:
         tw, th = (rx1 - rx0) - 2 * pad, (ry1 - ry0) - 2 * pad
         font, lines, lh = fit_text(uz, tw, th, max_size=max_font)
@@ -711,7 +865,7 @@ def clean_and_draw(img, grp, uz):
         for ln in lines:
             w = font.getlength(ln)
             x = ox + rx0 + pad + max(0, (tw - w) / 2)
-            d.text((x, y), ln, font=font, fill=(0, 0, 0))
+            d.text((x, y), ln, font=font, fill=ink)
             y += lh
     img[:] = np.asarray(pil)
 
@@ -886,7 +1040,15 @@ async def process(app, r, runner):
             t0 = time.time()
             for i, p in enumerate(paths, 1):
                 img = np.array(Image.open(p).convert("RGB"))
-                res.append(group_dets(ocr_image(reader, img), source))
+                grp_i = group_dets(ocr_image(reader, img), source)
+                try:
+                    extra = find_missed(img, grp_i, reader)
+                    if extra:
+                        live.note(f"{i}-sahifa: OCR topmagan {len(extra)} ta pufakcha qo'shildi")
+                        grp_i = sorted(grp_i + extra, key=lambda g: (g["box"][1], g["box"][0]))
+                except Exception as e:  # noqa: BLE001
+                    log(f"  {i}-sahifa: qo'shimcha pufakcha izlashda xato ({e})")
+                res.append(grp_i)
                 live.note(f"{i}-sahifa: {len(res[-1])} blok")
                 live.send(f"\U0001F50D Matn o'qilmoqda\n{bar(i * 100 / len(paths))} {i}/{len(paths)} "
                           f"· o'tdi {hms(time.time() - t0)}")
@@ -904,7 +1066,7 @@ async def process(app, r, runner):
             out_dir.mkdir()
             anno = await asyncio.to_thread(annotate_pages, paths, groups, out_dir)
             final = await asyncio.to_thread(build_output, anno, "pdf", f"{title}_raqamlangan", WORK)
-            texts = [f"{i + 1}.{j}# {g['text']}" for i, page in enumerate(groups) for j, g in enumerate(page, 1)]
+            texts = [f"{i + 1}.{j}# {g['text'] or '(o\'qilmadi — rasmga qarang)'}" for i, page in enumerate(groups) for j, g in enumerate(page, 1)]
             api("check", ident)
             live.send("⬆️ Yuborilmoqda...", force=True)
             await send_result(app, chat, final, f"\u270D {title} — pufakchalar raqamlandi ({len(texts)} ta)", jid, live)
@@ -915,8 +1077,9 @@ async def process(app, r, runner):
 
         live.send(f"\U0001F310 Tarjima qilinmoqda ({len(flat)} blok)...", force=True)
         uz_flat = await asyncio.to_thread(translate_texts, flat, source) if flat else []
-        bad = sum(1 for x in uz_flat if not x.strip())
-        if flat and bad == len(flat):
+        uz_flat = [u if t.strip() else "" for t, u in zip(flat, uz_flat)]   # o'qilmagan (bo'sh) pufakchalar tarjimasiz qoladi
+        bad = sum(1 for t, x in zip(flat, uz_flat) if t.strip() and not x.strip())
+        if flat and bad == sum(1 for t in flat if t.strip()) and bad > 0:
             raise RuntimeError("tarjima xizmati javob bermadi (Workers AI)")
         live.done(f"Tarjima qilindi" + (f" ({bad} blok tarjimasiz qoldi)" if bad else ""))
         it = iter(uz_flat)
