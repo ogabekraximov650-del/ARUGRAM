@@ -1,2 +1,5 @@
-SELECT epizod_number,origin_size,origin_height,substr(origin_video,1,40) AS origin_video,CASE WHEN origin_key<>'' THEN 'qismli' ELSE '' END AS qismli,datetime(created_at/1000+18000,'unixepoch') AS qoshilgan FROM epizod_db WHERE anime_id=3 AND season_id=1 ORDER BY epizod_number;
-SELECT epizod_id,quality,state,attempts,substr(error,1,140) AS error FROM encode_q WHERE anime_id=3 ORDER BY epizod_id,quality;
+SELECT substr(file_name,1,5) AS pre, COUNT(*) AS n FROM tg_files GROUP BY pre ORDER BY n DESC LIMIT 15;
+SELECT substr(name,1,5) AS pre, COUNT(*) AS n FROM vd_queue GROUP BY pre ORDER BY n DESC LIMIT 15;
+SELECT COUNT(*) AS epizodlar FROM epizod_db;
+SELECT COUNT(*) AS q_jobs FROM encode_jobs;
+SELECT COUNT(*) AS anibla_jobs FROM anibla_jobs;
