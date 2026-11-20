@@ -15,7 +15,7 @@ if url.startswith("libsql://"):
     url = "https://" + url[len("libsql://"):]
 ANIME, SEASON = 3, 1
 pairs = []
-for tok in open("ci/ENC_INSPECT").read().split():
+for tok in [t for t in open("ci/ENC_INSPECT").read().split() if t[0].isdigit()]:
     a, _, b = tok.partition(":")
     pairs.append((int(a), float(b or 0)))
 
