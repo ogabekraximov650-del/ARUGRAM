@@ -1,5 +1,2 @@
-SELECT file_name,msg_id FROM tg_files WHERE file_name LIKE 'orig%';
-SELECT anime_id,season_id,epizod_id,quality,state,attempts,substr(error,1,160) AS error FROM encode_q;
-SELECT anime_id,season_id,epizod_id,origin,state,done,attempts,substr(error,1,160) AS error FROM encode_jobs;
-SELECT anime_id,season_id,epizod_id,epizod_number,origin_video,origin_size,url_360p,url_480p,url_720p,url_1080p FROM epizod_db;
-SELECT id,kind,state,substr(payload,1,160) AS payload FROM async_jobs ORDER BY id DESC LIMIT 15;
+SELECT epizod_number,origin_size,origin_height,substr(origin_video,1,40) AS origin_video,CASE WHEN origin_key<>'' THEN 'qismli' ELSE '' END AS qismli,datetime(created_at/1000+18000,'unixepoch') AS qoshilgan FROM epizod_db WHERE anime_id=3 AND season_id=1 ORDER BY epizod_number;
+SELECT epizod_id,quality,state,attempts,substr(error,1,140) AS error FROM encode_q WHERE anime_id=3 ORDER BY epizod_id,quality;
