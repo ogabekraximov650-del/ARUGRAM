@@ -1811,6 +1811,11 @@ async fn init_db(env: &Env) -> bool {
         }
         config_put(env, "mig_collage_cols", "1").await;
     }
+    // TOPILGAN XATO: `mig_collage_cols` `collage_key` qo'shilishidan OLDIN belgilangan edi — ustun yaratilmay qoldi, kollaj yozuvi saqlanmadi.
+    if ok && config_get(env, "mig_collage_key").await.is_none() {
+        let _ = turso_exec(env, "ALTER TABLE epizod_db ADD COLUMN collage_key TEXT DEFAULT ''", vec![]).await;
+        config_put(env, "mig_collage_key", "1").await;
+    }
     // Kanallarga obuna ruxsati endi telefonda emas, bazada (2026-10).
     if ok && config_get(env, "mig_chan_consent").await.is_none() {
         let _ = turso_exec(env,
