@@ -689,6 +689,8 @@ macro_rules! epizod_cols {
             -- Birinchi sifat joylangan vaqt (qism ilovada ko'rinadigan payt).
             -- `created_at` — qator yaratilgan (asl video joylangan) vaqt.
             ready_at INTEGER DEFAULT 0,
+            -- Kanal posti uchun 1080p kadrlar kollaji: saqlash kanalidagi rasmning Telegram `file_id` si va xabar raqami.
+            collage_file_id TEXT DEFAULT '', collage_msg INTEGER DEFAULT 0,
             PRIMARY KEY (anime_id, season_id, epizod_id)"
     };
 }
@@ -702,7 +704,7 @@ const EPIZOD_COL_NAMES: &[&str] = &[
     "url_1080p", "size_1080p", "key_1080p", "q1080_vd_chunks", "q1080_vd_ids", "q1080_vd_msgs",
     "intro_1", "intro_2", "intro_3", "intro_4", "intro_5", "intro_6", "intro_7", "intro_8", "intro_9", "intro_10",
     "origin_video", "origin_key", "origin_size", "origin_height",
-    "views_total", "watch_ms_total", "created_at", "ready_at",
+    "views_total", "watch_ms_total", "created_at", "ready_at", "collage_file_id", "collage_msg",
 ];
 
 /// UZ: qaysi bazaga boriladi. Faqat "Post kodlash" va "Anibla yuklash" navbatlari (`post_jobs`, `anibla_jobs`) Turso'da qoladi; qolgan hamma narsa
@@ -1786,6 +1788,16 @@ async fn init_db(env: &Env) -> bool {
             let _ = turso_exec(env, sql, vec![]).await;
         }
         config_put(env, "mig_origin_meta", "1").await;
+    }
+    // Kanal posti kollaji (2026-11): qism qatorida saqlash kanalidagi rasm `file_id` si.
+    if ok && config_get(env, "mig_collage_cols").await.is_none() {
+        for sql in [
+            "ALTER TABLE epizod_db ADD COLUMN collage_file_id TEXT DEFAULT ''",
+            "ALTER TABLE epizod_db ADD COLUMN collage_msg INTEGER DEFAULT 0",
+        ] {
+            let _ = turso_exec(env, sql, vec![]).await;
+        }
+        config_put(env, "mig_collage_cols", "1").await;
     }
     // Kanallarga obuna ruxsati endi telefonda emas, bazada (2026-10).
     if ok && config_get(env, "mig_chan_consent").await.is_none() {
@@ -3956,6 +3968,8 @@ fn hide_keys(mut obj: Value) -> Value {
         }
         // Asl videoning kaliti ham hammaga berilmaydi.
         m.remove("origin_key");
+        m.remove("collage_file_id");
+        m.remove("collage_msg");
     }
     obj
 }

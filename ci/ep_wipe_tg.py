@@ -61,6 +61,11 @@ if "vd_queue" in tabs:
         vd_msgs += ids(m)
 for (m,) in rows(run("SELECT msg_id FROM tg_files WHERE file_name LIKE 'orig%'")[0]):
     tg_msgs += ids(m)
+try:  # kanal posti kollajlari (saqlash kanalidagi rasm xabarlari)
+    for (m,) in rows(run("SELECT collage_msg FROM epizod_db WHERE COALESCE(collage_msg,0)>0")[0]):
+        tg_msgs += ids(m)
+except RuntimeError:
+    pass
 vd_msgs, tg_msgs = sorted(set(vd_msgs)), sorted(set(tg_msgs))
 print(f"O'chiriladigan xabarlar: saqlash kanali {len(vd_msgs)}, asl video {len(tg_msgs)}")
 

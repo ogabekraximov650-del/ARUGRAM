@@ -138,6 +138,9 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8])
     if jpeg.len() < 2000 || jpeg.len() > COVER_MAX {
         return Err("kollaj hajmi noto'g'ri".into());
     }
+    // Rasm AVVAL saqlash kanaliga joylanadi, `file_id` qism qatoriga (`epizod_db.collage_file_id`) yoziladi — keyingi safar (ilovadan "kanalga joylash",
+    // qayta joylash) tayyor rasm ishlatiladi. Saqlash o'xshamasa — rasm to'g'ridan-to'g'ri yuklanadi (e'lon baribir chiqadi).
+    let stored = store_collage(env, a, s, e, jpeg).await.ok();
     let claim = turso_exec(env,
         "INSERT INTO announced (anime_id, season_id, epizod_id, at) VALUES (?,?,?,?)
          ON CONFLICT DO NOTHING RETURNING at",
@@ -147,7 +150,11 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8])
     }
     let sent = async {
         let (_, text, markup) = compose(env, a, s, e).await?;
-        upload_photo_post(env, ch, jpeg, &text, &markup).await
+        match &stored {
+            Some(fid) => send(env, "sendPhoto", json!({"chat_id": ch, "photo": fid, "caption": text,
+                "parse_mode": "HTML", "reply_markup": markup})).await.map(|_| ()),
+            None => upload_photo_post(env, ch, jpeg, &text, &markup).await.map(|_| ()),
+        }
     }.await;
     if let Err(why) = sent {
         let _ = turso_exec(env, "DELETE FROM announced WHERE anime_id=? AND season_id=? AND epizod_id=?",
@@ -157,10 +164,42 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8])
     Ok(true)
 }
 
+/// Kollajni saqlash kanaliga rasm qilib joylaydi; `file_id` va xabar raqamini qism qatoriga yozadi. Qaytadi: `file_id`.
+async fn store_collage(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8]) -> std::result::Result<String, String> {
+    let store = tg_channel_id(env);
+    if store == 0 {
+        return Err("saqlash kanali sozlanmagan".into());
+    }
+    let sent = upload_photo(env, store, jpeg).await?;
+    let fid = sent["result"]["photo"].as_array()
+        .and_then(|p| p.last()).and_then(|p| p["file_id"].as_str())
+        .ok_or("yuklangan rasm file_id si yo'q")?.to_string();
+    let msg = sent["result"]["message_id"].as_i64().unwrap_or(0);
+    // Eski kollaj xabari (qism qayta kodlangan bo'lsa) saqlash kanalidan o'chadi.
+    if let Some(old) = turso_exec(env, "SELECT collage_msg FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok().and_then(|r| first_row(&r)) {
+        let m = jint(&old, "collage_msg");
+        if m > 0 && m != msg {
+            let _ = tg_api(env, "deleteMessage", json!({"chat_id": store, "message_id": m})).await;
+        }
+    }
+    turso_exec(env, "UPDATE epizod_db SET collage_file_id=?, collage_msg=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
+        vec![TursoArg::text(&fid), TursoArg::int(msg), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await
+        .map_err(|e| e.to_string())?;
+    Ok(fid)
+}
+
 async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result<(), String> {
     let (season, text, markup) = compose(env, a, s, e).await?;
+    // Qism uchun kadrlar kollaji tayyor bo'lsa (`epizod_db.collage_file_id`) — afisha o'rniga shu rasm.
+    let collage = turso_exec(env, "SELECT collage_file_id FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok().and_then(|r| first_row(&r))
+        .and_then(|r| r["collage_file_id"].as_str().map(|x| x.to_string())).filter(|x| !x.is_empty());
     let photo = bare_name(season["photo_url"].as_str().unwrap_or(""));
-    let file_id = if photo.is_empty() { None } else { cover_file_id(env, &photo, ch).await.ok() };
+    let file_id = match collage {
+        Some(f) => Some(f),
+        None => if photo.is_empty() { None } else { cover_file_id(env, &photo, ch).await.ok() },
+    };
     // Muqova bor — rasm bilan; yo'q yoki olinmasa — faqat matn (e'lon baribir chiqadi).
     let sent = match &file_id {
         Some(fid) => send(env, "sendPhoto", json!({"chat_id": ch, "photo": fid, "caption": text,
