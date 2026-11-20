@@ -2085,8 +2085,11 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                     if let Ok(rq) = Request::new_with_init(&format!("https://api.github.com/repos/{repo}/actions/jobs/{job_id}/logs"), &init) {
                         if let Ok(mut rs) = Fetch::Request(rq).send().await {
                             if let Ok(t) = rs.text().await {
-                                let cs: Vec<char> = t.chars().collect();
-                                log_tail = cs[cs.len().saturating_sub(3500)..].iter().collect();
+                                // Yiqilgan qadam: `download.py` ishga tushgan joydan 3500 belgi (bo'lmasa log oxiri).
+                                let from = t.find("python3 tool/anibla/download.py").unwrap_or(0);
+                                let cs: Vec<char> = t[from..].chars().collect();
+                                let start = if from > 0 { 0 } else { cs.len().saturating_sub(3500) };
+                                log_tail = cs[start..cs.len().min(start + 3500)].iter().collect();
                             }
                         }
                     }
