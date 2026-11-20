@@ -7716,3 +7716,7 @@ Foydalanuvchi natija PDF si bilan topgan xatolar: matn so'zlari o'rtasidan uzili
 ## Manga tarjima: sun'iy intellektsiz yaxshilashlar (2026-11-20)
 
 Manbalar: OpenCV flood-fill pufakcha izlash, morfologik teshik to'ldirish (answers.opencv.org, SIFT-OCR loyihasi). Qo'shilgan: (1) `find_bubble` endi har qanday BIR TEKIS fonli ramkani (oq, rangli, qora narrator ramkasi) topadi, fon rangi bilan to'ldiradi, yozuv rangi fonga qarab; (2) `inpaint_texture` — screentone (takrorlanuvchi nuqta/to'r) fonida eski yozuvni avtokorrelyatsiya orqali topilgan DAVR bo'yicha qo'shni piksellardan nusxalab tiklaydi (qolgani OpenCV Telea); (3) `find_missed` — OCR topmagan matnli pufakcha/ramkalarni (och bog'langan soha + ichida harfsimon teshiklar, mavjud qutilar bilan qoplanmagan) topib raqamlashga qo'shadi (kesim kattalashtirib qayta OCR, o'qilmasa "(o'qilmadi — rasmga qarang)"). Sinov: `tool/translate/test_classic.py`.
+
+## Qism o'chganda kollaj ham o'chadi (2026-11-20)
+
+Topilgan xato: qism/bo'lim/anime o'chirilganda saqlash kanalidagi shifrlangan kollaj hujjati (`collage_<a>_<s>_<e>.bin`) qolib ketardi. Tuzatish: kollaj xabari `tg_files` da ham yoziladi (`store_collage`), migratsiya `mig_collage_tgfiles` eskilarini to'ldiradi; qism/bo'lim/anime o'chirish yo'llari (`collage_items`) tozalash ishiga kollaj nomini qo'shadi. Qolib ketgan yetim hujjatlar bir marta `ci/collage_clean.py` bilan tozalanadi (`ci/COLLAGE_CLEAN_ONCE`).

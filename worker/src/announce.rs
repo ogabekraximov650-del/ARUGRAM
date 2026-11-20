@@ -187,6 +187,11 @@ async fn store_collage(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex
             let _ = tg_api(env, "deleteMessage", json!({"chat_id": store, "message_id": m})).await;
         }
     }
+    // Qism o'chganda kollaj ham tozalansin: xabar `tg_files` da ham (`collage_<a>_<s>_<e>.bin`).
+    let _ = turso_exec(env,
+        "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')
+         ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
+        vec![TursoArg::text(&format!("collage_{a}_{s}_{e}.bin")), TursoArg::int(msg)]).await;
     turso_exec(env, "UPDATE epizod_db SET collage_file_id=?, collage_msg=?, collage_key=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
         vec![TursoArg::text(&fid), TursoArg::int(msg), TursoArg::text(key_hex), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await
         .map_err(|e| e.to_string())?;

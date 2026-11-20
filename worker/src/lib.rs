@@ -1816,6 +1816,15 @@ async fn init_db(env: &Env) -> bool {
         let _ = turso_exec(env, "ALTER TABLE epizod_db ADD COLUMN collage_key TEXT DEFAULT ''", vec![]).await;
         config_put(env, "mig_collage_key", "1").await;
     }
+    // Kollaj xabarlari `tg_files` da ham yozib qo'yiladi (qism o'chganda tozalash `collage_<a>_<s>_<e>.bin` nomi bilan ishlaydi): avvalgilari uchun to'ldirish.
+    if ok && config_get(env, "mig_collage_tgfiles").await.is_none() {
+        let _ = turso_exec(env,
+            "INSERT INTO tg_files (file_name, msg_id, file_key)
+             SELECT 'collage_' || anime_id || '_' || season_id || '_' || epizod_id || '.bin', collage_msg, ''
+               FROM epizod_db WHERE COALESCE(collage_msg,0) > 0
+             ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id", vec![]).await;
+        config_put(env, "mig_collage_tgfiles", "1").await;
+    }
     // Kanallarga obuna ruxsati endi telefonda emas, bazada (2026-10).
     if ok && config_get(env, "mig_chan_consent").await.is_none() {
         let _ = turso_exec(env,
@@ -3729,6 +3738,13 @@ fn cleanup_items(rows: &[Value], specs: &[(&str, &str)]) -> Vec<Value> {
         }
     }
     out
+}
+
+/// Kanal posti kollajlari (saqlash kanalidagi shifrlangan hujjat, `tg_files` da `collage_<a>_<s>_<e>.bin`): qism(lar) o'chganda ular ham tozalanadi.
+fn collage_items(rows: &[Value]) -> Vec<Value> {
+    rows.iter().filter(|r| jint(r, "collage_msg") > 0 && jint(r, "anime_id") > 0)
+        .map(|r| json!({"n": format!("collage_{}_{}_{}.bin", jint(r, "anime_id"), jint(r, "season_id"), jint(r, "epizod_id")), "m": ""}))
+        .collect()
 }
 
 /// Tozalash ishini navbatga qo'yadi va Ample ish yurituvchisini uyg'otadi (`JOBS_URL`).
@@ -16376,7 +16392,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
 
                         if method == Method::Delete {
                             let old = turso_exec(&env,
-                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, anime_id, season_id, epizod_id, collage_msg, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid), TursoArg::int(eid)]).await?;
                             let ec = old["cols"].as_array().cloned().unwrap_or_default();
                             let er = old["rows"].as_array().cloned().unwrap_or_default();
@@ -16410,6 +16426,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                                 if ov.starts_with("orig_") {
                                     items.push(json!({"n": ov, "m": ""}));
                                 }
+                                items.extend(collage_items(&[row.clone()]));
                                 job_enqueue_cleanup(&env, items).await;
                             }
                             return ok(json!({"success": true, "cleanup": "queued"}));
@@ -16488,7 +16505,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                         if method == Method::Delete {
                             // 1. Epizod videolarini B2dan o'chirish
                             let eps = turso_exec(&env,
-                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=? AND season_id=?",
+                                "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, anime_id, season_id, epizod_id, collage_msg, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=? AND season_id=?",
                                 vec![TursoArg::int(aid), TursoArg::int(sid)]).await?;
                             let ec = eps["cols"].as_array().cloned().unwrap_or_default();
                             let er = eps["rows"].as_array().cloned().unwrap_or_default();
@@ -16532,6 +16549,7 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                             let ep_rows: Vec<Value> = er.iter().map(|r| row_to_obj(&ec, r.as_array().unwrap_or(&vec![]))).collect();
                             let mut items = cleanup_items(&ep_rows, &[("url_360p", "q360_vd_msgs"), ("url_480p", "q480_vd_msgs"), ("url_720p", "q720_vd_msgs"), ("url_1080p", "q1080_vd_msgs")]);
                             items.extend(ep_rows.iter().filter_map(|r| r["origin_video"].as_str().filter(|o| o.starts_with("orig_")).map(|o| json!({"n": o, "m": ""}))));
+                            items.extend(collage_items(&ep_rows));
                             items.extend(cleanup_items(&[photo_row], &[("photo_url", "photo_vd_msgs")]));
                             job_enqueue_cleanup(&env, items).await;
                             return ok(json!({"success": true, "cleanup": "queued"}));
@@ -16587,12 +16605,13 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
                         // CASCADE: anime + barcha bo'limlar + barcha epizodlar. AVVAL bazadan (hammasi darhol yo'qoladi), fayllar/kanal tozalash esa Ample ish yurituvchisida.
                         // Fayl nomlari va kanal xabar raqamlari qatorlar o'chirilishidan OLDIN yig'iladi.
                         let eps = turso_exec(&env,
-                            "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=?",
+                            "SELECT url_360p,url_480p,url_720p,url_1080p,origin_video, anime_id, season_id, epizod_id, collage_msg, q360_vd_msgs,q480_vd_msgs,q720_vd_msgs,q1080_vd_msgs FROM epizod_db WHERE anime_id=?",
                             vec![TursoArg::int(id)]).await?;
                         let ec = eps["cols"].as_array().cloned().unwrap_or_default();
                         let ep_rows: Vec<Value> = eps["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| row_to_obj(&ec, r.as_array().unwrap_or(&vec![]))).collect();
                         let mut items = cleanup_items(&ep_rows, &[("url_360p", "q360_vd_msgs"), ("url_480p", "q480_vd_msgs"), ("url_720p", "q720_vd_msgs"), ("url_1080p", "q1080_vd_msgs")]);
                         items.extend(ep_rows.iter().filter_map(|r| r["origin_video"].as_str().filter(|o| o.starts_with("orig_")).map(|o| json!({"n": o, "m": ""}))));
+                        items.extend(collage_items(&ep_rows));
                         let ss = turso_exec(&env, "SELECT photo_url, photo_vd_msgs FROM season_db WHERE anime_id=?", vec![TursoArg::int(id)]).await?;
                         let sc = ss["cols"].as_array().cloned().unwrap_or_default();
                         let sr: Vec<Value> = ss["rows"].as_array().cloned().unwrap_or_default().iter().map(|r| row_to_obj(&sc, r.as_array().unwrap_or(&vec![]))).collect();
