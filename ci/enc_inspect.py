@@ -59,6 +59,7 @@ def inspect(eid, target):
         return
     origin = rows[0][0]
     raw = origin[len("anibla:"):] if origin.startswith("anibla:") else origin
+    j = None
     try:
         j = json.loads(raw)
         saved = str(j.get("u") or "")
@@ -66,6 +67,9 @@ def inspect(eid, target):
     except Exception:  # noqa: BLE001
         saved = raw
     vurl, _, aurl = saved.partition("\n")
+    shape = lambda x: re.sub(r"[A-Za-z]", "a", re.sub(r"\d", "9", x))[:70]
+    print("kalitlar:", sorted(j.keys()) if isinstance(j, dict) else type(j), "| origin boshi:", shape(origin[:40]), "| u shakli:", shape(vurl.strip()), "| u uzunligi:", len(vurl.strip()))
+    print("u sxemasi:", vurl.strip().split(":")[0][:10] if ":" in vurl else "yo'q")
     for u in (vurl, aurl):
         if u.strip():
             print("::add-mask::" + u.strip())
