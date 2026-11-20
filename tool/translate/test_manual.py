@@ -6,7 +6,7 @@ src = Path(__file__).with_name("translate.py").read_text()
 tree = ast.parse(src)
 want_f = {"tidy_uz", "parse_manual", "serialize_groups", "load_groups", "keep_group"}
 body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in want_f)
-        or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") in ("MARK_RE", "JUNK_WORDS", "SFX_WORDS", "SHORT_OK", "_TIDY") for t in n.targets))]
+        or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") in ("MARK_RE", "JUNK_WORDS", "SFX_WORDS", "SHORT_OK", "_TIDY", "GLOSSARY") for t in n.targets))]
 ns = {"re": re, "json": json}
 exec(compile(ast.Module(body, []), "translate.py", "exec"), ns)
 
