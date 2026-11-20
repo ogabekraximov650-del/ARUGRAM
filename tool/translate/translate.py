@@ -117,6 +117,10 @@ def tidy_uz(t: str) -> str:
     """Tarjima matnidagi shriftda yo'q (kvadrat bo'lib chiqadigan) belgilarni oddiylariga almashtiradi: defis variantlari, tipografik tirnoq/apostrof."""
     for a, b in _TIDY.items():
         t = t.replace(a, b)
+    for i, c in enumerate(t):   # gap boshidagi birinchi harf katta bo'lsin ("[sizning kunlik..." -> "[Sizning kunlik...")
+        if c.isalpha():
+            t = t[:i] + c.upper() + t[i + 1:]
+            break
     return t
 
 
@@ -856,12 +860,12 @@ def postprocess_groups(img, groups, reader, source):
         extra = []
     out = []
     for g in sorted(groups + extra, key=lambda x: (x["box"][1], x["box"][0])):
-        if not keep_group(g):
-            continue
         if g.get("text"):
             g = dict(g, text=re.sub(r"\s{2,}", " ", re.sub(r"[@#$%^&*{}<>|\\_=+`]", "", g["text"])).strip())
         if source == "english" and g.get("text"):
             g = dict(g, text=fix_ocr_words(g["text"]))
+        if not keep_group(g):   # tuzatishdan KEYIN tekshiriladi (masalan "Coong" -> "Cooing" ovoz effekti)
+            continue
         out.append(g)
     return out
 

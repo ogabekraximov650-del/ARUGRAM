@@ -26,5 +26,5 @@ assert not kg({"text": "HAAH", "conf": 0.1}), "past ishonch"
 assert not kg({"text": "Haah", "conf": 0.9}), "ovoz effekti saqlanib qoldi"
 assert not kg({"text": "Yz", "conf": 0.9}), "1-2 harfli shovqin"
 assert kg({"text": "No", "conf": 0.9}) and kg({"text": "I NEVER EXPECTED THIS", "conf": 0.9}) and kg({"text": "E-RANK HUNTER;", "conf": 0.8}) and kg({"text": "", "conf": 0.0})
-assert ns["tidy_uz"]("e\u2011rank \u201cJin\u2011Woo\u201d o\u2018zi") == 'e-rank "Jin-Woo" o\'zi', ns["tidy_uz"]("e\u2011rank")
+assert ns["tidy_uz"]("e\u2011rank \u201cJin\u2011Woo\u201d o\u2018zi") == 'E-rank "Jin-Woo" o\'zi', ns["tidy_uz"]("e\u2011rank")
 print("test_manual: OK")
