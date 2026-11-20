@@ -587,7 +587,7 @@ def clean_and_draw(img, grp, uz):
     if rect is None:
         rect = (cx - bw // 4, cy - bh // 4, cx + bw // 4, cy + bh // 4)
     rx0, ry0, rx1, ry1 = rect
-    pad = max(3, int(min(rx1 - rx0, ry1 - ry0) * 0.04))
+    pad = max(4, int(min(rx1 - rx0, ry1 - ry0) * 0.09))  # chiziqqa yopishmasin
     tw, th = (rx1 - rx0) - 2 * pad, (ry1 - ry0) - 2 * pad
     font, lines, lh = fit_text(uz, tw, th, max_size=int(fs * 1.35) + 4)
     pil = Image.fromarray(img)

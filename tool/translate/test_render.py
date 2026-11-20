@@ -52,7 +52,7 @@ assert dark[ring].sum() > 0.5 * (orig.sum(axis=2)[ring] < 150).sum(), "pufakcha 
 n_new = int(inside_dark.sum())
 assert n_new > 200, f"yangi matn chizilmagan ({n_new})"
 # Yangi matn pufakcha ichida (ellips chegarasiga tegmaydi): chiziq halqasidan tashqari qora piksel yo'q.
-assert not (dark & (dist >= 0.80) & (dist <= 0.93)).any(), "matn chiziqqa yaqin/chiqib ketgan"
+assert not (dark & (dist >= 0.80) & (dist <= 0.95)).any(), "matn chiziqqa yaqin/chiqib ketgan"
 # Eski inglizcha matn qolmagan: yangi matnning qora piksellari soni eskisidan juda ko'p farq qilmaydi va birinchi qator joyida eski shakl yo'q.
 old_region = orig[boxes[0][1]:boxes[0][3], boxes[0][0]:boxes[0][2]]
 print("test_render: OK", n_new, "qora piksel")
