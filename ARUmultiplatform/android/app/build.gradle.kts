@@ -9,17 +9,6 @@ val ciVersionCode = (System.getenv("VERSION_CODE") ?: "1").toIntOrNull() ?: 1
 val ciKeystore = System.getenv("KS_FILE") ?: "${rootDir}/../../ci/release.keystore"
 val ciStorePass = System.getenv("KS_PASS")?.takeIf { it.isNotBlank() } ?: "arumedia"
 
-// AdMob (reklama): foydalanuvchining HAQIQIY identifikatorlari (ular APK ichida ochiq turadi, sir emas). CI'da `ADMOB_APP_ID` / `ADMOB_REWARDED_ID` Secret'lari
-// bo'lsa ular ustun turadi (masalan, Google'ning SINOV ID'lari bilan sinash uchun: ca-app-pub-3940256099942544~3347511713 va .../5224354917).
-val testAdmobApp = "ca-app-pub-3940256099942544~3347511713"
-val prodAdmobApp = "ca-app-pub-8901205768474122~2994428955"
-val prodAdmobRewarded = "ca-app-pub-8901205768474122/4115938931"
-val testAdmobRewarded = "ca-app-pub-3940256099942544/5224354917"
-// VAQTINCHA: AdMob akkaunti hali tasdiqlanmagan ("Account not approved yet"), shuning uchun standart — Google SINOV ID'lari (reklama oqimini sinash uchun, pul keltirmaydi).
-// Akkaunt tasdiqlangach: quyidagi ikki qatorda `testAdmobApp`/`testAdmobRewarded` ni `prodAdmobApp`/`prodAdmobRewarded` ga almashtiring.
-val admobApp = System.getenv("ADMOB_APP_ID")?.takeIf { it.isNotBlank() } ?: testAdmobApp
-val admobRewarded = System.getenv("ADMOB_REWARDED_ID")?.takeIf { it.isNotBlank() } ?: testAdmobRewarded
-
 // `-PonlyAbi=armeabi-v7a` — faqat 32 bitli APK (CI'da "Admin 32 bit" uchun); bo'lmasa 32+64 bit.
 val onlyAbi = (project.findProperty("onlyAbi") as String?)?.takeIf { it.isNotBlank() }
 
@@ -38,9 +27,6 @@ android {
         buildConfigField("String", "API_BASE", "\"https://arumediatv.uzcom.workers.dev\"")
         // Serverga (`X-App-Version`) boradigan versiya: `<versionName>+<versionCode % 1000>` (worker `version_rank` shuni tushunadi).
         buildConfigField("String", "APP_VERSION", "\"0.1.0+${ciVersionCode % 1000}\"")
-        manifestPlaceholders["admobAppId"] = admobApp
-        buildConfigField("String", "ADMOB_REWARDED_ID", "\"$admobRewarded\"")
-        buildConfigField("boolean", "ADMOB_TEST", "${admobApp == testAdmobApp}")
 
         ndk {
             abiFilters += if (onlyAbi != null) listOf(onlyAbi) else listOf("armeabi-v7a", "arm64-v8a")
@@ -121,8 +107,6 @@ dependencies {
     // Telegram .tgs (Lottie) stikerlarini bir marta animatsiyali WebP'ga aylantirish uchun (faqat chizuvchi sifatida)
     implementation("com.airbnb.android:lottie:6.7.1")
     implementation(libs.okhttp)
-    // Reklama: AdMob (mukofotli reklama — "reklama ko'r, 60 daqiqa ko'r").
-    implementation("com.google.android.gms:play-services-ads:23.6.0")
     // Google bilan kirish (Credential Manager + Google ID).
     implementation("androidx.credentials:credentials:1.3.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.3.0")

@@ -7668,3 +7668,7 @@ Foydalanuvchi: ilovani silliq qil, qotishlarni tuzat. Telefonda profil olib bo'l
 - **Talab (foydalanuvchi):** "Ilovadagi va panel botdagi bo'limlar ro'yxati teskari tartibda bo'lsin" — eng katta bo'lim raqami tepada.
 - **Ilova** (`AdminSeasonsScreen`, "Bo'limni boshqarish"): ro'yxat ko'rsatiladigan bo'lim raqami (`bolim_id`, bo'lmasa `season_id`) bo'yicha kamayish tartibida. Server (`GET /api/seasons/anime/:id`) tartibi o'zgarmadi — u bo'limlarning boshqa ro'yxatlarida ham ishlatiladi (foydalanuvchi ko'radigan "Bo'limlar" yorlig'i ham oldingi tartibda qoldi).
 - **Bot** (`worker/src/lib.rs` `encbot_seasons`, "Qaysi bo'limga qism qo'shamiz?"): `ORDER BY COALESCE(NULLIF(bolim_id,0), season_id) DESC, season_id DESC`. Tugmani bosganda bo'lim `bolim_id` bo'yicha topiladi — tartib bunga ta'sir qilmaydi.
+
+## Reklama olib tashlandi (Kotlin ilova)
+
+Foydalanuvchi talabi: ilovadan reklamaga tegishli hamma narsa olib tashlandi — AdMob kutubxonasi (`play-services-ads`), `RewardedAds.kt`, Profildagi "reklama ko'r" tugmasi, "Obuna kerak" ekranidagi reklama tugmasi, to'lovlar tarixidagi "Reklama orqali" yozuvi, manifest/proguard/gradle/CI (`ADMOB_*`) sozlamalari. Ko'rish huquqi faqat obuna bilan. Server tomonidagi `/api/billing/ad-reward` o'zgarmadi (ilova endi chaqirmaydi).

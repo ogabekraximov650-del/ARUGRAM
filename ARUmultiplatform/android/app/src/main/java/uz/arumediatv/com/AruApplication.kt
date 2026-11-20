@@ -18,9 +18,9 @@ class AruApplication : Application() {
     }
 
     /**
-     * UZ: halokat yozuvchisi ENG ERTA nuqtada (`attachBaseContext`) o'rnatiladi — kutubxonalarning ishga tushish komponentlari (masalan AdMob `MobileAdsInitProvider`) `onCreate` dan OLDIN ishga tushadi,
+     * UZ: halokat yozuvchisi ENG ERTA nuqtada (`attachBaseContext`) o'rnatiladi — kutubxonalarning ishga tushish komponentlari `onCreate` dan OLDIN ishga tushadi,
      * `onCreate` da o'rnatilsa ularning halokati yozilmay qolardi. Kotlin/Java halokatlari `last_crash.txt` ga va Download papkasiga yoziladi.
-     * EN: the crash logger is installed at the earliest point so provider-init crashes (e.g. AdMob) are captured too.
+     * EN: the crash logger is installed at the earliest point so provider-init crashes are captured too.
      * RU: zapis padeniy ustanavlivaetsya v `attachBaseContext`, do provajderov bibliotek.
      */
     override fun attachBaseContext(base: android.content.Context) {

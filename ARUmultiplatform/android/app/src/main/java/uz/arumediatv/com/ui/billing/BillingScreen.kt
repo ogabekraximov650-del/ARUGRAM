@@ -331,19 +331,17 @@ private fun HistoryPage() {
         LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             items(list) { e ->
                 val up = e.isTopUp
-                val ad = e.isAd
                 val c = if (up) Success else AruColors.Accent
                 Glass(radius = 14) { Row(Modifier.padding(14.dp, 11.dp), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(34.dp).clip(RoundedCornerShape(10.dp)).background(c.copy(alpha = 0.16f)), contentAlignment = Alignment.Center) {
-                        Icon(if (up) AruIcons.AddCard else if (ad) AruIcons.PlayCircleOutline else AruIcons.WorkspacePremium, null, tint = c, modifier = Modifier.size(18.dp))
+                        Icon(if (up) AruIcons.AddCard else AruIcons.WorkspacePremium, null, tint = c, modifier = Modifier.size(18.dp))
                     }
                     Spacer(Modifier.width(12.dp))
                     Column(Modifier.weight(1f)) {
-                        Text(if (up) "Balans to'ldirildi" else if (ad) "Reklama orqali" else "${planLabel(e.days)} obuna", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(if (up) "Balans to'ldirildi" else "${planLabel(e.days)} obuna", color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(whenText(e.createdAt), color = Color.White.copy(alpha = 0.5f), fontSize = 11.5.sp, modifier = Modifier.padding(top = 2.dp))
                     }
-                    if (ad) Text("+1 soat", color = AruColors.Accent, fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
-                    else Text("${if (up) "+" else "−"}${formatSum(Math.abs(e.amount))}", color = if (up) Success else Color.White.copy(alpha = 0.8f), fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
+                    Text("${if (up) "+" else "−"}${formatSum(Math.abs(e.amount))}", color = if (up) Success else Color.White.copy(alpha = 0.8f), fontSize = 13.5.sp, fontWeight = FontWeight.ExtraBold)
                 } }
             }
         }

@@ -189,8 +189,6 @@ fun ProfileScreen(onLogin: () -> Unit, onBotLogin: () -> Unit, onEdit: () -> Uni
             })
             Spacer(Modifier.height(16.dp))
             BillingButton(onBilling)
-            Spacer(Modifier.height(10.dp))
-            AdButton(profileScroll)
             Spacer(Modifier.height(12.dp))
             StatsGrid(stats, cacheBytes, onOpenStat, onStorage)
             Spacer(Modifier.height(12.dp))
@@ -467,58 +465,6 @@ private fun BillingButton(onClick: () -> Unit) {
         }
         Spacer(Modifier.width(6.dp))
         Icon(AruIcons.ChevronRight, null, tint = Color.White.copy(alpha = 0.7f), modifier = Modifier.size(20.dp))
-    }
-}
-
-/** Bepul tomosha: reklama oxirigacha ko'rilsa server obuna muddatiga 1 soat qo'shadi (har safar oldingisining ustiga; boshqa qurilmada ham ishlaydi). */
-@Composable
-private fun AdButton(scroll: androidx.compose.foundation.ScrollState) {
-    val ctx = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val st by AppServices.billing.state.collectAsStateWithLifecycle()
-    var busy by remember { mutableStateOf(false) }
-    var msg by remember { mutableStateOf<String?>(null) }
-    var now by remember { mutableStateOf(System.currentTimeMillis()) }
-    // UZ: reklama kutubxonasi (WebView + reklama yuklash asosiy oqimda og'ir ishlaydi) Profilga kirgan zahoti EMAS: ekran 3 soniya tinch tursa va
-    //     surilmayotgan paytda ishga tushadi — surish paytida qotib qolmasin. EN: the ad SDK starts only when the screen has been idle (not scrolling).
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(3000)
-        androidx.compose.runtime.snapshotFlow { scroll.isScrollInProgress }.first { !it }
-        uz.arumediatv.com.data.RewardedAds.ensureInit(ctx)
-    }
-    // Obuna (yoki reklama vaqti) tugaguncha yangi reklama ko'rib bo'lmaydi: muddat tugagan zahoti tugma yana ochiladi.
-    LaunchedEffect(st.until) {
-        now = System.currentTimeMillis()
-        if (st.until > now) { kotlinx.coroutines.delay(st.until - now + 200); now = System.currentTimeMillis() }
-    }
-    val locked = st.until > now
-    val shape = RoundedCornerShape(18.dp)
-    Row(
-        Modifier.fillMaxWidth().clip(shape).background(Color.White.copy(alpha = if (busy || locked) 0.04f else 0.09f)).border(1.dp, AruColors.Accent.copy(alpha = if (locked) 0.25f else 0.55f), shape)
-            .clickable(enabled = !busy && !locked) {
-                var a: android.content.Context? = ctx
-                while (a is android.content.ContextWrapper && a !is android.app.Activity) a = a.baseContext
-                val act = a as? android.app.Activity
-                if (act == null) { msg = "Reklamani ochib bo'lmadi." } else {
-                    busy = true; msg = null
-                    uz.arumediatv.com.data.RewardedAds.show(
-                        act,
-                        onReward = { scope.launch { msg = AppServices.billing.adReward(); busy = false } },
-                        onFail = { msg = it; busy = false },
-                    )
-                }
-            }.padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(AruIcons.PlayCircleOutline, null, tint = AruColors.Accent, modifier = Modifier.size(22.dp))
-        Spacer(Modifier.width(10.dp))
-        Column(Modifier.weight(1f)) {
-            Text(if (busy) "Reklama ochilmoqda..." else "Bepul tomosha qilish uchun reklama ko'rish", color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 2)
-            Text(
-                msg ?: if (locked) "Obuna yoki vaqt tugaguncha reklama ko'rib bo'lmaydi" else "Reklamani oxirigacha ko'ring — obuna muddatiga 1 soat qo'shiladi",
-                color = if (msg != null) Color(0xFFFF8A80) else Color.White.copy(alpha = 0.7f), fontSize = 11.5.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 3.dp),
-            )
-        }
     }
 }
 
