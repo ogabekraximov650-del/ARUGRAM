@@ -109,6 +109,15 @@ def claim(runner):
 
 def translate_texts(texts, source):
     """Matnlar ro'yxati -> o'zbekcha ro'yxat. Xato bo'lgan element bo'sh satr (asl matn qoladi)."""
+    def norm(t):   # OCR katta harfli/aralash yozuvni gap shakliga keltirish (model aniqroq tarjima qiladi)
+        t = (t or "").strip()
+        letters = [c for c in t if c.isalpha()]
+        if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.5:
+            t = t.lower()
+            t = re.sub(r"\bi\b", "I", t)
+            t = t[:1].upper() + t[1:]
+        return t
+    texts = [norm(t) for t in texts]
     out = []
     for i in range(0, len(texts), CHUNK):
         part = texts[i:i + CHUNK]
@@ -119,7 +128,7 @@ def translate_texts(texts, source):
                           timeout=180, tries=2)
                 got = r.get("results")
                 if isinstance(got, list) and len(got) == len(part):
-                    res = [str(x or "") for x in got]
+                    res = [str(x or "").replace('\\"', '"').replace("\\", "").strip() for x in got]   # JSON qochirish belgilari (\") tushib qolmasin
                     break
             except Exception as e:  # noqa: BLE001
                 log(f"  tarjima {attempt + 1}/3 muvaffaqiyatsiz: {e}")
@@ -516,6 +525,31 @@ def fit_text(text, width, height, max_size):
     return f, wrap_lines(text, f, width), MIN + 1
 
 
+def smooth_fill(img, x0, y0, x1, y1, t=2):
+    """To'rtburchak (x0,y0)-(x1,y1) ni uning CHEKKALARIDAN silliq to'ldiradi (Coons yamog'i: to'rt chekka qatordan bilinear interpolyatsiya).
+    Gradient yoki tekis fonda eski yozuv qutisi izsiz yo'qoladi (Telea katta to'rtburchakda ko'rinadigan dog' qoldirardi)."""
+    import numpy as np
+    H, W = img.shape[:2]
+    x0, y0, x1, y1 = max(t, x0), max(t, y0), min(W - 1 - t, x1), min(H - 1 - t, y1)
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return False
+    a = img.astype(np.float32)
+    top = a[y0 - t:y0, x0:x1 + 1].mean(axis=0)
+    bot = a[y1 + 1:y1 + 1 + t, x0:x1 + 1].mean(axis=0)
+    left = a[y0:y1 + 1, x0 - t:x0].mean(axis=1)
+    right = a[y0:y1 + 1, x1 + 1:x1 + 1 + t].mean(axis=1)
+    h, w = y1 - y0 + 1, x1 - x0 + 1
+    u = np.linspace(0, 1, w, dtype=np.float32)[None, :, None]
+    v = np.linspace(0, 1, h, dtype=np.float32)[:, None, None]
+    TL, TR = (top[0] + left[0]) / 2, (top[-1] + right[0]) / 2
+    BL, BR = (bot[0] + left[-1]) / 2, (bot[-1] + right[-1]) / 2
+    Lc = (1 - u) * left[:, None, :] + u * right[:, None, :]
+    Tc = (1 - v) * top[None, :, :] + v * bot[None, :, :]
+    bil = (1 - u) * (1 - v) * TL + u * (1 - v) * TR + (1 - u) * v * BL + u * v * BR
+    img[y0:y1 + 1, x0:x1 + 1] = np.clip(Lc + Tc - bil, 0, 255).astype(np.uint8)
+    return True
+
+
 def _clean_and_draw_rect(img, grp, uz):
     """(Zaxira) pufakcha topilmasa: OCR qutisi atrofini tozalab, o'zbekcha matnni yozadi."""
     import cv2
@@ -532,38 +566,37 @@ def _clean_and_draw_rect(img, grp, uz):
     ring[max(0, y0 - ry0 - 1):y1 - ry0 + 1, max(0, x0 - rx0 - 1):x1 - rx0 + 1] = False
     samples = region[ring] if ring.any() else region.reshape(-1, 3)
     bg = np.median(samples, axis=0)
-    flat = float(samples.std(axis=0).mean()) < 30
+    gray_r = cv2.cvtColor(np.ascontiguousarray(region), cv2.COLOR_RGB2GRAY)
+    lap = np.abs(cv2.Laplacian(gray_r, cv2.CV_32F))
+    ring_lap = float(lap[ring].mean()) if ring.any() else 99.0
     mask = np.zeros((H, W), np.uint8)
     for (bx0, by0, bx1, by1) in grp["boxes"]:
         cv2.rectangle(mask, (max(0, bx0 - pad), max(0, by0 - pad)), (min(W - 1, bx1 + pad), min(H - 1, by1 + pad)), 255, -1)
-    if flat:
-        img[mask > 0] = bg.astype(np.uint8)
-        fg = (0, 0, 0) if bg.mean() > 128 else (255, 255, 255)
-        stroke = None
+    stroke = None
+    if ring_lap < 4.0:
+        # Silliq fon (tekis yoki gradient): har bir quti chekkalaridan silliq to'ldiriladi.
+        for (bx0, by0, bx1, by1) in grp["boxes"]:
+            smooth_fill(img, bx0 - pad, by0 - pad, bx1 + pad, by1 + pad)
     else:
-        # Murakkab / gradient fon: matn belgilari FON FARQI bo'yicha topiladi (har pikselning atrofdagi mediana rangidan farqi) — rangli, yaltiroq,
-        # ikki rangli yozuvlar ham; fon silliq (gradient, tekis) bo'lsa — butun quti tiklanadi (chekkadan interpolyatsiya).
+        # Murakkab fon: matn belgilari FON FARQI bo'yicha topiladi (har pikselning atrofdagi mediana rangidan farqi) — rangli, yaltiroq yozuvlar ham;
+        # keyin davriy fon (screentone) usuli yoki Telea bilan tiklanadi.
         k = max(15, min(71, int(fs * 2.5) // 2 * 2 + 1))
         mx = k // 2 + 2
         ex0, ey0, ex1, ey1 = max(0, rx0 - mx), max(0, ry0 - mx), min(W, rx1 + mx), min(H, ry1 + mx)
         big = np.ascontiguousarray(img[ey0:ey1, ex0:ex1])
         med = cv2.medianBlur(big, k)
         diff = np.abs(big.astype(np.int16) - med.astype(np.int16)).max(axis=2)
-        strokes_c = (diff > 24).astype(np.uint8)
         strokes = np.zeros_like(mask)
-        strokes[ey0:ey1, ex0:ex1] = strokes_c
+        strokes[ey0:ey1, ex0:ex1] = (diff > 24).astype(np.uint8)
         strokes = cv2.bitwise_and(strokes, mask)
         strokes = cv2.dilate(strokes, np.ones((5, 5), np.uint8), iterations=1)
-        gray_r = cv2.cvtColor(region, cv2.COLOR_RGB2GRAY)
-        lap = np.abs(cv2.Laplacian(gray_r, cv2.CV_32F))
-        ring_lap = float(lap[ring].mean()) if ring.any() else 99.0
-        smooth = ring_lap < 4.0
-        use = (mask > 0) if smooth else (strokes > 0)
-        inpaint_mask(img, use)
-        # Yozuv rangi: tiklangan joyning yorqinligiga qarab (och fonda qora oq chiziq bilan, to'qda oq qora chiziq bilan).
-        after = img[mask > 0]
-        lum = float(np.median(after.mean(axis=1))) if after.size else float(bg.mean())
-        fg, stroke = ((0, 0, 0), (255, 255, 255)) if lum > 140 else ((255, 255, 255), (0, 0, 0))
+        inpaint_mask(img, strokes > 0)
+    # Yozuv rangi: tiklangan joyning yorqinligiga qarab (och fonda qora, to'qda oq); murakkab fonda qarama-qarshi chiziq bilan.
+    after = img[mask > 0]
+    lum = float(np.median(after.mean(axis=1))) if after.size else float(bg.mean())
+    fg = (0, 0, 0) if lum > 140 else (255, 255, 255)
+    if ring_lap >= 4.0:
+        stroke = (255, 255, 255) if lum > 140 else (0, 0, 0)
     # Yozuv maydoni: matn qutisidan biroz kengroq (o'zbekcha matn uzunroq bo'ladi), rasm ichida.
     bw, bh = x1 - x0, y1 - y0
     ex, ey = int(bw * 0.12) + pad, int(bh * 0.08) + pad
@@ -683,12 +716,16 @@ def layout_in_bubble(uz, filled, cx, cy, pad, max_size, min_size=9):
     return None
 
 
-JUNK_WORDS = (".com", "www.", "http", "discord", "patreon", "facebook", "twitter", "instagram", "scanlation", "scans", "translator", "proofreader",
+SFX_WORDS = {"gong", "swoosh", "whoosh", "beep", "stab", "klang", "klong", "clang", "thud", "boom", "bang", "crash", "haah", "huff", "tring", "ding", "slash",
+             "crack", "thump", "splat", "bam", "pow", "zzz", "cooing", "kreak", "creak", "bzzt", "thwack", "slam", "swish", "whack", "pant", "gasp"}
+SHORT_OK = {"no", "ok", "oh", "ah", "uh", "um", "hm", "so", "go", "me", "we", "he", "it", "is", "to", "do", "be", "by", "on", "at", "in", "of", "or",
+            "an", "as", "if", "my", "up", "us", "am", "hi", "a", "i"}
+JUNK_WORDS = (".com", "editor", "quality check", "cleaner", "raw provider", "www.", "http", "discord", "patreon", "facebook", "twitter", "instagram", "scanlation", "scans", "translator", "proofreader",
               "typesetter", "redrawer", "credit:", "join our", "read on", "@gmail", "support us", "recruit", "staff")
 OCR_CONF = {frozenset(x) for x in (("h", "k"), ("u", "l"), ("u", "n"), ("l", "i"), ("o", "0"), ("c", "e"), ("e", "o"), ("a", "o"), ("r", "p"), ("t", "l"),
                                    ("m", "n"), ("n", "h"), ("d", "o"), ("g", "6"), ("s", "5"), ("b", "6"), ("b", "h"), ("v", "y"), ("u", "v"), ("a", "4"),
                                    ("i", "1"), ("l", "1"), ("f", "t"), ("c", "o"), ("r", "n"), ("q", "g"))}
-OCR_FIX = {"tke": "the", "tbe": "the", "tne": "the", "whal": "what", "wnat": "what", "bul": "but", "yau": "you", "yov": "you"}
+OCR_FIX = {"slng": "sung", "sune": "sung", "sng": "sung", "tke": "the", "tbe": "the", "tne": "the", "whal": "what", "wnat": "what", "bul": "but", "yau": "you", "yov": "you"}
 _SPELL = None
 
 
@@ -700,6 +737,13 @@ def keep_group(g) -> bool:
     letters = sum(1 for c in t if c.isalpha())
     if letters < 2:
         return False
+    words = [w.lower() for w in re.findall(r"[A-Za-z]+", t)]
+    if words and all(w in SFX_WORDS for w in words):
+        return False   # ovoz effekti (BEEP, GONG...) — tarjima qilinmaydi
+    if letters <= 2 and "".join(words) not in SHORT_OK:
+        return False   # 1-2 harfli shovqin (Yz, Yo)
+    if sum(1 for c in t if c.isdigit()) / max(1, len(t)) > 0.35:
+        return False
     sym = sum(1 for c in t if not (c.isalnum() or c.isspace() or c in ".,!?'\"-:;()~…"))
     if sym / max(1, len(t)) > 0.2:
         return False
@@ -709,17 +753,46 @@ def keep_group(g) -> bool:
     return not any(w in low for w in JUNK_WORDS)
 
 
+def _ocr_candidates(low):
+    """`low` so'zidan OCR chalkashligi (OCR_CONF) bo'yicha 1-3 ta harfni almashtirib hosil bo'lgan LUG'ATDAGI so'zlar."""
+    import itertools
+    alts = {}
+    for i, ch in enumerate(low):
+        a = [o for pair in OCR_CONF for o in pair if ch in pair and o != ch]
+        if a:
+            alts[i] = sorted(set(a))
+    out = set()
+    pos = list(alts)
+    for k in (1, 2, 3):
+        for comb in itertools.combinations(pos, k):
+            for rep in itertools.product(*(alts[i] for i in comb)):
+                w = list(low)
+                for i, r in zip(comb, rep):
+                    w[i] = r
+                w = "".join(w)
+                if w in _SPELL:
+                    out.add(w)
+    return out
+
+
 def fix_ocr_words(text: str) -> str:
-    """Inglizcha OCR xatolarini lug'at bo'yicha tuzatadi (sun'iy intellektsiz: tahrir masofasi): masalan KLNTER -> HUNTER. Faqat 5+ harfli, defis/apostrofga
-    yopishmagan so'zlar (ismlar buzilmasin) va kichik "chalkash harf" ro'yxati (`OCR_FIX`) bo'yicha."""
+    """Inglizcha OCR xatolarini lug'at bo'yicha tuzatadi (sun'iy intellektsiz): faqat OCR HARF CHALKASHLIGIGA o'xshash almashtirishlar (H/K, U/L, P/R...)
+    bilan: KLNTER -> HUNTER, SOppy -> SORRY. So'z lug'atda bo'lmasa yoki juda kam uchrasa (soppy) va nomzod ancha ko'p uchrasa almashtiriladi.
+    4+ harfli, defis/apostrofga yopishmagan so'zlar (ismlar buzilmasin) va kichik `OCR_FIX` jadvali (TkE -> THE, SLNG -> SUNG)."""
     global _SPELL
     import re as _re
     try:
         if _SPELL is None:
             from spellchecker import SpellChecker
-            _SPELL = SpellChecker(distance=2)
+            _SPELL = SpellChecker(distance=1)
     except Exception:  # noqa: BLE001
         return text
+
+    def freq(w):
+        try:
+            return _SPELL.word_usage_frequency(w)
+        except Exception:  # noqa: BLE001
+            return _SPELL[w]
 
     def fix(m):
         w = m.group(0)
@@ -727,19 +800,14 @@ def fix_ocr_words(text: str) -> str:
         low = w.lower()
         if low in OCR_FIX:
             new = OCR_FIX[low]
-        elif len(w) >= 5 and pre not in ("-", "'") and post not in ("-", "'") and low not in _SPELL:
-            # Faqat OCR HARF CHALKASHLIGIGA o'xshash almashtirishlar (H/K, U/L, U/N, 0/O...) bilan bir uzunlikdagi nomzodlar; eng ko'p uchraydigani.
-            new = None
-            best = -1
-            for cand in (_SPELL.candidates(low) or ()):
-                if cand == low or len(cand) != len(low):
-                    continue
-                diff = [(a, b) for a, b in zip(low, cand) if a != b]
-                if diff and all(frozenset(p_) in OCR_CONF for p_ in diff):
-                    f = _SPELL.word_usage_frequency(cand) if hasattr(_SPELL, "word_usage_frequency") else _SPELL[cand]
-                    if f > best:
-                        best, new = f, cand
-            if not new:
+        elif len(w) >= 4 and pre not in ("-", "'") and post not in ("-", "'"):
+            f0 = freq(low) if low in _SPELL else 0.0
+            best, new = -1.0, None
+            for cand in _ocr_candidates(low):
+                f1 = freq(cand)
+                if f1 > best:
+                    best, new = f1, cand
+            if not new or (f0 > 0 and best < 300 * f0):
                 return w
         else:
             return w

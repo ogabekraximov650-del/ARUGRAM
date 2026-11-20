@@ -8,11 +8,12 @@ from PIL import Image, ImageDraw, ImageFont
 
 src = Path(__file__).with_name("translate.py").read_text()
 tree = ast.parse(src)
-names = {"merge_same_bubble", "inpaint_texture", "inpaint_mask", "find_missed", "find_bubble", "clean_and_draw", "_clean_and_draw_rect", "layout_in_bubble",
+names = {"smooth_fill", "_ocr_candidates", "merge_same_bubble", "inpaint_texture", "inpaint_mask", "find_missed", "find_bubble", "clean_and_draw", "_clean_and_draw_rect", "layout_in_bubble",
          "_balanced_lines", "_font", "font_path", "wrap_lines", "_word_ok", "fit_text"}
 body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in names)
         or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "FONT_CANDIDATES" for t in n.targets))]
-ns = {"Path": Path, "log": print, "cv2": cv2, "np": np, "functools": functools}
+import re
+ns = {"Path": Path, "log": print, "cv2": cv2, "np": np, "functools": functools, "re": re}
 exec(compile(ast.Module(body, []), "translate.py", "exec"), ns)
 
 # 1) Davriy fon (yarim ton): davriy usul Telea'dan aniqroq bo'lishi kerak.
@@ -105,4 +106,15 @@ g2 = {"box": (70, 122, 70 + int(f.getlength("ACCEPT?")), 146), "boxes": [(70, 12
 mg, mu = ns["merge_same_bubble"](arr, [g1, g2], ["Kunlik topshiriq", "Qabul qilasizmi?"])
 assert len(mg) == 1 and mu[0] == "Kunlik topshiriq Qabul qilasizmi?", (len(mg), mu)
 print("merge_same_bubble: OK")
+# 6) Coons silliq to'ldirish: vertikal gradient aniq tiklanadi (xato <= 3).
+H, W = 200, 300
+yy, xx = np.mgrid[0:H, 0:W]
+g = np.clip(yy * 255 / H, 0, 255).astype(np.uint8)
+gt = np.stack([g, g, g], axis=2)
+arr = gt.copy()
+arr[60:110, 80:220] = (10, 200, 50)
+ns["smooth_fill"](arr, 80, 60, 219, 109)
+err = np.abs(arr.astype(int) - gt.astype(int))[60:110, 80:220].mean()
+assert err < 3.0, f"Coons xatosi katta: {err:.2f}"
+print(f"smooth_fill: OK (xato {err:.2f})")
 print("test_classic: OK")

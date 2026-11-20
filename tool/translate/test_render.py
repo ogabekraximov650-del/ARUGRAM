@@ -8,17 +8,20 @@ from PIL import Image, ImageDraw, ImageFont
 
 src = Path(__file__).with_name("translate.py").read_text()
 tree = ast.parse(src)
-names = {"fix_ocr_words", "_balanced_lines", "layout_in_bubble", "_font", "font_path", "wrap_lines", "_word_ok", "fit_text", "find_bubble", "_clean_and_draw_rect", "clean_and_draw"}
+names = {"smooth_fill", "_ocr_candidates", "fix_ocr_words", "_balanced_lines", "layout_in_bubble", "_font", "font_path", "wrap_lines", "_word_ok", "fit_text", "find_bubble", "_clean_and_draw_rect", "clean_and_draw"}
 body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in names)
         or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "FONT_CANDIDATES" for t in n.targets))]
 import functools
-ns = {"Path": Path, "log": print, "cv2": cv2, "np": np, "functools": functools}
-body += [n for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, "id", "") in ("OCR_FIX", "OCR_CONF", "_SPELL") for t in n.targets)]
+import re
+ns = {"Path": Path, "log": print, "cv2": cv2, "np": np, "functools": functools, "re": re}
+body += [n for n in tree.body if isinstance(n, ast.Assign) and any(getattr(t, "id", "") in ("OCR_FIX", "OCR_CONF", "_SPELL", "SFX_WORDS", "SHORT_OK", "JUNK_WORDS") for t in n.targets)]
 ns["__builtins__"] = __builtins__
 exec(compile(ast.Module(body, []), "translate.py", "exec"), ns)
 fx = ns["fix_ocr_words"]("THE KLNTER WILL HLNT MONSTERS, JIN-WOO KNEW")
 assert "HUNTER" in fx and "JIN-WOO" in fx, fx   # ism buzilmaydi
 assert ns["fix_ocr_words"]("TkE") == "THE" or ns["fix_ocr_words"]("TkE").lower() == "the", ns["fix_ocr_words"]("TkE")
+assert ns["fix_ocr_words"]("SOppy") .lower() == "sorry", ns["fix_ocr_words"]("SOppy")
+assert ns["fix_ocr_words"]("KLNTEP SLNG JIN-WOO") == "HUNTER SUNG JIN-WOO", ns["fix_ocr_words"]("KLNTEP SLNG JIN-WOO")
 print("fix_ocr_words:", fx)
 
 # 1) So'zlar uzilmasligi.
