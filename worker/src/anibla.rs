@@ -2234,6 +2234,18 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
 
     if path == "/api/anibla/done" {
         let Some(job) = own(env, &b).await else {
+            // TOPILGAN XATO (Laputa 2,9 GB: qismlar yuklangach `done` 60 s ichida javob bermadi, yuklovchi qayta yubordi; birinchi chaqiruv serverda
+            // bajarilib ish qatori o'chgan edi, ikkinchisi "lost" oldi va yuklovchi KANALDAGI QISMLARNI O'CHIRIB yubordi — qism buzuq qoldi).
+            // Endi: ish allaqachon qabul qilingan bo'lsa (kanal xabari `tg_files` da bor) — `dup` deb javob beriladi, yuklovchi hech narsani o'chirmaydi.
+            // EN: a retried `done` whose first call already completed must answer `dup`, not `lost`, so the uploader does not delete the channel parts.
+            let msg = jint(&b, "channel_msg");
+            if b["ok"].as_bool() == Some(true) && msg > 0 {
+                let seen = turso_exec(env, "SELECT 1 AS x FROM tg_files WHERE msg_id=? LIMIT 1", vec![TursoArg::int(msg)]).await
+                    .ok().and_then(|r| first_row(&r)).is_some();
+                if seen {
+                    return ok(json!({"ok": true, "dup": true}));
+                }
+            }
             return json_resp(&json!({"error": "lost"}), 409);
         };
         let id = jint(&job, "id");

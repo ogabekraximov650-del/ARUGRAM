@@ -111,7 +111,7 @@ def api(path, body):
             headers={"X-Encode-Token": os.environ["ENCODE_TOKEN"],
                      "Content-Type": "application/json", "User-Agent": "arumediatv-anibla"})
         try:
-            with urllib.request.urlopen(req, timeout=60) as r:
+            with urllib.request.urlopen(req, timeout=240 if path == "done" else 60) as r:  # `done` uzoq (qism yozish) — 60 s da uzilib qayta yuborilmasin
                 return json.loads(r.read() or b"{}")
         except urllib.error.HTTPError as e:
             if e.code == 409:
