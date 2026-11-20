@@ -780,7 +780,7 @@ def inpaint_texture(crop, mask):
                 src_ok[ok] = known[sy[ok], sx[ok]]
                 sel = ok & src_ok
                 if sel.any():
-                    out[sel] = crop[sy[sel], sx[sel]]
+                    out[sel] = out[sy[sel], sx[sel]]   # AVVAL tiklanganlardan ham nusxa olinadi (asl `crop` da hali yozuv piksellari bor!)
                     remaining &= ~sel
                     known = known | sel
         if not remaining.any():
