@@ -104,7 +104,8 @@ fn caption(season: &Value, ep_number: i64) -> String {
     out
 }
 
-async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result<(), String> {
+/// Post matni va "Tomosha qilish" tugmasi (muqovali ham, kadrlar kollajli ham bir xil).
+async fn compose(env: &Env, a: i64, s: i64, e: i64) -> std::result::Result<(Value, String, Value), String> {
     let season = turso_exec(env,
         "SELECT s.nomi, s.photo_url, s.bolim_id, s.turi, s.epizod_count,
                 COALESCE(NULLIF((SELECT t.name FROM translator_db t JOIN anime_db an ON an.translator_id = t.id WHERE an.id = s.anime_id), ''), s.tarjimon) AS tarjimon
@@ -124,7 +125,40 @@ async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result
         "text": "Tomosha qilish",
         "url": format!("https://t.me/{bot}?start={a}_{s}_{e}"),
     }]]});
+    Ok((season, text, markup))
+}
 
+/// UZ: 1080p (eng yuqori sifat) kodlash tugagach Actions yig'gan 3x3 KADRLAR KOLLAJI (16:9, JPEG) afisha O'RNIGA asosiy post rasmi bo'ladi.
+///     Post bir marta (`announced` belgisi); allaqachon e'lon qilingan bo'lsa `Ok(false)`. EN: the 3x3 frame collage replaces the poster in the main post.
+pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8]) -> std::result::Result<bool, String> {
+    let ch = channel(env);
+    if ch == 0 {
+        return Err("e'lon kanali sozlanmagan".into());
+    }
+    if jpeg.len() < 2000 || jpeg.len() > COVER_MAX {
+        return Err("kollaj hajmi noto'g'ri".into());
+    }
+    let claim = turso_exec(env,
+        "INSERT INTO announced (anime_id, season_id, epizod_id, at) VALUES (?,?,?,?)
+         ON CONFLICT DO NOTHING RETURNING at",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e), TursoArg::int(now_ms())]).await;
+    if !claim.ok().and_then(|r| first_row(&r)).is_some() {
+        return Ok(false);
+    }
+    let sent = async {
+        let (_, text, markup) = compose(env, a, s, e).await?;
+        upload_photo_post(env, ch, jpeg, &text, &markup).await
+    }.await;
+    if let Err(why) = sent {
+        let _ = turso_exec(env, "DELETE FROM announced WHERE anime_id=? AND season_id=? AND epizod_id=?",
+            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
+        return Err(why);
+    }
+    Ok(true)
+}
+
+async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result<(), String> {
+    let (season, text, markup) = compose(env, a, s, e).await?;
     let photo = bare_name(season["photo_url"].as_str().unwrap_or(""));
     let file_id = if photo.is_empty() { None } else { cover_file_id(env, &photo, ch).await.ok() };
     // Muqova bor — rasm bilan; yo'q yoki olinmasa — faqat matn (e'lon baribir chiqadi).
@@ -255,6 +289,37 @@ async fn upload_photo(env: &Env, ch: i64, bytes: &[u8]) -> std::result::Result<V
         return Err(format!("sendPhoto: {}", v["description"].as_str().unwrap_or("noma'lum")));
     }
     Ok(v)
+}
+
+/// Matn + tugma bilan `sendPhoto` (multipart) — kollaj posti (asosiy bot; bo'lmasa kodlash boti).
+async fn upload_photo_post(env: &Env, ch: i64, bytes: &[u8], caption: &str, markup: &Value) -> std::result::Result<Value, String> {
+    let mut last = String::new();
+    for token in [tg_secret(env, "TELEGRAM_BOT_TOKEN"), encbot_token(env)] {
+        if token.is_empty() {
+            continue;
+        }
+        let fd = web_sys::FormData::new().map_err(|_| "FormData".to_string())?;
+        fd.append_with_str("chat_id", &ch.to_string()).map_err(|_| "FormData".to_string())?;
+        fd.append_with_str("caption", caption).map_err(|_| "FormData".to_string())?;
+        fd.append_with_str("parse_mode", "HTML").map_err(|_| "FormData".to_string())?;
+        fd.append_with_str("reply_markup", &markup.to_string()).map_err(|_| "FormData".to_string())?;
+        let arr = js_sys::Uint8Array::from(bytes);
+        let parts = js_sys::Array::new();
+        parts.push(&arr);
+        let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(|_| "Blob".to_string())?;
+        fd.append_with_blob_and_filename("photo", &blob, "frames.jpg").map_err(|_| "FormData".to_string())?;
+        let req = Request::new_with_init(
+            &format!("https://api.telegram.org/bot{token}/sendPhoto"),
+            RequestInit::new().with_method(Method::Post).with_body(Some(fd.into())),
+        ).map_err(|e| e.to_string())?;
+        let mut r = Fetch::Request(req).send().await.map_err(|e| e.to_string())?;
+        let v: Value = r.json().await.map_err(|e| e.to_string())?;
+        if v["ok"] == json!(true) {
+            return Ok(v);
+        }
+        last = format!("sendPhoto: {}", v["description"].as_str().unwrap_or("noma'lum"));
+    }
+    Err(if last.is_empty() { "bot tokeni yo'q".into() } else { last })
 }
 
 /// `/start <anime>_<bo'lim>[_<qism>]` (e'londagi "Tomosha qilish"; faqat raqamlar) -> (anime, bo'lim, qism). Eski havolalar (`w<anime>_...`) ham ishlaydi.

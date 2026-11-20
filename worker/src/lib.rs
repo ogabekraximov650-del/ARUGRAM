@@ -11154,7 +11154,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh" | "/api/encode/collage"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/tr/claim" | "/api/tr/peek" | "/api/tr/check" | "/api/tr/finish" | "/api/tr/progress"
         | "/api/cmp/claim" | "/api/cmp/peek" | "/api/cmp/check" | "/api/cmp/finish" | "/api/cmp/progress"
@@ -12026,6 +12026,10 @@ async fn encode_settle(env: &Env, a: i64, s: i64, e: i64, queued_at: i64) {
     if settled < QUALITIES.len() {
         return;
     }
+    // Kollajli e'lon chiqmagan bo'lsa (masalan 1080p sifat yo'q/xato) — afisha bilan e'lon qilinadi (bir marta; `announced`).
+    if !done.is_empty() {
+        announce::episode_ready(env, a, s, e).await;
+    }
     let errs: Vec<String> = rows.iter()
         .filter(|r| r["state"].as_str() == Some("error")
             && !done.iter().any(|d| Some(d.as_str()) == r["quality"].as_str()))
@@ -12365,9 +12369,8 @@ pub(crate) async fn encode_commit_quality(env: &Env, (a, s, e): (i64, i64, i64),
         turso_batch(env, &stmts).await?;
         // Birinchi kodlangan sifat — qism endi ilovada ko'rinadi.
         free_seasons_forget().await;
-        if !had_any {
-            announce::episode_ready(env, a, s, e).await;
-        }
+        // E'lon (kanal posti) endi birinchi sifatda EMAS: 1080p (eng yuqori sifat) kodlash tugagach kadrlar kollaji bilan chiqadi (`/api/encode/collage`),
+        // kollaj chiqmasa — qism hamma sifat bo'yicha hal bo'lganda afisha bilan (`encode_settle`).
         // Eski (almashtirilgan) Telegram fayli kanaldan o'chadi.
         let old = bare_name(&old);
         if !old.is_empty() && old != file {
@@ -12795,6 +12798,22 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
 
     // Bazaga TO'G'RIDAN-TO'G'RI (CI skriptlari: video/statistika tozalash) yozilgach worker keshlari eskirib qoladi (ro'yxatlar o'zgarish belgisi bo'yicha keshlanadi,
     // belgi esa faqat worker orqali yozilganda yangilanardi). Shu yo'l hamma tegishli jadval belgilarini yangilaydi va hisoblagich keshlarini tashlaydi.
+    // 1080p (eng yuqori sifat) workflow'i 9 ta kadrdan yig'gan 3x3 kollaj (JPEG, tana — xom bayt): afisha o'rniga asosiy post (`announce::collage_post`).
+    if path == "/api/encode/collage" && method == Method::Post {
+        let qurl = req.url().ok();
+        let q = |k: &str| qurl.as_ref().and_then(|u| u.query_pairs().find(|(x, _)| x == k).map(|(_, v)| v.to_string())).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+        let (a, s, e) = (q("a"), q("s"), q("e"));
+        let mut req = req;
+        if a == 0 || s == 0 || e == 0 {
+            return json_resp(&json!({"error": "a, s, e kerak"}), 400);
+        }
+        let bytes = req.bytes().await?;
+        return match announce::collage_post(env, a, s, e, &bytes).await {
+            Ok(posted) => ok(json!({"ok": true, "posted": posted})),
+            Err(why) => json_resp(&json!({"error": why}), 502),
+        };
+    }
+
     if path == "/api/encode/refresh" && method == Method::Post {
         let mut tables: Vec<String> = Vec::new();
         for t in ["anime_db", "season_db", "epizod_db", "watch_history_db", "users_db", "stats_hourly", "stats_daily", "encode_jobs", "encode_q", "tg_files", "ratings_db", "favorites_db"] {

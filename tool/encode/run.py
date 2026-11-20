@@ -620,6 +620,49 @@ def api(path, body=None, method="POST"):
     raise RuntimeError(f"{path}: {err}")
 
 
+def make_collage(video: Path, dur: float) -> bytes:
+    """Kodlangan videodan 9 ta SIFATLI kadr -> 3x3 kollaj (1920x1080, 16:9, JPEG). Videoning 3%..88% oralig'i 9 teng bo'lakka bo'linadi
+    (boshidagi sarlavha va oxiridagi titrlar chetda); har bo'lakdan 6 ta nomzod kadr olinadi va ENG BATAFSILI tanlanadi: bir xil sifatda JPEG hajmi
+    qancha katta bo'lsa kadr shuncha tiniq va ma'noli (qora, xira, o'tish paytidagi kadrlar kichik chiqadi va tashlanadi).
+    EN: 9 quality frames (most detailed of 6 candidates per ninth, judged by JPEG size) tiled 3x3 into a 16:9 collage."""
+    import tempfile
+    tmp = Path(tempfile.mkdtemp())
+    t0, t1 = dur * 0.03, dur * 0.88
+    seg = (t1 - t0) / 9
+    best = []
+    for i in range(9):
+        cands = []
+        for j in range(6):
+            t = t0 + seg * i + seg * (j + 0.5) / 6
+            f = tmp / f"c{i}_{j}.jpg"
+            r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", f"{t:.2f}", "-i", str(video), "-frames:v", "1",
+                                "-vf", "scale=640:360:flags=lanczos", "-q:v", "4", str(f)], capture_output=True, timeout=120)
+            if r.returncode == 0 and f.exists() and f.stat().st_size > 0:
+                cands.append((f.stat().st_size, f))
+        if not cands:
+            raise RuntimeError(f"kollaj: {i + 1}-bo'lakdan kadr olinmadi")
+        sz, f = max(cands, key=lambda c: c[0])
+        f.rename(tmp / f"b{i}.jpg")
+        best.append(tmp / f"b{i}.jpg")
+    out = tmp / "collage.jpg"
+    r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-framerate", "1", "-i", str(tmp / "b%d.jpg"), "-vf", "tile=3x3", "-frames:v", "1",
+                        "-q:v", "3", str(out)], capture_output=True, timeout=120)
+    if r.returncode != 0 or not out.exists() or out.stat().st_size < 2000:
+        raise RuntimeError("kollaj yig'ilmadi: " + (r.stderr or b"")[-200:].decode(errors="replace"))
+    data = out.read_bytes()
+    shutil.rmtree(tmp, ignore_errors=True)
+    return data
+
+
+def post_collage(ident: dict, jpeg: bytes) -> dict:
+    """Kollajni worker'ga yuboradi: u afisha O'RNIGA asosiy postni kanalga joylaydi (bir marta)."""
+    q = f"a={ident['anime_id']}&s={ident['season_id']}&e={ident['epizod_id']}"
+    req = urllib.request.Request(f"{API}/api/encode/collage?{q}", data=jpeg, method="POST",
+                                 headers={"X-Encode-Token": TOKEN, "Content-Type": "image/jpeg", "User-Agent": "arumediatv-encoder"})
+    with urllib.request.urlopen(req, timeout=120) as r:
+        return json.loads(r.read() or b"{}")
+
+
 def ctr_file(src: Path, dst: Path, key: bytes):
     """AES-128-CTR (IV nol, 128-bit big-endian hisoblagich)."""
     enc = Cipher(algorithms.AES(key), modes.CTR(b"\0" * 16)).encryptor()
@@ -1273,6 +1316,7 @@ async def process(app: Client, channel: int, job: dict):
         hb.check()
         src_h, src_d = await asyncio.to_thread(probe, src)
         steps = plan(src_h)
+        top_label = steps[0][0]  # eng yuqori sifat (plan: yuqoridan pastga) — kadrlar kollaji va kanal posti shu run'da
         if QUALITY:
             # Haqiqiy balandlik worker'ga yoziladi: boshqa sifatlar uchun to'g'ri kelmaydiganlari
             # (upscale yo'q) "skip" bo'ladi, asl video bekorga yuklanmaydi.
@@ -1320,6 +1364,13 @@ async def process(app: Client, channel: int, job: dict):
             _, d = await asyncio.to_thread(probe, out)
             if abs(d - src_d) > 2.0:
                 raise RuntimeError(f"{label}: davomiylik mos emas ({d:.1f} / {src_d:.1f} s)")
+            collage = None
+            if QUALITY and label == top_label:
+                try:
+                    collage = await asyncio.to_thread(make_collage, out, src_d)
+                    log(f"  {label}: kadrlar kollaji tayyor ({len(collage) // 1024} KB)")
+                except Exception as ex:  # noqa: BLE001
+                    log(f"  {label}: kollaj yig'ilmadi ({type(ex).__name__}: {str(ex)[:150]}) — e'lon afisha bilan chiqadi")
             hb.check()
             k = secrets.token_bytes(16)
             sealed = WORK / name
@@ -1383,6 +1434,13 @@ async def process(app: Client, channel: int, job: dict):
             STATUS.quality(label, state="done")
             STATUS.update(xfer=None)
             log(f"  {label}: jurnalga yozildi")
+            if collage:
+                # Sifat jurnalga yozildi (qism ilovada ochiladi) — endi kollajli asosiy post kanalga chiqadi (bir marta).
+                try:
+                    r_ = await asyncio.to_thread(post_collage, ident, collage)
+                    log(f"  {label}: kanal posti {'joylandi' if r_.get('posted') else 'avval joylangan'}")
+                except Exception as ex:  # noqa: BLE001
+                    log(f"  {label}: kanal posti yuborilmadi ({type(ex).__name__}: {str(ex)[:150]}) — afisha bilan chiqadi")
             nxt = [l for l, _, _ in steps if l not in done]
             if ONE_QUALITY_PER_RUN and nxt:
                 log(f"  keyingi sifat ({nxt[0]}) yangi run'da — bu run tugaydi")

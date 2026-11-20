@@ -7688,3 +7688,7 @@ Topilgan sabab (35-qism 323.4/1478.1 s, Naruto 6-qism 1286/1381 s): Telegram `up
 ## Bazaga to'g'ridan-to'g'ri yozgandan keyin worker keshi
 
 Topilgan xato: CI skriptlari (`ep_wipe_tg.py`, `stats_reset.py`) bazaga worker'ni chetlab yozadi, ro'yxatlar esa o'zgarish belgisi bo'yicha keshlanadi — shuning uchun ilovada eski qismlar soni/ko'rishlar qolib ketgan. Yangi `POST /api/encode/refresh` (X-Encode-Token) hamma tegishli jadval belgilarini yangilaydi va hisoblagich keshlarini tashlaydi; workflow: `.github/workflows/cache-refresh.yml` (`ci/CACHE_REFRESH` o'zgarsa). Bazaga to'g'ridan-to'g'ri yozgan har bir tozalashdan keyin shuni ishga tushiring.
+
+## Kanal posti: afisha o'rniga 1080p kadrlar kollaji
+
+Foydalanuvchi talabi: asosiy post (nom, qism, "Ovoz berdi", "Tomosha qilish") afisha o'rniga 9 ta SIFATLI kadrdan 3x3 (16:9) kollaj bilan chiqadi. `tool/encode/run.py::make_collage` eng yuqori sifat (plan()[0]) kodlangach videoni 9 bo'lakka bo'ladi (3%..88%), har bo'lakdan 6 nomzod kadr olib eng batafsilini (JPEG hajmi bo'yicha) tanlaydi; sifat jurnalga yozilgach `post_collage` -> `POST /api/encode/collage` -> `announce::collage_post` (`announced` belgisi bilan bir marta; bot yo'q bo'lsa kodlash boti). Birinchi sifatda e'lon endi chiqmaydi; kollaj chiqmasa `encode_settle` afisha bilan e'lon qiladi. Admin "qayta joylash" (`repost`) afisha bilan qoladi. Sinov: `tool/encode/test_collage.py`.
