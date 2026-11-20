@@ -45,6 +45,19 @@ async def main():
         for i in ids:
             m = await app.get_messages(chan, i)
             print(f"  xabar {i}: {brief(m)}")
+        # Kim o'chirdi: kanal harakatlar jurnali (o'chirilgan xabarlar), faqat egasi/admin ko'radi.
+        try:
+            from pyrogram.types import ChatEventFilter
+            print("--- kanal jurnali: o'chirilgan xabarlar (oxirgi 40) ---")
+            n = 0
+            async for ev in app.get_chat_event_log(chan, filters=ChatEventFilter(deleted_messages=True), limit=40):
+                dm = ev.deleted_message
+                d = (dm.document or dm.video) if dm else None
+                print(f"  {ev.date} kim={getattr(ev.user, 'id', None)} xabar={getattr(dm, 'id', None)} nom={getattr(d, 'file_name', None)!r} hajm={getattr(d, 'file_size', None)}")
+                n += 1
+            print(f"  jami {n} ta")
+        except Exception as ex:  # noqa: BLE001
+            print("kanal jurnali o'qilmadi:", type(ex).__name__, str(ex)[:200])
         print("--- oxirgi 5 xabar ---")
         async for m in app.get_chat_history(chan, limit=5):
             print(f"  #{m.id}: {brief(m)}")
