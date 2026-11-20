@@ -85,6 +85,10 @@ orig = arr.copy()
 bx = (120, 95, 120 + int(f.getlength("GATE")), 135)
 ns["clean_and_draw"](arr, {"box": bx, "boxes": [bx], "text": "GATE"}, "Darvoza")
 blue = (arr[..., 2].astype(int) - arr[..., 0].astype(int)) > 80
+if blue.any():
+    ys_, xs_ = np.where(blue)
+    print("DIAG: rangli qoldiq", int(blue.sum()), "x", int(xs_.min()), int(xs_.max()), "y", int(ys_.min()), int(ys_.max()), "| quti", bx,
+          "| asl matn piksellari", int(((orig[..., 2].astype(int) - orig[..., 0].astype(int)) > 80).sum()))
 assert int(blue.sum()) == 0, f"rangli yozuv qoldigi: {int(blue.sum())}"
 print("gradient: OK")
 
