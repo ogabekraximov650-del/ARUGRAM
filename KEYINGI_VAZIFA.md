@@ -7684,3 +7684,7 @@ Topilgan xato: One Piece kartasida "70 ta qism", qismlar ro'yxatida 34 tasi. Sab
 ## Kodlash: Telegramdan yarim yuklangan asl video (davomiylik mos emas xatosi)
 
 Topilgan sabab (35-qism 323.4/1478.1 s, Naruto 6-qism 1286/1381 s): Telegram `upload.GetFile` da [-503 Timeout] bersa Pyrogram `download_media` xatoni yutib, YARIM faylni muvaffaqiyatli deb qaytargan (588 MB o'rniga 122 MB; konteyner sarlavhasi to'liq davomiylikni aytgani uchun ffprobe aldangan). Asl fayl kanalda butun edi. Tuzatish: `tool/encode/run.py::download_full` — hajmni kanal xabaridagi haqiqiy hajm bilan solishtiradi, kam bo'lsa 1 MiB chegarasidan `stream_media(offset)` bilan davom ettiradi (12 urinish), baribir to'lmasa xato beradi. Tashxis: `ci/enc_inspect.py` (`.github/workflows/enc-inspect.yml`). Eslatma: `tool/post/post.py` va `tool/dub/dub.py` da ham `download_media` bor (hali tuzatilmagan).
+
+## Bazaga to'g'ridan-to'g'ri yozgandan keyin worker keshi
+
+Topilgan xato: CI skriptlari (`ep_wipe_tg.py`, `stats_reset.py`) bazaga worker'ni chetlab yozadi, ro'yxatlar esa o'zgarish belgisi bo'yicha keshlanadi — shuning uchun ilovada eski qismlar soni/ko'rishlar qolib ketgan. Yangi `POST /api/encode/refresh` (X-Encode-Token) hamma tegishli jadval belgilarini yangilaydi va hisoblagich keshlarini tashlaydi; workflow: `.github/workflows/cache-refresh.yml` (`ci/CACHE_REFRESH` o'zgarsa). Bazaga to'g'ridan-to'g'ri yozgan har bir tozalashdan keyin shuni ishga tushiring.

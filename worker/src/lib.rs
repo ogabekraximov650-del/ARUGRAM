@@ -11154,7 +11154,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/tr/claim" | "/api/tr/peek" | "/api/tr/check" | "/api/tr/finish" | "/api/tr/progress"
         | "/api/cmp/claim" | "/api/cmp/peek" | "/api/cmp/check" | "/api/cmp/finish" | "/api/cmp/progress"
@@ -12792,6 +12792,19 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         return json_resp(&json!({"error": "unauthorized"}), 401);
     }
     let now = now_ms();
+
+    // Bazaga TO'G'RIDAN-TO'G'RI (CI skriptlari: video/statistika tozalash) yozilgach worker keshlari eskirib qoladi (ro'yxatlar o'zgarish belgisi bo'yicha keshlanadi,
+    // belgi esa faqat worker orqali yozilganda yangilanardi). Shu yo'l hamma tegishli jadval belgilarini yangilaydi va hisoblagich keshlarini tashlaydi.
+    if path == "/api/encode/refresh" && method == Method::Post {
+        let mut tables: Vec<String> = Vec::new();
+        for t in ["anime_db", "season_db", "epizod_db", "watch_history_db", "users_db", "stats_hourly", "stats_daily", "encode_jobs", "encode_q", "tg_files", "ratings_db", "favorites_db"] {
+            tables.push(t.to_string());
+            tables.push(format!("del_{t}"));
+        }
+        marks_bump(env, &tables).await;
+        free_seasons_forget().await;
+        return ok(json!({"ok": true, "bumped": tables.len()}));
+    }
 
     // Runner har daqiqada to'liq holat va log'ni yuboradi (`StatusPin`
     // matni) — `EncodeLive` xotirasiga yoziladi, Turso'ga EMAS.
