@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 src = Path(__file__).with_name("translate.py").read_text()
 tree = ast.parse(src)
-names = {"inpaint_texture", "inpaint_mask", "find_missed", "find_bubble", "clean_and_draw", "_clean_and_draw_rect", "layout_in_bubble",
+names = {"merge_same_bubble", "inpaint_texture", "inpaint_mask", "find_missed", "find_bubble", "clean_and_draw", "_clean_and_draw_rect", "layout_in_bubble",
          "_balanced_lines", "_font", "font_path", "wrap_lines", "_word_ok", "fit_text"}
 body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in names)
         or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "FONT_CANDIDATES" for t in n.targets))]
@@ -72,4 +72,33 @@ assert 150 < b[0] and b[2] < 450 and 100 < b[1] and b[3] < 320, b
 none = ns["find_missed"](arr, [{"box": b}], None)
 assert none == [], "qoplangan pufakcha qayta topildi"
 print("find_missed: OK", b)
+# 4) Gradient fonda yaltiroq (rangli) yozuv: butunlay o'chadi (rangli piksellar qolmaydi).
+H, W = 220, 420
+yy, xx = np.mgrid[0:H, 0:W]
+grad = np.clip(yy / H * 255, 0, 255).astype(np.uint8)
+img = Image.fromarray(np.stack([grad, grad, grad], axis=2))
+d = ImageDraw.Draw(img)
+f = ImageFont.truetype(ns["font_path"](), 40) if ns["font_path"]() else ImageFont.load_default()
+d.text((120, 90), "GATE", font=f, fill=(40, 90, 255))
+arr = np.array(img)
+orig = arr.copy()
+bx = (120, 95, 120 + int(f.getlength("GATE")), 135)
+ns["clean_and_draw"](arr, {"box": bx, "boxes": [bx], "text": "GATE"}, "Darvoza")
+blue = (arr[..., 2].astype(int) - arr[..., 0].astype(int)) > 80
+assert int(blue.sum()) == 0, f"rangli yozuv qoldigi: {int(blue.sum())}"
+print("gradient: OK")
+
+# 5) Bir pufakchada ikki OCR guruhi: tarjimalar birlashadi.
+img = Image.new("RGB", (420, 220), (150, 150, 150))
+d = ImageDraw.Draw(img)
+d.rectangle([40, 50, 380, 170], fill=(30, 30, 30))
+f = ImageFont.truetype(ns["font_path"](), 22) if ns["font_path"]() else ImageFont.load_default()
+d.text((70, 70), "YOUR DAILY QUESTS", font=f, fill=(255, 255, 255))
+d.text((70, 120), "ACCEPT?", font=f, fill=(255, 255, 255))
+arr = np.array(img)
+g1 = {"box": (70, 72, 70 + int(f.getlength("YOUR DAILY QUESTS")), 96), "boxes": [(70, 72, 250, 96)], "text": "a"}
+g2 = {"box": (70, 122, 70 + int(f.getlength("ACCEPT?")), 146), "boxes": [(70, 122, 150, 146)], "text": "b"}
+mg, mu = ns["merge_same_bubble"](arr, [g1, g2], ["Kunlik topshiriq", "Qabul qilasizmi?"])
+assert len(mg) == 1 and mu[0] == "Kunlik topshiriq Qabul qilasizmi?", (len(mg), mu)
+print("merge_same_bubble: OK")
 print("test_classic: OK")

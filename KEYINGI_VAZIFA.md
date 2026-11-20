@@ -7720,3 +7720,5 @@ Manbalar: OpenCV flood-fill pufakcha izlash, morfologik teshik to'ldirish (answe
 ## Qism o'chganda kollaj ham o'chadi (2026-11-20)
 
 Topilgan xato: qism/bo'lim/anime o'chirilganda saqlash kanalidagi shifrlangan kollaj hujjati (`collage_<a>_<s>_<e>.bin`) qolib ketardi. Tuzatish: kollaj xabari `tg_files` da ham yoziladi (`store_collage`), migratsiya `mig_collage_tgfiles` eskilarini to'ldiradi; qism/bo'lim/anime o'chirish yo'llari (`collage_items`) tozalash ishiga kollaj nomini qo'shadi. Qolib ketgan yetim hujjatlar bir marta `ci/collage_clean.py` bilan tozalanadi (`ci/COLLAGE_CLEAN_ONCE`).
+
+**Yangilanish (haqiqiy PDF asosida):** (1) bir pufakcha/ramkadagi bir necha OCR guruhi tarjimasi `merge_same_bubble` bilan birlashtirilib bir marta chiziladi (tizim oynasida matnlar ustma-ust tushardi); (2) murakkab/gradient fonda yozuv fon farqi (mediana rangidan og'ish) bo'yicha topiladi, fon silliq bo'lsa butun quti tiklanadi (yaltiroq "GATE" yozuvi qolmasligi uchun); (3) oq pufakcha ichidagi antialias "soya" ham o'chadi. Sinov: `tool/translate/test_classic.py` (gradient, merge).

@@ -541,21 +541,29 @@ def _clean_and_draw_rect(img, grp, uz):
         fg = (0, 0, 0) if bg.mean() > 128 else (255, 255, 255)
         stroke = None
     else:
-        # Murakkab fon: faqat matn belgilarini inpaint qilamiz.
-        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        # Murakkab / gradient fon: matn belgilari FON FARQI bo'yicha topiladi (har pikselning atrofdagi mediana rangidan farqi) — rangli, yaltiroq,
+        # ikki rangli yozuvlar ham; fon silliq (gradient, tekis) bo'lsa — butun quti tiklanadi (chekkadan interpolyatsiya).
+        k = max(15, min(71, int(fs * 2.5) // 2 * 2 + 1))
+        mx = k // 2 + 2
+        ex0, ey0, ex1, ey1 = max(0, rx0 - mx), max(0, ry0 - mx), min(W, rx1 + mx), min(H, ry1 + mx)
+        big = np.ascontiguousarray(img[ey0:ey1, ex0:ex1])
+        med = cv2.medianBlur(big, k)
+        diff = np.abs(big.astype(np.int16) - med.astype(np.int16)).max(axis=2)
+        strokes_c = (diff > 24).astype(np.uint8)
         strokes = np.zeros_like(mask)
-        for (bx0, by0, bx1, by1) in grp["boxes"]:
-            roi = gray[by0:by1, bx0:bx1]
-            if roi.size == 0:
-                continue
-            _, th = cv2.threshold(roi, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            if th.mean() > 127:   # matn qora fonda oq emas — kichik qismi matn bo'lishi kerak
-                th = 255 - th
-            strokes[by0:by1, bx0:bx1] = th
-        strokes = cv2.dilate(strokes, np.ones((5, 5), np.uint8))
-        inpaint_mask(img, strokes > 0)   # davriy fon (screentone) uchun maxsus, qolgani Telea
-        # Yozuv rangi fonga qarab: och fonda qora (oq chiziq bilan), to'q fonda oq (qora chiziq bilan).
-        fg, stroke = ((0, 0, 0), (255, 255, 255)) if bg.mean() > 140 else ((255, 255, 255), (0, 0, 0))
+        strokes[ey0:ey1, ex0:ex1] = strokes_c
+        strokes = cv2.bitwise_and(strokes, mask)
+        strokes = cv2.dilate(strokes, np.ones((5, 5), np.uint8), iterations=1)
+        gray_r = cv2.cvtColor(region, cv2.COLOR_RGB2GRAY)
+        lap = np.abs(cv2.Laplacian(gray_r, cv2.CV_32F))
+        ring_lap = float(lap[ring].mean()) if ring.any() else 99.0
+        smooth = ring_lap < 4.0
+        use = (mask > 0) if smooth else (strokes > 0)
+        inpaint_mask(img, use)
+        # Yozuv rangi: tiklangan joyning yorqinligiga qarab (och fonda qora oq chiziq bilan, to'qda oq qora chiziq bilan).
+        after = img[mask > 0]
+        lum = float(np.median(after.mean(axis=1))) if after.size else float(bg.mean())
+        fg, stroke = ((0, 0, 0), (255, 255, 255)) if lum > 140 else ((255, 255, 255), (0, 0, 0))
     # Yozuv maydoni: matn qutisidan biroz kengroq (o'zbekcha matn uzunroq bo'ladi), rasm ichida.
     bw, bh = x1 - x0, y1 - y0
     ex, ey = int(bw * 0.12) + pad, int(bh * 0.08) + pad
@@ -825,6 +833,11 @@ def clean_and_draw(img, grp, uz):
     # 1) Eski matn: teshiklar (kengaytirilgan) pufakcha ichida FON RANGI bilan bo'yaladi.
     er = cv2.dilate(holes.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=2).astype(bool) & filled
     sub = img[oy:oy + er.shape[0], ox:ox + er.shape[1]]
+    # Yozuv atrofidagi yarim shaffof "soya" (antialias) ham o'chadi: fonga yaqin bo'lmagan, lekin pufakcha ichidagi piksellar.
+    lum = 0.299 * bgc[0] + 0.587 * bgc[1] + 0.114 * bgc[2]
+    g_sub = cv2.cvtColor(np.ascontiguousarray(sub), cv2.COLOR_RGB2GRAY).astype(np.float32)
+    halo = filled & (np.abs(g_sub - lum) > 14)
+    er = er | cv2.dilate(halo.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1).astype(bool) & filled
     sub[er] = bgc
     ink = (255, 255, 255) if dark_bg else (0, 0, 0)
     # 2) Yozuv maydoni: pufakchaga sig'adigan markazlashgan to'g'ri to'rtburchak (egri pufakchada burchaklar chetda qolmasin).
@@ -890,6 +903,35 @@ def build_output(paths, fmt, title, dst: Path) -> Path:
 
 # ── Ish ──────────────────────────────────────────────────────
 
+def merge_same_bubble(img, groups, uz):
+    """Bir XIL pufakcha/ramka ichida bir necha OCR guruhi bo'lsa (masalan tizim oynasining ikki qatori), ularning tarjimasi BIRLASHTIRILIB bir marta
+    chiziladi — aks holda matnlar bir-birining ustiga tushadi. Qaytadi: (guruhlar, tarjimalar)."""
+    out_g, out_u, seen = [], [], {}
+    for g, u in zip(groups, uz):
+        key = None
+        if u and u.strip():
+            try:
+                f = find_bubble(img, g["box"])
+            except Exception:  # noqa: BLE001
+                f = None
+            if f is not None:
+                import numpy as np
+                ys, xs = np.where(f[0])
+                key = (int(xs.min()) + f[2][0], int(ys.min()) + f[2][1], int(xs.max()) + f[2][0], int(ys.max()) + f[2][1], int(f[0].sum()))
+        if key is not None and key in seen:
+            i = seen[key]
+            a = out_g[i]
+            out_g[i] = {"box": (min(a["box"][0], g["box"][0]), min(a["box"][1], g["box"][1]), max(a["box"][2], g["box"][2]), max(a["box"][3], g["box"][3])),
+                        "boxes": list(a["boxes"]) + list(g["boxes"]), "text": a.get("text", "")}
+            out_u[i] = (out_u[i].strip() + " " + u.strip()).strip()
+            continue
+        if key is not None:
+            seen[key] = len(out_g)
+        out_g.append(g)
+        out_u.append(u)
+    return out_g, out_u
+
+
 def render_all(paths, per_page_groups, uz_by_page, out_dir: Path):
     """Har rasmga tarjimani chizib, JPEG qilib saqlaydi. -> yangi yo'llar."""
     import numpy as np
@@ -897,7 +939,8 @@ def render_all(paths, per_page_groups, uz_by_page, out_dir: Path):
     outs = []
     for i, p in enumerate(paths):
         img = np.array(Image.open(p).convert("RGB"))
-        for grp, uz in zip(per_page_groups[i], uz_by_page[i]):
+        groups_i, uz_i = merge_same_bubble(img, per_page_groups[i], uz_by_page[i])
+        for grp, uz in zip(groups_i, uz_i):
             if uz and uz.strip():
                 try:
                     clean_and_draw(img, grp, uz.strip())
