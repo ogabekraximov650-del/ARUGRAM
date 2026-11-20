@@ -54,6 +54,6 @@ jobs:
         with:
           python-version: '3.11'
       - name: ffmpeg
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && pip install -q cryptography
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && true
       - name: HLS bo'laklarini tekshirish
         run: python3 ci/enc_inspect.py
