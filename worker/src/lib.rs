@@ -690,7 +690,7 @@ macro_rules! epizod_cols {
             -- `created_at` — qator yaratilgan (asl video joylangan) vaqt.
             ready_at INTEGER DEFAULT 0,
             -- Kanal posti uchun 1080p kadrlar kollaji: saqlash kanalidagi rasmning Telegram `file_id` si va xabar raqami.
-            collage_file_id TEXT DEFAULT '', collage_msg INTEGER DEFAULT 0,
+            collage_file_id TEXT DEFAULT '', collage_msg INTEGER DEFAULT 0, collage_key TEXT DEFAULT '',
             PRIMARY KEY (anime_id, season_id, epizod_id)"
     };
 }
@@ -704,7 +704,7 @@ const EPIZOD_COL_NAMES: &[&str] = &[
     "url_1080p", "size_1080p", "key_1080p", "q1080_vd_chunks", "q1080_vd_ids", "q1080_vd_msgs",
     "intro_1", "intro_2", "intro_3", "intro_4", "intro_5", "intro_6", "intro_7", "intro_8", "intro_9", "intro_10",
     "origin_video", "origin_key", "origin_size", "origin_height",
-    "views_total", "watch_ms_total", "created_at", "ready_at", "collage_file_id", "collage_msg",
+    "views_total", "watch_ms_total", "created_at", "ready_at", "collage_file_id", "collage_msg", "collage_key",
 ];
 
 /// UZ: qaysi bazaga boriladi. Faqat "Post kodlash" va "Anibla yuklash" navbatlari (`post_jobs`, `anibla_jobs`) Turso'da qoladi; qolgan hamma narsa
@@ -1794,6 +1794,7 @@ async fn init_db(env: &Env) -> bool {
         for sql in [
             "ALTER TABLE epizod_db ADD COLUMN collage_file_id TEXT DEFAULT ''",
             "ALTER TABLE epizod_db ADD COLUMN collage_msg INTEGER DEFAULT 0",
+            "ALTER TABLE epizod_db ADD COLUMN collage_key TEXT DEFAULT ''",
         ] {
             let _ = turso_exec(env, sql, vec![]).await;
         }
@@ -3970,6 +3971,7 @@ fn hide_keys(mut obj: Value) -> Value {
         m.remove("origin_key");
         m.remove("collage_file_id");
         m.remove("collage_msg");
+        m.remove("collage_key");
     }
     obj
 }
@@ -12812,7 +12814,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
 
     // Bazaga TO'G'RIDAN-TO'G'RI (CI skriptlari: video/statistika tozalash) yozilgach worker keshlari eskirib qoladi (ro'yxatlar o'zgarish belgisi bo'yicha keshlanadi,
     // belgi esa faqat worker orqali yozilganda yangilanardi). Shu yo'l hamma tegishli jadval belgilarini yangilaydi va hisoblagich keshlarini tashlaydi.
-    // 1080p (eng yuqori sifat) workflow'i 9 ta kadrdan yig'gan 3x3 kollaj (JPEG, tana — xom bayt): afisha o'rniga asosiy post (`announce::collage_post`).
+    // 1080p (eng yuqori sifat) workflow'i 9 ta kadrdan yig'gan 3x3 kollaj (JPEG, SHIFRLANGAN: AES-128-CTR, kalit `X-Collage-Key` sarlavhasida; tana — xom bayt): afisha o'rniga asosiy post (`announce::collage_post`).
     if path == "/api/encode/collage" && method == Method::Post {
         let qurl = req.url().ok();
         let q = |k: &str| qurl.as_ref().and_then(|u| u.query_pairs().find(|(x, _)| x == k).map(|(_, v)| v.to_string())).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
@@ -12821,8 +12823,9 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         if a == 0 || s == 0 || e == 0 {
             return json_resp(&json!({"error": "a, s, e kerak"}), 400);
         }
+        let key_hex = req.headers().get("X-Collage-Key").ok().flatten().unwrap_or_default();
         let bytes = req.bytes().await?;
-        return match announce::collage_post(env, a, s, e, &bytes).await {
+        return match announce::collage_post(env, a, s, e, &bytes, &key_hex).await {
             Ok(posted) => ok(json!({"ok": true, "posted": posted})),
             Err(why) => json_resp(&json!({"error": why}), 502),
         };

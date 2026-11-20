@@ -129,18 +129,28 @@ async fn compose(env: &Env, a: i64, s: i64, e: i64) -> std::result::Result<(Valu
 }
 
 /// UZ: 1080p (eng yuqori sifat) kodlash tugagach Actions yig'gan 3x3 KADRLAR KOLLAJI (16:9, JPEG) afisha O'RNIGA asosiy post rasmi bo'ladi.
-///     Post bir marta (`announced` belgisi); allaqachon e'lon qilingan bo'lsa `Ok(false)`. EN: the 3x3 frame collage replaces the poster in the main post.
-pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8]) -> std::result::Result<bool, String> {
+///     Rasm Actions'dan SHIFRLANGAN (AES-128-CTR, kalit alohida) keladi: saqlash kanaliga shifrlangan hujjat sifatida joylanadi (`file_id` va kalit
+///     qism qatoriga yoziladi), post uchun worker xotirada shifrdan yechib rasm qilib yuboradi. Post bir marta (`announced`); allaqachon e'lon
+///     qilingan bo'lsa `Ok(false)`. EN: the encrypted collage is stored in the storage channel as a document; the worker decrypts it in memory to post a photo.
+pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex: &str) -> std::result::Result<bool, String> {
     let ch = channel(env);
     if ch == 0 {
         return Err("e'lon kanali sozlanmagan".into());
     }
-    if jpeg.len() < 2000 || jpeg.len() > COVER_MAX {
+    if sealed.len() < 2000 || sealed.len() > COVER_MAX {
         return Err("kollaj hajmi noto'g'ri".into());
     }
-    // Rasm AVVAL saqlash kanaliga joylanadi, `file_id` qism qatoriga (`epizod_db.collage_file_id`) yoziladi — keyingi safar (ilovadan "kanalga joylash",
-    // qayta joylash) tayyor rasm ishlatiladi. Saqlash o'xshamasa — rasm to'g'ridan-to'g'ri yuklanadi (e'lon baribir chiqadi).
-    let stored = store_collage(env, a, s, e, jpeg).await.ok();
+    let key = hex_key(key_hex.trim()).ok_or("kollaj kaliti noto'g'ri")?;
+    let mut jpeg = sealed.to_vec();
+    let mut c = ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into());
+    c.apply_keystream(&mut jpeg);
+    if jpeg.len() < 3 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
+        return Err("kollaj shifri ochilmadi (kalit mos emas)".into());
+    }
+    // Shifrlangan nusxa avval saqlash kanaliga; xato bo'lsa e'lon baribir chiqadi (keyingi safar afisha bilan).
+    if let Err(why) = store_collage(env, a, s, e, sealed, key_hex.trim()).await {
+        console_log!("kollaj saqlanmadi ({a}/{s}/{e}): {why}");
+    }
     let claim = turso_exec(env,
         "INSERT INTO announced (anime_id, season_id, epizod_id, at) VALUES (?,?,?,?)
          ON CONFLICT DO NOTHING RETURNING at",
@@ -150,11 +160,7 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8])
     }
     let sent = async {
         let (_, text, markup) = compose(env, a, s, e).await?;
-        match &stored {
-            Some(fid) => send(env, "sendPhoto", json!({"chat_id": ch, "photo": fid, "caption": text,
-                "parse_mode": "HTML", "reply_markup": markup})).await.map(|_| ()),
-            None => upload_photo_post(env, ch, jpeg, &text, &markup).await.map(|_| ()),
-        }
+        upload_photo_post(env, ch, &jpeg, &text, &markup).await.map(|_| ())
     }.await;
     if let Err(why) = sent {
         let _ = turso_exec(env, "DELETE FROM announced WHERE anime_id=? AND season_id=? AND epizod_id=?",
@@ -164,16 +170,14 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8])
     Ok(true)
 }
 
-/// Kollajni saqlash kanaliga rasm qilib joylaydi; `file_id` va xabar raqamini qism qatoriga yozadi. Qaytadi: `file_id`.
-async fn store_collage(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8]) -> std::result::Result<String, String> {
+/// Shifrlangan kollajni saqlash kanaliga HUJJAT qilib joylaydi; `file_id`, xabar raqami va kalit qism qatoriga yoziladi.
+async fn store_collage(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex: &str) -> std::result::Result<String, String> {
     let store = tg_channel_id(env);
     if store == 0 {
         return Err("saqlash kanali sozlanmagan".into());
     }
-    let sent = upload_photo(env, store, jpeg).await?;
-    let fid = sent["result"]["photo"].as_array()
-        .and_then(|p| p.last()).and_then(|p| p["file_id"].as_str())
-        .ok_or("yuklangan rasm file_id si yo'q")?.to_string();
+    let sent = upload_document(env, store, sealed, &format!("collage_{a}_{s}_{e}.bin")).await?;
+    let fid = sent["result"]["document"]["file_id"].as_str().ok_or("yuklangan hujjat file_id si yo'q")?.to_string();
     let msg = sent["result"]["message_id"].as_i64().unwrap_or(0);
     // Eski kollaj xabari (qism qayta kodlangan bo'lsa) saqlash kanalidan o'chadi.
     if let Some(old) = turso_exec(env, "SELECT collage_msg FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
@@ -183,23 +187,41 @@ async fn store_collage(env: &Env, a: i64, s: i64, e: i64, jpeg: &[u8]) -> std::r
             let _ = tg_api(env, "deleteMessage", json!({"chat_id": store, "message_id": m})).await;
         }
     }
-    turso_exec(env, "UPDATE epizod_db SET collage_file_id=?, collage_msg=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
-        vec![TursoArg::text(&fid), TursoArg::int(msg), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await
+    turso_exec(env, "UPDATE epizod_db SET collage_file_id=?, collage_msg=?, collage_key=? WHERE anime_id=? AND season_id=? AND epizod_id=?",
+        vec![TursoArg::text(&fid), TursoArg::int(msg), TursoArg::text(key_hex), TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await
         .map_err(|e| e.to_string())?;
     Ok(fid)
 }
 
+/// Qism uchun saqlangan kollaj: `file_id` bo'yicha shifrlangan hujjat yuklab olinadi va xotirada ochiladi. `None` — kollaj yo'q yoki olinmadi.
+async fn stored_collage(env: &Env, a: i64, s: i64, e: i64) -> Option<Vec<u8>> {
+    let row = turso_exec(env, "SELECT collage_file_id, collage_key FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok().and_then(|r| first_row(&r))?;
+    let fid = row["collage_file_id"].as_str().filter(|x| !x.is_empty())?.to_string();
+    let key = hex_key(row["collage_key"].as_str().unwrap_or("").trim())?;
+    let info = tg_api(env, "getFile", json!({"file_id": fid})).await.ok()?;
+    let path = info["file_path"].as_str()?.to_string();
+    let token = tg_secret(env, "TELEGRAM_BOT_TOKEN");
+    let mut resp = Fetch::Url(format!("https://api.telegram.org/file/bot{token}/{path}").parse().ok()?).send().await.ok()?;
+    let mut bytes = resp.bytes().await.ok()?;
+    if bytes.len() < 2000 || bytes.len() > COVER_MAX {
+        return None;
+    }
+    let mut c = ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into());
+    c.apply_keystream(&mut bytes);
+    (bytes[0] == 0xFF && bytes[1] == 0xD8).then_some(bytes)
+}
+
 async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result<(), String> {
     let (season, text, markup) = compose(env, a, s, e).await?;
-    // Qism uchun kadrlar kollaji tayyor bo'lsa (`epizod_db.collage_file_id`) — afisha o'rniga shu rasm.
-    let collage = turso_exec(env, "SELECT collage_file_id FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
-        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok().and_then(|r| first_row(&r))
-        .and_then(|r| r["collage_file_id"].as_str().map(|x| x.to_string())).filter(|x| !x.is_empty());
+    // Qism uchun kadrlar kollaji saqlangan bo'lsa (shifrlangan hujjat, `epizod_db.collage_file_id`) — worker shifrdan yechib, afisha O'RNIGA shu rasmni joylaydi.
+    if let Some(jpeg) = stored_collage(env, a, s, e).await {
+        if upload_photo_post(env, ch, &jpeg, &text, &markup).await.is_ok() {
+            return Ok(());
+        }
+    }
     let photo = bare_name(season["photo_url"].as_str().unwrap_or(""));
-    let file_id = match collage {
-        Some(f) => Some(f),
-        None => if photo.is_empty() { None } else { cover_file_id(env, &photo, ch).await.ok() },
-    };
+    let file_id = if photo.is_empty() { None } else { cover_file_id(env, &photo, ch).await.ok() };
     // Muqova bor — rasm bilan; yo'q yoki olinmasa — faqat matn (e'lon baribir chiqadi).
     let sent = match &file_id {
         Some(fid) => send(env, "sendPhoto", json!({"chat_id": ch, "photo": fid, "caption": text,
@@ -326,6 +348,29 @@ async fn upload_photo(env: &Env, ch: i64, bytes: &[u8]) -> std::result::Result<V
     let v: Value = r.json().await.map_err(|e| e.to_string())?;
     if v["ok"] != json!(true) {
         return Err(format!("sendPhoto: {}", v["description"].as_str().unwrap_or("noma'lum")));
+    }
+    Ok(v)
+}
+
+/// `sendDocument` (multipart) — asosiy bot bilan (shifrlangan kollaj saqlash kanaliga).
+async fn upload_document(env: &Env, ch: i64, bytes: &[u8], name: &str) -> std::result::Result<Value, String> {
+    let token = tg_secret(env, "TELEGRAM_BOT_TOKEN");
+    let fd = web_sys::FormData::new().map_err(|_| "FormData".to_string())?;
+    fd.append_with_str("chat_id", &ch.to_string()).map_err(|_| "FormData".to_string())?;
+    fd.append_with_str("disable_notification", "true").map_err(|_| "FormData".to_string())?;
+    let arr = js_sys::Uint8Array::from(bytes);
+    let parts = js_sys::Array::new();
+    parts.push(&arr);
+    let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(|_| "Blob".to_string())?;
+    fd.append_with_blob_and_filename("document", &blob, name).map_err(|_| "FormData".to_string())?;
+    let req = Request::new_with_init(
+        &format!("https://api.telegram.org/bot{token}/sendDocument"),
+        RequestInit::new().with_method(Method::Post).with_body(Some(fd.into())),
+    ).map_err(|e| e.to_string())?;
+    let mut r = Fetch::Request(req).send().await.map_err(|e| e.to_string())?;
+    let v: Value = r.json().await.map_err(|e| e.to_string())?;
+    if v["ok"] != json!(true) {
+        return Err(format!("sendDocument: {}", v["description"].as_str().unwrap_or("noma'lum")));
     }
     Ok(v)
 }

@@ -655,10 +655,15 @@ def make_collage(video: Path, dur: float) -> bytes:
 
 
 def post_collage(ident: dict, jpeg: bytes) -> dict:
-    """Kollajni worker'ga yuboradi: u afisha O'RNIGA asosiy postni kanalga joylaydi (bir marta)."""
+    """Kollajni SHIFRLAB (AES-128-CTR, tasodifiy kalit) worker'ga yuboradi: u shifrlangan nusxani saqlash kanaliga qo'yadi, postda esa xotirada
+    ochib afisha O'RNIGA kanalga joylaydi (bir marta)."""
+    k = secrets.token_bytes(16)
+    enc = Cipher(algorithms.AES(k), modes.CTR(b"\0" * 16)).encryptor()
+    sealed = enc.update(jpeg) + enc.finalize()
     q = f"a={ident['anime_id']}&s={ident['season_id']}&e={ident['epizod_id']}"
-    req = urllib.request.Request(f"{API}/api/encode/collage?{q}", data=jpeg, method="POST",
-                                 headers={"X-Encode-Token": TOKEN, "Content-Type": "image/jpeg", "User-Agent": "arumediatv-encoder"})
+    req = urllib.request.Request(f"{API}/api/encode/collage?{q}", data=sealed, method="POST",
+                                 headers={"X-Encode-Token": TOKEN, "X-Collage-Key": k.hex(), "Content-Type": "application/octet-stream",
+                                          "User-Agent": "arumediatv-encoder"})
     with urllib.request.urlopen(req, timeout=120) as r:
         return json.loads(r.read() or b"{}")
 
