@@ -685,6 +685,9 @@ def layout_in_bubble(uz, filled, cx, cy, pad, max_size, min_size=9):
 
 JUNK_WORDS = (".com", "www.", "http", "discord", "patreon", "facebook", "twitter", "instagram", "scanlation", "scans", "translator", "proofreader",
               "typesetter", "redrawer", "credit:", "join our", "read on", "@gmail", "support us", "recruit", "staff")
+OCR_CONF = {frozenset(x) for x in (("h", "k"), ("u", "l"), ("u", "n"), ("l", "i"), ("o", "0"), ("c", "e"), ("e", "o"), ("a", "o"), ("r", "p"), ("t", "l"),
+                                   ("m", "n"), ("n", "h"), ("d", "o"), ("g", "6"), ("s", "5"), ("b", "6"), ("b", "h"), ("v", "y"), ("u", "v"), ("a", "4"),
+                                   ("i", "1"), ("l", "1"), ("f", "t"), ("c", "o"), ("r", "n"), ("q", "g"))}
 OCR_FIX = {"tke": "the", "tbe": "the", "tne": "the", "whal": "what", "wnat": "what", "bul": "but", "yau": "you", "yov": "you"}
 _SPELL = None
 
@@ -725,8 +728,18 @@ def fix_ocr_words(text: str) -> str:
         if low in OCR_FIX:
             new = OCR_FIX[low]
         elif len(w) >= 5 and pre not in ("-", "'") and post not in ("-", "'") and low not in _SPELL:
-            new = _SPELL.correction(low)
-            if not new or new == low:
+            # Faqat OCR HARF CHALKASHLIGIGA o'xshash almashtirishlar (H/K, U/L, U/N, 0/O...) bilan bir uzunlikdagi nomzodlar; eng ko'p uchraydigani.
+            new = None
+            best = -1
+            for cand in (_SPELL.candidates(low) or ()):
+                if cand == low or len(cand) != len(low):
+                    continue
+                diff = [(a, b) for a, b in zip(low, cand) if a != b]
+                if diff and all(frozenset(p_) in OCR_CONF for p_ in diff):
+                    f = _SPELL.word_usage_frequency(cand) if hasattr(_SPELL, "word_usage_frequency") else _SPELL[cand]
+                    if f > best:
+                        best, new = f, cand
+            if not new:
                 return w
         else:
             return w
