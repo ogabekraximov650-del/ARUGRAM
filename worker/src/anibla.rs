@@ -2052,7 +2052,25 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
 
     // Navbatdagi yuklashni QO'LDA ishga tushirish (cron har 10 daqiqada qiladi): `kick` natijasi matni (GitHub xatosi bo'lsa shu yerda ko'rinadi).
     if path == "/api/anibla/kick" {
-        return ok(json!({"msg": kick(env).await}));
+        // Tashxis: `anibla.yml` ning oxirgi run'lari va eng oxirgisining qadamlari (qaysi qadamda yiqilgani).
+        let repo = tg_secret(env, "GH_REPO");
+        let mut runs = Vec::new();
+        let mut steps = Value::Null;
+        if let Ok((200, v)) = gh_api(env, Method::Get, &format!("/repos/{repo}/actions/workflows/{WORKFLOW}/runs?per_page=5"), None).await {
+            for r in v["workflow_runs"].as_array().cloned().unwrap_or_default() {
+                runs.push(json!({"id": r["id"], "status": r["status"], "conclusion": r["conclusion"], "created": r["created_at"], "event": r["event"]}));
+            }
+            if let Some(id) = v["workflow_runs"][0]["id"].as_i64() {
+                if let Ok((200, j)) = gh_api(env, Method::Get, &format!("/repos/{repo}/actions/runs/{id}/jobs"), None).await {
+                    steps = json!(j["jobs"].as_array().cloned().unwrap_or_default().iter().map(|jb| json!({
+                        "job": jb["name"], "status": jb["status"], "conclusion": jb["conclusion"],
+                        "steps": jb["steps"].as_array().cloned().unwrap_or_default().iter()
+                            .map(|st| format!("{}: {}/{}", st["name"].as_str().unwrap_or(""), st["status"].as_str().unwrap_or(""), st["conclusion"].as_str().unwrap_or(""))).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>());
+                }
+            }
+        }
+        return ok(json!({"msg": kick(env).await, "runs": runs, "latest_jobs": steps}));
     }
 
     // TASHXIS: webhook holati, sayt so'rovlari va 90 tugmali inline xabarni adminga sinab yuborish.
