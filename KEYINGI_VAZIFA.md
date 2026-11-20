@@ -7680,3 +7680,7 @@ Foydalanuvchi talabi. Avval katta Anibla videosi BAYT bo'yicha ~1,9 GB li shifrl
 ## Bo'lim kartasidagi "N ta qism" ro'yxat bilan mos
 
 Topilgan xato: One Piece kartasida "70 ta qism", qismlar ro'yxatida 34 tasi. Sabab: ro'yxat (`GET /api/epizods/:a/:s`) birinchi tayyor bo'lmagan qismda (35 kodlanmagan) to'xtaydi, hisob (`visible_episode_counts`) esa tayyor qismlarning hammasini sanardi. Endi hisob ham qism raqami bo'yicha birinchi tayyor bo'lmagan qismgacha sanaydi. Fayl: `worker/src/lib.rs`.
+
+## Kodlash: Telegramdan yarim yuklangan asl video (davomiylik mos emas xatosi)
+
+Topilgan sabab (35-qism 323.4/1478.1 s, Naruto 6-qism 1286/1381 s): Telegram `upload.GetFile` da [-503 Timeout] bersa Pyrogram `download_media` xatoni yutib, YARIM faylni muvaffaqiyatli deb qaytargan (588 MB o'rniga 122 MB; konteyner sarlavhasi to'liq davomiylikni aytgani uchun ffprobe aldangan). Asl fayl kanalda butun edi. Tuzatish: `tool/encode/run.py::download_full` — hajmni kanal xabaridagi haqiqiy hajm bilan solishtiradi, kam bo'lsa 1 MiB chegarasidan `stream_media(offset)` bilan davom ettiradi (12 urinish), baribir to'lmasa xato beradi. Tashxis: `ci/enc_inspect.py` (`.github/workflows/enc-inspect.yml`). Eslatma: `tool/post/post.py` va `tool/dub/dub.py` da ham `download_media` bor (hali tuzatilmagan).

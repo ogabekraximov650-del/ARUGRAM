@@ -230,6 +230,40 @@ class ChannelLog:
 CHLOG = ChannelLog()
 
 
+async def download_full(app, msg, dst, progress=None):
+    """TOPILGAN XATO (35-qism "davomiylik mos emas 323.4/1478.1", Naruto 6-qism 1286/1381): Telegram `upload.GetFile` da [-503 Timeout] bersa Pyrogram
+    `download_media` XATONI YUTIB, YARIM faylni muvaffaqiyatli deb qaytarardi (asl 588 MB o'rniga 122 MB) — kodlash faqat shu yarmini kodlardi.
+    Endi hajm kanal xabaridagi haqiqiy hajm bilan solishtiriladi; kam bo'lsa 1 MiB chegarasidan davom ettirib (`stream_media`) to'ldiriladi.
+    EN: Pyrogram swallows -503 on GetFile and returns a truncated file; verify against the message size and resume until complete."""
+    d = msg.document or msg.video
+    expected = int(getattr(d, "file_size", 0) or 0)
+    got = await app.download_media(msg, file_name=str(dst), progress=progress)
+    path = Path(got) if got else Path(dst)
+    if expected <= 0:
+        return got
+    for attempt in range(12):
+        have = path.stat().st_size if path.exists() else 0
+        if have == expected:
+            return str(path)
+        if have > expected:
+            raise RuntimeError(f"yuklangan fayl kutilganidan katta ({have} > {expected})")
+        log(f"  yuklab olish to'liq emas ({have}/{expected} bayt) — davom ettirilmoqda ({attempt + 1}/12)")
+        await asyncio.sleep(min(3 * (attempt + 1), 20))
+        skip = have // 1048576
+        try:
+            with open(path, "r+b" if path.exists() else "wb") as f:
+                f.truncate(skip * 1048576)
+                f.seek(skip * 1048576)
+                async for chunk in app.stream_media(msg, offset=skip):
+                    f.write(chunk)
+        except Exception as ex:  # noqa: BLE001
+            log(f"  davom ettirish xatosi: {type(ex).__name__}: {str(ex)[:120]}")
+    have = path.stat().st_size if path.exists() else 0
+    if have != expected:
+        raise RuntimeError(f"asl video to'liq yuklanmadi ({have}/{expected} bayt)")
+    return str(path)
+
+
 def transfer_progress(kind: str):
     """Telegram yuklab olish/yuklash jarayoni: har soniyada bitta qator."""
     t0, last = time.time(), [0.0]
@@ -1193,7 +1227,7 @@ async def process(app: Client, channel: int, job: dict):
                         if not pmsg or pmsg.empty or not (pmsg.document or pmsg.video):
                             raise Fatal(f"asl video qismi {i + 1}/{len(parts)} kanalda topilmadi")
                         log(f"  asl video qismi {i + 1}/{len(parts)} yuklab olinmoqda...")
-                        pgot = await app.download_media(pmsg, file_name=str(WORK / f"opart{i}.mp4"),
+                        pgot = await download_full(app, pmsg, WORK / f"opart{i}.mp4",
                                                         progress=transfer_progress(f"yuklab olinmoqda ({i + 1}/{len(parts)})"))
                         if not pgot or Path(pgot).stat().st_size == 0:
                             raise RuntimeError(f"asl video qismi {i + 1} yuklab olinmadi")
@@ -1213,7 +1247,7 @@ async def process(app: Client, channel: int, job: dict):
                         if not pmsg or pmsg.empty or not (pmsg.document or pmsg.video):
                             raise Fatal(f"asl video qismi {i + 1}/{len(parts)} kanalda topilmadi")
                         log(f"  asl video qismi {i + 1}/{len(parts)} yuklab olinmoqda...")
-                        pgot = await app.download_media(pmsg, file_name=str(WORK / f"opart{i}"),
+                        pgot = await download_full(app, pmsg, WORK / f"opart{i}",
                                                         progress=transfer_progress(f"yuklab olinmoqda ({i + 1}/{len(parts)})"))
                         if not pgot or Path(pgot).stat().st_size == 0:
                             raise RuntimeError(f"asl video qismi {i + 1} yuklab olinmadi")
@@ -1221,7 +1255,7 @@ async def process(app: Client, channel: int, job: dict):
                             shutil.copyfileobj(fi, fo, 8 * 1048576)
                         Path(pgot).unlink()
             else:
-                got = await app.download_media(m, file_name=str(enc),
+                got = await download_full(app, m, enc,
                                                progress=transfer_progress("yuklab olinmoqda"))
             if not got or Path(got).stat().st_size == 0:
                 raise RuntimeError("asl video yuklab olinmadi")
