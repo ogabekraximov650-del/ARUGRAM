@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 src = Path(__file__).with_name("translate.py").read_text()
 tree = ast.parse(src)
-names = {"smooth_fill", "_ocr_candidates", "merge_same_bubble", "inpaint_texture", "inpaint_mask", "find_missed", "find_bubble", "clean_and_draw", "_clean_and_draw_rect", "layout_in_bubble",
+names = {"_med1d", "smooth_fill", "_ocr_candidates", "merge_same_bubble", "inpaint_texture", "inpaint_mask", "find_missed", "find_bubble", "clean_and_draw", "_clean_and_draw_rect", "layout_in_bubble",
          "_balanced_lines", "_font", "font_path", "wrap_lines", "_word_ok", "fit_text"}
 body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in names)
         or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") == "FONT_CANDIDATES" for t in n.targets))]

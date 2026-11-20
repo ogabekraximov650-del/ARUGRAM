@@ -4,9 +4,9 @@ from pathlib import Path
 
 src = Path(__file__).with_name("translate.py").read_text()
 tree = ast.parse(src)
-want_f = {"parse_manual", "serialize_groups", "load_groups", "keep_group"}
+want_f = {"tidy_uz", "parse_manual", "serialize_groups", "load_groups", "keep_group"}
 body = [n for n in tree.body if (isinstance(n, ast.FunctionDef) and n.name in want_f)
-        or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") in ("MARK_RE", "JUNK_WORDS", "SFX_WORDS", "SHORT_OK") for t in n.targets))]
+        or (isinstance(n, ast.Assign) and any(getattr(t, "id", "") in ("MARK_RE", "JUNK_WORDS", "SFX_WORDS", "SHORT_OK", "_TIDY") for t in n.targets))]
 ns = {"re": re, "json": json}
 exec(compile(ast.Module(body, []), "translate.py", "exec"), ns)
 
@@ -26,4 +26,5 @@ assert not kg({"text": "HAAH", "conf": 0.1}), "past ishonch"
 assert not kg({"text": "Haah", "conf": 0.9}), "ovoz effekti saqlanib qoldi"
 assert not kg({"text": "Yz", "conf": 0.9}), "1-2 harfli shovqin"
 assert kg({"text": "No", "conf": 0.9}) and kg({"text": "I NEVER EXPECTED THIS", "conf": 0.9}) and kg({"text": "E-RANK HUNTER;", "conf": 0.8}) and kg({"text": "", "conf": 0.0})
+assert ns["tidy_uz"]("e\u2011rank \u201cJin\u2011Woo\u201d o\u2018zi") == 'e-rank "Jin-Woo" o\'zi', ns["tidy_uz"]("e\u2011rank")
 print("test_manual: OK")

@@ -107,12 +107,25 @@ def claim(runner):
     return r if r.get("job") and r.get("channel") else None
 
 
+GLOSSARY = {"Gate": "Darvoza", "Hunter": "Ovchi", "Hunters": "Ovchilar", "Dungeon": "Zindon", "Quest": "Topshiriq", "Quests": "Topshiriqlar",
+            "Rank": "Daraja", "Level up": "Daraja oshdi", "Raid": "Reyd", "Boss": "Boss"}
+_TIDY = {"\u2010": "-", "\u2011": "-", "\u2012": "-", "\u2013": "-", "\u2014": "-", "\u02bb": "'", "\u02bc": "'", "\u2018": "'", "\u2019": "'",
+         "\u201c": '"', "\u201d": '"', "\u00a0": " ", "\u200b": "", "\u2060": "", "\u00ad": ""}
+
+
+def tidy_uz(t: str) -> str:
+    """Tarjima matnidagi shriftda yo'q (kvadrat bo'lib chiqadigan) belgilarni oddiylariga almashtiradi: defis variantlari, tipografik tirnoq/apostrof."""
+    for a, b in _TIDY.items():
+        t = t.replace(a, b)
+    return t
+
+
 def translate_texts(texts, source):
     """Matnlar ro'yxati -> o'zbekcha ro'yxat. Xato bo'lgan element bo'sh satr (asl matn qoladi)."""
     def norm(t):   # OCR katta harfli/aralash yozuvni gap shakliga keltirish (model aniqroq tarjima qiladi)
         t = (t or "").strip()
         letters = [c for c in t if c.isalpha()]
-        if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.5:
+        if letters and sum(1 for c in letters if c.isupper()) / len(letters) > 0.25:
             t = t.lower()
             t = re.sub(r"\bi\b", "I", t)
             t = t[:1].upper() + t[1:]
@@ -124,11 +137,11 @@ def translate_texts(texts, source):
         res = None
         for attempt in range(3):
             try:
-                r = _post("/api/encode/translate", {"texts": part, "source": source, "target": "uzbek"},
+                r = _post("/api/encode/translate", {"texts": part, "source": source, "target": "uzbek", "glossary": GLOSSARY},
                           timeout=180, tries=2)
                 got = r.get("results")
                 if isinstance(got, list) and len(got) == len(part):
-                    res = [str(x or "").replace('\\"', '"').replace("\\", "").strip() for x in got]   # JSON qochirish belgilari (\") tushib qolmasin
+                    res = [tidy_uz(str(x or "").replace('\\"', '"').replace("\\", "")).strip() for x in got]   # JSON qochirish belgilari (\") tushib qolmasin
                     break
             except Exception as e:  # noqa: BLE001
                 log(f"  tarjima {attempt + 1}/3 muvaffaqiyatsiz: {e}")
@@ -525,19 +538,34 @@ def fit_text(text, width, height, max_size):
     return f, wrap_lines(text, f, width), MIN + 1
 
 
-def smooth_fill(img, x0, y0, x1, y1, t=2):
+def _med1d(a, k):
+    """Chekka qatoridagi keskin sakrashlarni (harf piksellari) tekislaydi: N x 3 massivda k kenglikdagi sirpanuvchi mediana."""
+    import numpy as np
+    n = a.shape[0]
+    if n < 3 or k < 3:
+        return a
+    k = min(k | 1, n if n % 2 else n - 1)
+    h = k // 2
+    pad = np.pad(a, ((h, h), (0, 0)), mode="edge")
+    win = np.stack([pad[i:i + n] for i in range(k)], axis=0)
+    return np.median(win, axis=0)
+
+
+def smooth_fill(img, x0, y0, x1, y1, t=4):
     """To'rtburchak (x0,y0)-(x1,y1) ni uning CHEKKALARIDAN silliq to'ldiradi (Coons yamog'i: to'rt chekka qatordan bilinear interpolyatsiya).
-    Gradient yoki tekis fonda eski yozuv qutisi izsiz yo'qoladi (Telea katta to'rtburchakda ko'rinadigan dog' qoldirardi)."""
+    Chekka qatorlari mediana bilan tozalanadi (harf chekkasiga tushgan piksellar yo'l-yo'l dog' qoldirmasin). Gradient yoki tekis fonda eski yozuv qutisi
+    izsiz yo'qoladi (Telea katta to'rtburchakda ko'rinadigan dog' qoldirardi)."""
     import numpy as np
     H, W = img.shape[:2]
     x0, y0, x1, y1 = max(t, x0), max(t, y0), min(W - 1 - t, x1), min(H - 1 - t, y1)
     if x1 - x0 < 2 or y1 - y0 < 2:
         return False
     a = img.astype(np.float32)
-    top = a[y0 - t:y0, x0:x1 + 1].mean(axis=0)
-    bot = a[y1 + 1:y1 + 1 + t, x0:x1 + 1].mean(axis=0)
-    left = a[y0:y1 + 1, x0 - t:x0].mean(axis=1)
-    right = a[y0:y1 + 1, x1 + 1:x1 + 1 + t].mean(axis=1)
+    kx, ky = max(9, (x1 - x0) // 6), max(9, (y1 - y0) // 4)
+    top = _med1d(np.median(a[y0 - t:y0, x0:x1 + 1], axis=0), kx)
+    bot = _med1d(np.median(a[y1 + 1:y1 + 1 + t, x0:x1 + 1], axis=0), kx)
+    left = _med1d(np.median(a[y0:y1 + 1, x0 - t:x0], axis=1), ky)
+    right = _med1d(np.median(a[y0:y1 + 1, x1 + 1:x1 + 1 + t], axis=1), ky)
     h, w = y1 - y0 + 1, x1 - x0 + 1
     u = np.linspace(0, 1, w, dtype=np.float32)[None, :, None]
     v = np.linspace(0, 1, h, dtype=np.float32)[:, None, None]
@@ -576,7 +604,7 @@ def _clean_and_draw_rect(img, grp, uz):
     if ring_lap < 4.0:
         # Silliq fon (tekis yoki gradient): har bir quti chekkalaridan silliq to'ldiriladi.
         for (bx0, by0, bx1, by1) in grp["boxes"]:
-            smooth_fill(img, bx0 - pad, by0 - pad, bx1 + pad, by1 + pad)
+            smooth_fill(img, bx0 - pad - 3, by0 - pad - 3, bx1 + pad + 3, by1 + pad + 3)
     else:
         # Murakkab fon: matn belgilari FON FARQI bo'yicha topiladi (har pikselning atrofdagi mediana rangidan farqi) — rangli, yaltiroq yozuvlar ham;
         # keyin davriy fon (screentone) usuli yoki Telea bilan tiklanadi.
@@ -830,6 +858,8 @@ def postprocess_groups(img, groups, reader, source):
     for g in sorted(groups + extra, key=lambda x: (x["box"][1], x["box"][0])):
         if not keep_group(g):
             continue
+        if g.get("text"):
+            g = dict(g, text=re.sub(r"\s{2,}", " ", re.sub(r"[@#$%^&*{}<>|\\_=+`]", "", g["text"])).strip())
         if source == "english" and g.get("text"):
             g = dict(g, text=fix_ocr_words(g["text"]))
         out.append(g)
@@ -1105,7 +1135,7 @@ def render_all(paths, per_page_groups, uz_by_page, out_dir: Path):
         for grp, uz in zip(groups_i, uz_i):
             if uz and uz.strip() and _norm(uz) != _norm(grp.get("text")):   # tarjima asl bilan bir xil (ovoz effekti, nom) — tegilmaydi
                 try:
-                    clean_and_draw(img, grp, uz.strip())
+                    clean_and_draw(img, grp, tidy_uz(uz.strip()))
                 except Exception as e:  # noqa: BLE001
                     log(f"  {p.name}: pufakchani chizib bo'lmadi ({e})")
         o = out_dir / f"{i + 1:05d}.jpg"
