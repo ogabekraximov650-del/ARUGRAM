@@ -1066,7 +1066,8 @@ async def process(app, r, runner):
             out_dir.mkdir()
             anno = await asyncio.to_thread(annotate_pages, paths, groups, out_dir)
             final = await asyncio.to_thread(build_output, anno, "pdf", f"{title}_raqamlangan", WORK)
-            texts = [f"{i + 1}.{j}# {g['text'] or '(o\'qilmadi — rasmga qarang)'}" for i, page in enumerate(groups) for j, g in enumerate(page, 1)]
+            unread = "(o'qilmadi — rasmga qarang)"
+            texts = [f"{i + 1}.{j}# {g['text'] or unread}" for i, page in enumerate(groups) for j, g in enumerate(page, 1)]
             api("check", ident)
             live.send("⬆️ Yuborilmoqda...", force=True)
             await send_result(app, chat, final, f"\u270D {title} — pufakchalar raqamlandi ({len(texts)} ta)", jid, live)
