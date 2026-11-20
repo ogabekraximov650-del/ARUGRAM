@@ -1,4 +1,3 @@
-SELECT COUNT(*) AS epizodlar FROM epizod_db;
-SELECT COUNT(*) AS encode_jobs FROM encode_jobs;
-SELECT COUNT(*) AS orig_tg_files FROM tg_files WHERE file_name LIKE 'orig%';
-SELECT (SELECT COUNT(*) FROM anime_db) AS animelar, (SELECT COUNT(*) FROM season_db) AS bolimlar, (SELECT COUNT(*) FROM watch_history_db) AS tarix;
+SELECT anime_id,season_id,epizod_id,state,attempts,substr(error,1,120) AS error,done,datetime(queued_at/1000+18000,'unixepoch') AS qoshilgan,runner,lease_until FROM encode_jobs ORDER BY queued_at;
+SELECT anime_id,season_id,epizod_id,quality,state,attempts,substr(error,1,140) AS error FROM encode_q ORDER BY anime_id,epizod_id,quality;
+SELECT anime_id,season_id,epizod_id,epizod_number,origin_size,origin_height,substr(origin_video,1,30) AS origin FROM epizod_db ORDER BY created_at DESC LIMIT 12;
