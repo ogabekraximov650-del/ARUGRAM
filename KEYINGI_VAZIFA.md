@@ -7676,3 +7676,7 @@ Foydalanuvchi talabi: ilovadan reklamaga tegishli hamma narsa olib tashlandi —
 ## 2 GB dan katta asl video — Telegram'da ochiladigan qismlar
 
 Foydalanuvchi talabi. Avval katta Anibla videosi BAYT bo'yicha ~1,9 GB li shifrlangan hujjatlarga (`.p0/.p1`) bo'linardi — Telegram'da ochilmasdi. Endi `tool/anibla/stage.py::split_playable` kalit-kadr chegaralarida (`-c copy`, qayta kodlashsiz) ~1,7 GB li mp4 qismlarga bo'ladi; `download.py::upload_parts` ularni `send_video(supports_streaming)` bilan yuklaydi (shifrsiz — ≤2 GB asl videolar ham shunday). Worker (`anibla.rs`, `done`) bo'sh kalitli qismlarni ham ro'yxatga oladi; kodlovchi (`tool/encode/run.py`) kalit bo'sh bo'lsa qismlarni ffmpeg `concat` bilan ulaydi, kalit bor bo'lsa eski (shifrlangan) usul. Sinov: `.github/workflows/anibla-stage-test.yml`.
+
+## Bo'lim kartasidagi "N ta qism" ro'yxat bilan mos
+
+Topilgan xato: One Piece kartasida "70 ta qism", qismlar ro'yxatida 34 tasi. Sabab: ro'yxat (`GET /api/epizods/:a/:s`) birinchi tayyor bo'lmagan qismda (35 kodlanmagan) to'xtaydi, hisob (`visible_episode_counts`) esa tayyor qismlarning hammasini sanardi. Endi hisob ham qism raqami bo'yicha birinchi tayyor bo'lmagan qismgacha sanaydi. Fayl: `worker/src/lib.rs`.

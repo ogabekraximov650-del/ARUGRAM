@@ -6539,18 +6539,25 @@ async fn visible_episode_counts(env: &Env) -> Option<std::collections::HashMap<(
     // o'zgarish belgisi darhol yangilanadi, ilova ro'yxatni shu zahoti qayta so'raydi va JAVOB TANASI yangi belgi ostida ESKI hisob bilan
     // keshlanib qolardi (o'chirgandan keyingi `free_seasons_forget` esa kechikardi). Endi hisob keshlanmaydi: javob tanasi o'zi belgi
     // bo'yicha keshlanadi (jadval o'zgarmaguncha Turso'ga bormaydi), o'zgarganda esa hisob DOIM yangi o'qiladi.
+    // TOPILGAN XATO (One Piece: kartada "70 ta qism", ro'yxatda 34 tasi): qism ro'yxati (`GET /api/epizods/:a/:s`) BIRINCHI tayyor bo'lmagan qismda
+    // to'xtaydi, hisob esa tayyor qismlarning hammasini sanardi. Endi hisob ham shu qoida bilan: qism raqami bo'yicha boshidan birinchi tayyor
+    // bo'lmagan qismgacha bo'lganlar.
     let res = turso_exec(env,
-        "SELECT anime_id, season_id, COUNT(*) AS n FROM epizod_db
-          WHERE COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>''
-             OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>''
-             OR (COALESCE(origin_video,'')<>'' AND LENGTH(COALESCE(origin_key,''))=32)
-          GROUP BY anime_id, season_id",
+        "SELECT anime_id, season_id,
+                (COALESCE(url_360p,'')<>'' OR COALESCE(url_480p,'')<>'' OR COALESCE(url_720p,'')<>'' OR COALESCE(url_1080p,'')<>''
+                 OR (COALESCE(origin_video,'')<>'' AND LENGTH(COALESCE(origin_key,''))=32)) AS ready
+           FROM epizod_db ORDER BY anime_id, season_id, epizod_number ASC",
         vec![]).await.ok()?;
     let cols = res["cols"].as_array().cloned().unwrap_or_default();
-    Some(res["rows"].as_array().cloned().unwrap_or_default().iter()
-        .map(|r| row_to_obj(&cols, r.as_array().unwrap_or(&vec![])))
-        .map(|o| ((jint(&o, "anime_id"), jint(&o, "season_id")), jint(&o, "n")))
-        .collect())
+    let mut counts: std::collections::HashMap<(i64, i64), i64> = std::collections::HashMap::new();
+    let mut stopped: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+    for r in res["rows"].as_array().cloned().unwrap_or_default().iter() {
+        let o = row_to_obj(&cols, r.as_array().unwrap_or(&vec![]));
+        let key = (jint(&o, "anime_id"), jint(&o, "season_id"));
+        if stopped.contains(&key) { continue; }
+        if jint(&o, "ready") == 1 { *counts.entry(key).or_insert(0) += 1; } else { stopped.insert(key); }
+    }
+    Some(counts)
 }
 
 /// Bo'lim obyektlaridagi `epizod_count` ni ko'rinadigan qismlar soniga almashtiradi.
