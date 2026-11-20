@@ -1789,6 +1789,17 @@ async fn init_db(env: &Env) -> bool {
         }
         config_put(env, "mig_origin_meta", "1").await;
     }
+    // Manga tarjima: qo'lda tarjima rejimi (2026-11) — ish rejimi, foydalanuvchi tarjimasi, pufakchalar koordinatalari.
+    if ok && config_get(env, "mig_tr_manual").await.is_none() {
+        for sql in [
+            "ALTER TABLE tr_jobs ADD COLUMN mode TEXT DEFAULT ''",
+            "ALTER TABLE tr_jobs ADD COLUMN manual TEXT DEFAULT ''",
+            "ALTER TABLE tr_jobs ADD COLUMN boxes TEXT DEFAULT ''",
+        ] {
+            let _ = turso_exec(env, sql, vec![]).await;
+        }
+        config_put(env, "mig_tr_manual", "1").await;
+    }
     // Kanal posti kollaji (2026-11): qism qatorida saqlash kanalidagi rasm `file_id` si.
     if ok && config_get(env, "mig_collage_cols").await.is_none() {
         for sql in [

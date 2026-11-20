@@ -537,6 +537,80 @@ def render_all(paths, per_page_groups, uz_by_page, out_dir: Path):
     return outs
 
 
+# ── Qo'lda tarjima (2026-11): 1-bosqich raqamlash, 2-bosqich foydalanuvchi matnini joylash ──
+
+MARK_RE = re.compile(r"^\s*(\d{1,4})\s*\.\s*(\d{1,4})\s*(?:#|:)?\s*(.*)$")
+
+
+def parse_manual(text: str) -> dict:
+    """Foydalanuvchi yozgan `1.1# matn` qatorlari -> {(sahifa, pufakcha): matn}. Marker bo'lmagan qator oldingisining davomi (ko'p qatorli tarjima)."""
+    out, cur = {}, None
+    for raw in (text or "").splitlines():
+        m = MARK_RE.match(raw)
+        if m:
+            cur = (int(m.group(1)), int(m.group(2)))
+            out[cur] = m.group(3).strip()
+        elif cur is not None and raw.strip():
+            out[cur] = (out[cur] + " " + raw.strip()).strip()
+    return out
+
+
+def serialize_groups(groups):
+    """OCR guruhlari -> JSON (faqat koordinatalar): [[[box, [boxes...]], ...] har sahifa uchun]."""
+    return [[[list(map(int, g["box"])), [list(map(int, b)) for b in g["boxes"]]] for g in page] for page in groups]
+
+
+def load_groups(js: str):
+    pages = json.loads(js)
+    return [[{"box": tuple(b), "boxes": [tuple(x) for x in bs], "text": ""} for b, bs in page] for page in pages]
+
+
+def annotate_pages(paths, groups, out_dir: Path):
+    """Har sahifada pufakchalarni qizil ramka va `sahifa.raqam#` yorlig'i bilan belgilab, JPEG saqlaydi."""
+    from PIL import Image, ImageDraw
+    outs = []
+    for i, p in enumerate(paths):
+        im = Image.open(p).convert("RGB")
+        d = ImageDraw.Draw(im)
+        W = im.size[0]
+        fsz = max(16, min(48, W // 28))
+        font = _font(fsz)
+        for j, g in enumerate(groups[i], 1):
+            x0, y0, x1, y1 = g["box"]
+            d.rectangle([x0, y0, x1, y1], outline=(230, 30, 30), width=max(2, W // 400))
+            lab = f"{i + 1}.{j}#"
+            tw = int(font.getlength(lab)) + 8
+            ty = max(0, y0 - fsz - 6)
+            d.rectangle([x0, ty, x0 + tw, ty + fsz + 6], fill=(230, 30, 30))
+            d.text((x0 + 4, ty + 2), lab, font=font, fill=(255, 255, 255))
+        o = out_dir / f"{i + 1:05d}.jpg"
+        im.save(o, quality=88)
+        outs.append(o)
+    return outs
+
+
+async def send_result(app, chat, final: Path, caption: str, jid: int, live):
+    """Faylni suhbatga yuboradi: asosiy akkaunt, bo'lmasa R2 orqali panel bot."""
+    sent, send_err = False, None
+    try:
+        await app.send_document(chat, str(final), caption=caption[:1024], file_name=final.name, force_document=True)
+        sent = True
+    except Exception as ex:  # noqa: BLE001
+        send_err = ex
+        log(f"  asosiy akkaunt yubora olmadi ({type(ex).__name__}: {ex}) — R2 orqali yuboriladi")
+    if not sent:
+        via_r2 = False
+        if r2client is not None:
+            dest = {"mode": "document", "to": chat, "caption": caption[:1024], "file_name": final.name,
+                    "lease": {"t": "tr_jobs", "id": jid}, "fallback_bot": True}
+            via_r2 = await asyncio.to_thread(
+                r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], final,
+                f"tr_{jid}_{int(time.time())}{final.suffix}", dest, log, "arumediatv-translate")
+        if not via_r2:
+            raise send_err
+        live.done("Asosiy akkaunt yubora olmadi — R2'ga yozildi, panel bot yetkazadi")
+
+
 async def process(app, r, runner):
     channel = int(r["channel"])
     job = r["job"]
@@ -552,6 +626,31 @@ async def process(app, r, runner):
         live.send("⬇️ Fayllar yuklab olinmoqda...", force=True)
         paths = await collect_images(app, channel, job["pages"], live)
         live.done(f"Yuklab olindi: {len(paths)} ta rasm")
+        mode = str(job.get("mode") or "")
+
+        if mode == "render":
+            # 2-bosqich: pufakchalar 1-bosqichda saqlangan; foydalanuvchi yozgan `sahifa.raqam#` matnlari joylanadi (OCR/tarjima kerak emas).
+            groups = load_groups(job["boxes"])
+            if len(groups) != len(paths):
+                raise Fatal(f"sahifalar soni mos emas ({len(groups)} != {len(paths)}) — ishni o'chirib, qaytadan yuboring")
+            man = parse_manual(job.get("manual"))
+            uz_pages = [[man.get((i + 1, j + 1), "") for j in range(len(page))] for i, page in enumerate(groups)]
+            used = sum(1 for page in uz_pages for t in page if t.strip())
+            unknown = [f"{a}.{b}" for (a, b) in man if not (1 <= a <= len(groups) and 1 <= b <= len(groups[a - 1]))]
+            live.done(f"Tarjima: {used} ta pufakcha" + (f"; mavjud bo'lmagan raqamlar: {', '.join(unknown[:15])}" if unknown else ""))
+            live.send("\U0001F3A8 Rasmlarga yozilmoqda...", force=True)
+            out_dir = WORK / "out"
+            out_dir.mkdir()
+            outs = await asyncio.to_thread(render_all, paths, groups, uz_pages, out_dir)
+            final = await asyncio.to_thread(build_output, outs, fmt, title, WORK)
+            size = final.stat().st_size
+            live.done(f"Fayl tayyor: {size / 1048576:.1f} MB ({len(outs)} sahifa)")
+            api("check", ident)
+            live.send("⬆️ Yuborilmoqda...", force=True)
+            await send_result(app, chat, final, f"\U0001F310 {title}", jid, live)
+            api("finish", {**ident, "ok": True, "size": size, "pages": len(outs)})
+            log(f"  ✅ qo'lda tarjima #{jid} yuborildi ({used} pufakcha)")
+            return
 
         # OCR (og'ir ish — alohida oqimda, Telegram ulanishi uzilmasin).
         def work_ocr():
@@ -580,6 +679,22 @@ async def process(app, r, runner):
         log(f"  OCR tayyor: {len(flat)} ta matn bloki")
         live.done(f"Matn topildi: {len(flat)} ta blok")
 
+        if mode == "detect":
+            # 1-bosqich: pufakchalarni `sahifa.raqam#` bilan raqamlab, belgilangan fayl va asl matnlar ro'yxatini yuboramiz; ish tarjima kutadi.
+            live.send("\U0001F3F7 Pufakchalar raqamlanmoqda...", force=True)
+            out_dir = WORK / "anno"
+            out_dir.mkdir()
+            anno = await asyncio.to_thread(annotate_pages, paths, groups, out_dir)
+            final = await asyncio.to_thread(build_output, anno, "pdf", f"{title}_raqamlangan", WORK)
+            texts = [f"{i + 1}.{j}# {g['text']}" for i, page in enumerate(groups) for j, g in enumerate(page, 1)]
+            api("check", ident)
+            live.send("⬆️ Yuborilmoqda...", force=True)
+            await send_result(app, chat, final, f"\u270D {title} — pufakchalar raqamlandi ({len(texts)} ta)", jid, live)
+            api("finish", {**ident, "wait": True, "src": source, "boxes": json.dumps(serialize_groups(groups), separators=(",", ":")),
+                           "pages": len(paths), "blocks": len(texts), "texts": texts})
+            log(f"  ✍ #{jid}: {len(texts)} pufakcha raqamlandi, tarjima kutilmoqda")
+            return
+
         live.send(f"\U0001F310 Tarjima qilinmoqda ({len(flat)} blok)...", force=True)
         uz_flat = await asyncio.to_thread(translate_texts, flat, source) if flat else []
         bad = sum(1 for x in uz_flat if not x.strip())
@@ -601,25 +716,7 @@ async def process(app, r, runner):
         api("check", ident)   # admin shu orada o'chirgan bo'lsa — yuborilmaydi
         live.send("⬆️ Yuborilmoqda...", force=True)
         caption = f"\U0001F310 {title}"[:1024]
-        sent = False
-        send_err = None
-        try:
-            await app.send_document(chat, str(final), caption=caption, file_name=final.name, force_document=True)
-            sent = True
-        except Exception as ex:  # noqa: BLE001
-            send_err = ex
-            log(f"  asosiy akkaunt yubora olmadi ({type(ex).__name__}: {ex}) — R2 orqali yuboriladi")
-        if not sent:
-            via_r2 = False
-            if r2client is not None:
-                dest = {"mode": "document", "to": chat, "caption": caption, "file_name": final.name,
-                        "lease": {"t": "tr_jobs", "id": jid}, "fallback_bot": True}
-                via_r2 = await asyncio.to_thread(
-                    r2client.deliver, os.environ["API_BASE"], os.environ["ENCODE_TOKEN"], final,
-                    f"tr_{jid}_{int(time.time())}{final.suffix}", dest, log, "arumediatv-translate")
-            if not via_r2:
-                raise send_err
-            live.done("Asosiy akkaunt yubora olmadi — R2'ga yozildi, panel bot yetkazadi")
+        await send_result(app, chat, final, caption, jid, live)
         api("finish", {**ident, "ok": True, "size": size, "pages": len(outs)})
         log(f"  ✅ tarjima #{jid} yuborildi")
     except Lost:
