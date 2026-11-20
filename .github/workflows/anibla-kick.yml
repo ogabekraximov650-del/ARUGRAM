@@ -29,4 +29,15 @@ jobs:
       - name: Yuklashni ishga tushirish
         run: |
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          curl -fsS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/anibla/kick"; echo
+          curl -fsS -X POST -H "X-Encode-Token: $K" -H "Content-Type: application/json" -d '{}' "$API_BASE/api/anibla/kick" > "$RUNNER_TEMP/kick.json"
+          python3 - <<'PY'
+          import json, os
+          d = json.load(open(os.environ["RUNNER_TEMP"] + "/kick.json"))
+          neut = lambda x: str(x).replace("##[", "# [").replace("::", ": :")
+          print("MSG:", d.get("msg"))
+          print("RUNS:", [(r["id"], r["status"], r["conclusion"], r["created"]) for r in d.get("runs", [])])
+          print("JOBS:", neut(json.dumps(d.get("latest_jobs"), ensure_ascii=False)))
+          print("LOG_TAIL_BEGIN")
+          print(neut(d.get("log_tail", "")))
+          print("LOG_TAIL_END")
+          PY
