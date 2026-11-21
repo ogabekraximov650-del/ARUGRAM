@@ -47,6 +47,10 @@ jobs:
       - name: Sinov
         if: steps.m.outputs.mit != '1'
         run: python3 ci/translate_test.py
+      - uses: actions/setup-python@v5
+        if: steps.m.outputs.mit == '1'
+        with:
+          python-version: '3.12'
       - name: MIT sinovi (manga-image-translator, faqat tozalash)
         if: steps.m.outputs.mit == '1'
         run: |
