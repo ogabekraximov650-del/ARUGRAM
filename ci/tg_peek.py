@@ -9,9 +9,13 @@ SESSION = os.environ["SESSION_PATH"]
 chan = int(open("ci/VD_CHANNEL_ID").read().strip())
 ids = []
 deep_ids = []   # "d3177" — xabarni TO'LIQ tekshirish: xom atributlar, yuklab olish va ffprobe (videolarni solishtirish uchun)
+thumb_ids = []  # "t3177" — yuklab olmasdan: xom atributlar va kichik rasmlar (thumbs) o'lchami
 for tok in open("ci/TG_PEEK").read().split():
     if tok.startswith("d") and tok[1:].isdigit():
         deep_ids.append(int(tok[1:]))
+        continue
+    if tok.startswith("t") and tok[1:].isdigit():
+        thumb_ids.append(int(tok[1:]))
         continue
     if "-" in tok.strip("-"):
         a, b = tok.split("-", 1)
@@ -54,6 +58,10 @@ async def deep(app, chat, i):
     for a in doc.attributes:
         print("  atribut:", type(a).__name__, " ".join(str(a).split()))
     print("  xabar matni:", repr((raw.message or "")[:120]), "| sana:", raw.date, "| kimdan:", getattr(raw.from_id, "user_id", None) or getattr(raw.from_id, "channel_id", None))
+    for th in (doc.thumbs or []):
+        print("  kichik rasm:", type(th).__name__, " ".join(str(th).split())[:200])
+    if i in thumb_ids:
+        return
     m = await app.get_messages(chat, i)
     if doc.size > 600 * 1024 * 1024:
         print("  juda katta — yuklab olinmadi")
@@ -80,8 +88,8 @@ async def main():
             pass
         print("sessiya hisobi:", app.me.id, app.me.username)
         chat = await app.get_chat(chan)
-        if deep_ids:
-            for i in deep_ids:
+        if deep_ids or thumb_ids:
+            for i in deep_ids + thumb_ids:
                 try:
                     await deep(app, chan, i)
                 except Exception as ex:  # noqa: BLE001
