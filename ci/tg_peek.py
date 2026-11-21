@@ -52,7 +52,7 @@ async def deep(app, chat, i):
     print(f"  xom: mime={doc.mime_type} hajm={doc.size} dc={doc.dc_id} thumbs={len(doc.thumbs or [])} video_thumbs={len(getattr(doc, 'video_thumbs', None) or [])}")
     print(f"  media bayroqlari: spoiler={getattr(raw.media, 'spoiler', None)} video={getattr(raw.media, 'video', None)} round={getattr(raw.media, 'round', None)}")
     for a in doc.attributes:
-        print("  atribut:", type(a).__name__, {k: v for k, v in a.__dict__.items() if not k.startswith("_")})
+        print("  atribut:", type(a).__name__, " ".join(str(a).split()))
     print("  xabar matni:", repr((raw.message or "")[:120]), "| sana:", raw.date, "| kimdan:", getattr(raw.from_id, "user_id", None) or getattr(raw.from_id, "channel_id", None))
     m = await app.get_messages(chat, i)
     if doc.size > 600 * 1024 * 1024:
