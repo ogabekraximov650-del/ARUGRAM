@@ -754,7 +754,7 @@ SFX_WORDS = {"gong", "swoosh", "whoosh", "beep", "stab", "klang", "klong", "clan
              "crack", "thump", "splat", "bam", "pow", "zzz", "cooing", "kreak", "creak", "bzzt", "thwack", "slam", "swish", "whack", "pant", "gasp"}
 SHORT_OK = {"no", "ok", "oh", "ah", "uh", "um", "hm", "so", "go", "me", "we", "he", "it", "is", "to", "do", "be", "by", "on", "at", "in", "of", "or",
             "an", "as", "if", "my", "up", "us", "am", "hi", "a", "i"}
-JUNK_WORDS = (".com", "editor", "quality check", "cleaner", "raw provider", "www.", "http", "discord", "patreon", "facebook", "twitter", "instagram", "scanlation", "scans", "translator", "proofreader",
+JUNK_WORDS = (".com", "scanlat", "feedback is", "editor", "quality check", "cleaner", "raw provider", "www.", "http", "discord", "patreon", "facebook", "twitter", "instagram", "scanlation", "scans", "translator", "proofreader",
               "typesetter", "redrawer", "credit:", "join our", "read on", "@gmail", "support us", "recruit", "staff")
 OCR_CONF = {frozenset(x) for x in (("h", "k"), ("u", "l"), ("u", "n"), ("l", "i"), ("o", "0"), ("c", "e"), ("e", "o"), ("a", "o"), ("r", "p"), ("t", "l"),
                                    ("m", "n"), ("n", "h"), ("d", "o"), ("g", "6"), ("s", "5"), ("b", "6"), ("b", "h"), ("v", "y"), ("u", "v"), ("a", "4"),
