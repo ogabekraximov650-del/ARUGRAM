@@ -620,17 +620,21 @@ def api(path, body=None, method="POST"):
     raise RuntimeError(f"{path}: {err}")
 
 
-def make_collage(video: Path, dur: float) -> bytes:
-    """Kodlangan videodan 9 ta SIFATLI kadr -> 3x3 kollaj (1920x1080, 16:9, JPEG). Videoning 3%..88% oralig'i 9 teng bo'lakka bo'linadi
-    (boshidagi sarlavha va oxiridagi titrlar chetda); har bo'lakdan 6 ta nomzod kadr olinadi va ENG BATAFSILI tanlanadi: bir xil sifatda JPEG hajmi
-    qancha katta bo'lsa kadr shuncha tiniq va ma'noli (qora, xira, o'tish paytidagi kadrlar kichik chiqadi va tashlanadi).
-    EN: 9 quality frames (most detailed of 6 candidates per ninth, judged by JPEG size) tiled 3x3 into a 16:9 collage."""
+FRAMES_N = 10          # kanal postidagi kadrlar soni (Telegram albomi — eng ko'pi bilan 10 ta)
+FRAMES_FROM, FRAMES_TO = 0.20, 0.80   # videoning shu oralig'idan olinadi: boshidagi intro va oxiridagi titrlar tushib qolmasin
+
+
+def make_frames(video: Path, dur: float, n: int = FRAMES_N) -> list:
+    """UZ: Kodlangan videodan `n` ta SIFATLI kadr (har biri TO'LIQ o'lchamda, 16:9, JPEG ro'yxati; kollaj EMAS). Videoning 20%..80% oralig'i `n` teng
+    bo'lakka bo'linadi; har bo'lakdan 6 ta nomzod kadr (kichik nusxada) olinib ENG BATAFSILI (JPEG hajmi eng katta: tiniq, ma'noli kadr) tanlanadi,
+    so'ng aynan shu vaqt to'liq o'lchamda (eng ko'pi 1920 px eni) qayta olinadi.
+    EN: `n` full-size 16:9 JPEG frames from the 20%..80% part of the video (skips intro/credits); best of 6 candidates per slice by JPEG size."""
     import tempfile
     tmp = Path(tempfile.mkdtemp())
-    t0, t1 = dur * 0.03, dur * 0.88
-    seg = (t1 - t0) / 9
-    best = []
-    for i in range(9):
+    t0, t1 = dur * FRAMES_FROM, dur * FRAMES_TO
+    seg = (t1 - t0) / n
+    frames = []
+    for i in range(n):
         cands = []
         for j in range(6):
             t = t0 + seg * i + seg * (j + 0.5) / 6
@@ -638,33 +642,36 @@ def make_collage(video: Path, dur: float) -> bytes:
             r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", f"{t:.2f}", "-i", str(video), "-frames:v", "1",
                                 "-vf", "scale=640:360:flags=lanczos", "-q:v", "4", str(f)], capture_output=True, timeout=120)
             if r.returncode == 0 and f.exists() and f.stat().st_size > 0:
-                cands.append((f.stat().st_size, f))
+                cands.append((f.stat().st_size, t))
         if not cands:
-            raise RuntimeError(f"kollaj: {i + 1}-bo'lakdan kadr olinmadi")
-        sz, f = max(cands, key=lambda c: c[0])
-        f.rename(tmp / f"b{i}.jpg")
-        best.append(tmp / f"b{i}.jpg")
-    out = tmp / "collage.jpg"
-    r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-framerate", "1", "-i", str(tmp / "b%d.jpg"), "-vf", "tile=3x3", "-frames:v", "1",
-                        "-q:v", "3", str(out)], capture_output=True, timeout=120)
-    if r.returncode != 0 or not out.exists() or out.stat().st_size < 2000:
-        raise RuntimeError("kollaj yig'ilmadi: " + (r.stderr or b"")[-200:].decode(errors="replace"))
-    data = out.read_bytes()
+            raise RuntimeError(f"kadrlar: {i + 1}-bo'lakdan kadr olinmadi")
+        _, bt = max(cands, key=lambda c: c[0])
+        out = tmp / f"f{i}.jpg"
+        r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", f"{bt:.2f}", "-i", str(video), "-frames:v", "1",
+                            "-vf", "scale='min(1920,iw)':-2:flags=lanczos", "-q:v", "2", str(out)], capture_output=True, timeout=120)
+        if r.returncode != 0 or not out.exists() or out.stat().st_size < 2000:
+            raise RuntimeError(f"{i + 1}-kadr olinmadi: " + (r.stderr or b"")[-200:].decode(errors="replace"))
+        frames.append(out.read_bytes())
     shutil.rmtree(tmp, ignore_errors=True)
-    return data
+    return frames
 
 
-def post_collage(ident: dict, jpeg: bytes) -> dict:
-    """Kollajni SHIFRLAB (AES-128-CTR, tasodifiy kalit) worker'ga yuboradi: u shifrlangan nusxani saqlash kanaliga qo'yadi, postda esa xotirada
-    ochib afisha O'RNIGA kanalga joylaydi (bir marta)."""
+def pack_frames(frames: list) -> bytes:
+    """Kadrlar -> bitta bayt oqimi: har kadr oldidan 4 bayt (big-endian) uzunlik. Worker (`announce::split_frames`) shunday ajratadi."""
+    return b"".join(len(f).to_bytes(4, "big") + f for f in frames)
+
+
+def post_frames(ident: dict, frames: list) -> dict:
+    """Kadrlarni SHIFRLAB (AES-128-CTR, tasodifiy kalit; butun oqim bir marta shifrlanadi) worker'ga yuboradi: u shifrlangan nusxani saqlash kanaliga
+    qo'yadi, postda esa xotirada ochib kadrlarni ALBOM qilib kanalga joylaydi (bir marta)."""
     k = secrets.token_bytes(16)
     enc = Cipher(algorithms.AES(k), modes.CTR(b"\0" * 16)).encryptor()
-    sealed = enc.update(jpeg) + enc.finalize()
-    q = f"a={ident['anime_id']}&s={ident['season_id']}&e={ident['epizod_id']}"
+    sealed = enc.update(pack_frames(frames)) + enc.finalize()
+    q = f"a={ident['anime_id']}&s={ident['season_id']}&e={ident['epizod_id']}&n={len(frames)}"
     req = urllib.request.Request(f"{API}/api/encode/collage?{q}", data=sealed, method="POST",
                                  headers={"X-Encode-Token": TOKEN, "X-Collage-Key": k.hex(), "Content-Type": "application/octet-stream",
                                           "User-Agent": "arumediatv-encoder"})
-    with urllib.request.urlopen(req, timeout=120) as r:
+    with urllib.request.urlopen(req, timeout=180) as r:
         return json.loads(r.read() or b"{}")
 
 
@@ -1372,10 +1379,10 @@ async def process(app: Client, channel: int, job: dict):
             collage = None
             if QUALITY and label == top_label:
                 try:
-                    collage = await asyncio.to_thread(make_collage, out, src_d)
-                    log(f"  {label}: kadrlar kollaji tayyor ({len(collage) // 1024} KB)")
+                    collage = await asyncio.to_thread(make_frames, out, src_d)
+                    log(f"  {label}: {len(collage)} ta kadr tayyor ({sum(len(x) for x in collage) // 1024} KB)")
                 except Exception as ex:  # noqa: BLE001
-                    log(f"  {label}: kollaj yig'ilmadi ({type(ex).__name__}: {str(ex)[:150]}) — e'lon afisha bilan chiqadi")
+                    log(f"  {label}: kadrlar olinmadi ({type(ex).__name__}: {str(ex)[:150]}) — e'lon afisha bilan chiqadi")
             hb.check()
             k = secrets.token_bytes(16)
             sealed = WORK / name
@@ -1442,7 +1449,7 @@ async def process(app: Client, channel: int, job: dict):
             if collage:
                 # Sifat jurnalga yozildi (qism ilovada ochiladi) — endi kollajli asosiy post kanalga chiqadi (bir marta).
                 try:
-                    r_ = await asyncio.to_thread(post_collage, ident, collage)
+                    r_ = await asyncio.to_thread(post_frames, ident, collage)
                     log(f"  {label}: kanal posti {'joylandi' if r_.get('posted') else 'avval joylangan'}")
                 except Exception as ex:  # noqa: BLE001
                     log(f"  {label}: kanal posti yuborilmadi ({type(ex).__name__}: {str(ex)[:150]}) — afisha bilan chiqadi")

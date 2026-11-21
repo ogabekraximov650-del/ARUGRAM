@@ -34,6 +34,10 @@ pub(crate) const DDL: [&str; 2] = [
 
 /// Cho'ntakdagi muqova hajmi chegarasi (Bot API `getFile` — 20 MB, muqova esa kichik bo'ladi).
 const COVER_MAX: usize = 8 * 1024 * 1024;
+/// Kadrlar albomi (shifrlangan butun oqim) chegarasi: Bot API `getFile` 20 MB dan oshirmaydi.
+const FRAMES_MAX: usize = 18 * 1024 * 1024;
+/// Telegram albomi: 2..=10 ta rasm.
+const FRAMES_MAX_N: usize = 10;
 
 fn channel(env: &Env) -> i64 {
     serde_json::from_str::<Value>(&tg_secret(env, "ANNOUNCE_CHANNEL")).ok()
@@ -128,28 +132,54 @@ async fn compose(env: &Env, a: i64, s: i64, e: i64) -> std::result::Result<(Valu
     Ok((season, text, markup))
 }
 
-/// UZ: 1080p (eng yuqori sifat) kodlash tugagach Actions yig'gan 3x3 KADRLAR KOLLAJI (16:9, JPEG) afisha O'RNIGA asosiy post rasmi bo'ladi.
-///     Rasm Actions'dan SHIFRLANGAN (AES-128-CTR, kalit alohida) keladi: saqlash kanaliga shifrlangan hujjat sifatida joylanadi (`file_id` va kalit
-///     qism qatoriga yoziladi), post uchun worker xotirada shifrdan yechib rasm qilib yuboradi. Post bir marta (`announced`); allaqachon e'lon
-///     qilingan bo'lsa `Ok(false)`. EN: the encrypted collage is stored in the storage channel as a document; the worker decrypts it in memory to post a photo.
+/// Ochilgan oqimdan kadrlarni ajratadi: har kadr oldidan 4 bayt (big-endian) uzunlik (`tool/encode/run.py::pack_frames`). Eski (kollaj) nusxalar — bitta
+/// JPEG (to'g'ridan-to'g'ri `FF D8` bilan boshlanadi) — bitta kadr deb olinadi.
+fn split_frames(plain: &[u8]) -> std::result::Result<Vec<Vec<u8>>, String> {
+    if plain.len() >= 2 && plain[0] == 0xFF && plain[1] == 0xD8 {
+        return Ok(vec![plain.to_vec()]);
+    }
+    let mut out: Vec<Vec<u8>> = Vec::new();
+    let mut pos = 0usize;
+    while pos < plain.len() {
+        if pos + 4 > plain.len() {
+            return Err("kadrlar oqimi buzuq".into());
+        }
+        let n = u32::from_be_bytes([plain[pos], plain[pos + 1], plain[pos + 2], plain[pos + 3]]) as usize;
+        pos += 4;
+        if n < 3 || pos + n > plain.len() || plain[pos] != 0xFF || plain[pos + 1] != 0xD8 {
+            return Err("kadr JPEG emas yoki shifr ochilmadi (kalit mos emas)".into());
+        }
+        out.push(plain[pos..pos + n].to_vec());
+        pos += n;
+        if out.len() > FRAMES_MAX_N {
+            return Err("kadrlar 10 tadan ko'p".into());
+        }
+    }
+    if out.is_empty() {
+        return Err("kadrlar yo'q".into());
+    }
+    Ok(out)
+}
+
+/// UZ: 1080p (eng yuqori sifat) kodlash tugagach Actions olgan KADRLAR (2..10 ta, to'liq o'lchamli 16:9 JPEG; videoning 20%..80% oralig'idan) ALBOM
+///     qilib afisha O'RNIGA asosiy post bo'ladi. Kadrlar Actions'dan bitta SHIFRLANGAN oqim (AES-128-CTR, kalit alohida) bo'lib keladi: u saqlash
+///     kanaliga shifrlangan hujjat sifatida joylanadi (`file_id` va kalit qism qatoriga yoziladi), post uchun worker xotirada ochib albom qilib
+///     yuboradi, albom tagidan matn + "Tomosha qilish" tugmali alohida xabar (Telegram albomga tugma qo'yishga ruxsat bermaydi) chiqadi.
+///     Post bir marta (`announced`); allaqachon e'lon qilingan bo'lsa `Ok(false)`.
+///     EN: the frames arrive as one encrypted stream, are stored as one encrypted document, and are posted as an album + a caption message with the button.
 pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex: &str) -> std::result::Result<bool, String> {
     let ch = channel(env);
     if ch == 0 {
         return Err("e'lon kanali sozlanmagan".into());
     }
-    if sealed.len() < 2000 || sealed.len() > COVER_MAX {
-        return Err("kollaj hajmi noto'g'ri".into());
+    if sealed.len() < 2000 || sealed.len() > FRAMES_MAX {
+        return Err("kadrlar hajmi noto'g'ri".into());
     }
-    let key = hex_key(key_hex.trim()).ok_or("kollaj kaliti noto'g'ri")?;
-    let mut jpeg = sealed.to_vec();
-    let mut c = ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into());
-    c.apply_keystream(&mut jpeg);
-    if jpeg.len() < 3 || jpeg[0] != 0xFF || jpeg[1] != 0xD8 {
-        return Err("kollaj shifri ochilmadi (kalit mos emas)".into());
-    }
+    let key = hex_key(key_hex.trim()).ok_or("kadrlar kaliti noto'g'ri")?;
+    let frames = split_frames(&decrypt(sealed, &key))?;
     // Shifrlangan nusxa avval saqlash kanaliga; xato bo'lsa e'lon baribir chiqadi (keyingi safar afisha bilan).
     if let Err(why) = store_collage(env, a, s, e, sealed, key_hex.trim()).await {
-        console_log!("kollaj saqlanmadi ({a}/{s}/{e}): {why}");
+        console_log!("kadrlar saqlanmadi ({a}/{s}/{e}): {why}");
     }
     let claim = turso_exec(env,
         "INSERT INTO announced (anime_id, season_id, epizod_id, at) VALUES (?,?,?,?)
@@ -159,18 +189,73 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8
         return Ok(false);
     }
     let sent = async {
-        let (_, text, markup) = compose(env, a, s, e).await?;
-        upload_photo_post(env, ch, &jpeg, &text, &markup).await.map(|_| ())
+        let (_, text, markup) = compose(env, a, s, e).await.map_err(|e| (false, e))?;
+        post_frames(env, ch, &frames, &text, &markup).await
     }.await;
-    if let Err(why) = sent {
-        let _ = turso_exec(env, "DELETE FROM announced WHERE anime_id=? AND season_id=? AND epizod_id=?",
-            vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
+    if let Err((album_sent, why)) = sent {
+        // Albom allaqachon chiqqan bo'lsa belgi QOLADI (qayta urinishda albom ikki marta chiqmasin).
+        if !album_sent {
+            let _ = turso_exec(env, "DELETE FROM announced WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
+        }
         return Err(why);
     }
     Ok(true)
 }
 
-/// Shifrlangan kollajni saqlash kanaliga HUJJAT qilib joylaydi; `file_id`, xabar raqami va kalit qism qatoriga yoziladi.
+/// AES-128-CTR (hisoblagich 0): shifrlash va ochish bir xil amal.
+fn decrypt(sealed: &[u8], key: &[u8; 16]) -> Vec<u8> {
+    let mut out = sealed.to_vec();
+    let mut c = ctr::Ctr128BE::<Aes128>::new(key.into(), &[0u8; 16].into());
+    c.apply_keystream(&mut out);
+    out
+}
+
+/// Kadrlarni kanalga joylaydi: 2..10 ta bo'lsa — albom (`sendMediaGroup`) va uning tagida matn + tugma xabari; bitta (eski kollaj) bo'lsa —
+/// matn+tugmali bitta rasm. Xato: `(albom_chiqdimi, sabab)`.
+async fn post_frames(env: &Env, ch: i64, frames: &[Vec<u8>], text: &str, markup: &Value) -> std::result::Result<(), (bool, String)> {
+    if frames.len() == 1 {
+        return upload_photo_post(env, ch, &frames[0], text, markup).await.map(|_| ()).map_err(|e| (false, e));
+    }
+    upload_album(env, ch, frames).await.map_err(|e| (false, e))?;
+    send(env, "sendMessage", json!({"chat_id": ch, "text": text, "parse_mode": "HTML",
+        "disable_web_page_preview": true, "reply_markup": markup})).await
+        .map(|_| ()).map_err(|e| (true, format!("albom joylandi, lekin matn/tugma xabari yuborilmadi: {e}")))
+}
+
+/// `sendMediaGroup` (multipart): kadrlar bitta albom (asosiy bot; bo'lmasa kodlash boti). Telegram albomni suriladigan post qilib ko'rsatadi.
+async fn upload_album(env: &Env, ch: i64, frames: &[Vec<u8>]) -> std::result::Result<Value, String> {
+    let mut last = String::new();
+    for token in [tg_secret(env, "TELEGRAM_BOT_TOKEN"), encbot_token(env)] {
+        if token.is_empty() {
+            continue;
+        }
+        let fd = web_sys::FormData::new().map_err(|_| "FormData".to_string())?;
+        fd.append_with_str("chat_id", &ch.to_string()).map_err(|_| "FormData".to_string())?;
+        let media: Vec<Value> = (0..frames.len()).map(|i| json!({"type": "photo", "media": format!("attach://f{i}")})).collect();
+        fd.append_with_str("media", &Value::Array(media).to_string()).map_err(|_| "FormData".to_string())?;
+        for (i, f) in frames.iter().enumerate() {
+            let arr = js_sys::Uint8Array::from(f.as_slice());
+            let parts = js_sys::Array::new();
+            parts.push(&arr);
+            let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(|_| "Blob".to_string())?;
+            fd.append_with_blob_and_filename(&format!("f{i}"), &blob, &format!("frame{i}.jpg")).map_err(|_| "FormData".to_string())?;
+        }
+        let req = Request::new_with_init(
+            &format!("https://api.telegram.org/bot{token}/sendMediaGroup"),
+            RequestInit::new().with_method(Method::Post).with_body(Some(fd.into())),
+        ).map_err(|e| e.to_string())?;
+        let mut r = Fetch::Request(req).send().await.map_err(|e| e.to_string())?;
+        let v: Value = r.json().await.map_err(|e| e.to_string())?;
+        if v["ok"] == json!(true) {
+            return Ok(v);
+        }
+        last = format!("sendMediaGroup: {}", v["description"].as_str().unwrap_or("noma'lum"));
+    }
+    Err(if last.is_empty() { "bot tokeni yo'q".into() } else { last })
+}
+
+/// Shifrlangan kadrlar oqimini saqlash kanaliga HUJJAT qilib joylaydi; `file_id`, xabar raqami va kalit qism qatoriga yoziladi.
 async fn store_collage(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex: &str) -> std::result::Result<String, String> {
     let store = tg_channel_id(env);
     if store == 0 {
@@ -179,7 +264,7 @@ async fn store_collage(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex
     let sent = upload_document(env, store, sealed, &format!("collage_{a}_{s}_{e}.bin")).await?;
     let fid = sent["result"]["document"]["file_id"].as_str().ok_or("yuklangan hujjat file_id si yo'q")?.to_string();
     let msg = sent["result"]["message_id"].as_i64().unwrap_or(0);
-    // Eski kollaj xabari (qism qayta kodlangan bo'lsa) saqlash kanalidan o'chadi.
+    // Eski nusxa xabari (qism qayta kodlangan bo'lsa) saqlash kanalidan o'chadi.
     if let Some(old) = turso_exec(env, "SELECT collage_msg FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok().and_then(|r| first_row(&r)) {
         let m = jint(&old, "collage_msg");
@@ -187,7 +272,7 @@ async fn store_collage(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex
             let _ = tg_api(env, "deleteMessage", json!({"chat_id": store, "message_id": m})).await;
         }
     }
-    // Qism o'chganda kollaj ham tozalansin: xabar `tg_files` da ham (`collage_<a>_<s>_<e>.bin`).
+    // Qism o'chganda nusxa ham tozalansin: xabar `tg_files` da ham (`collage_<a>_<s>_<e>.bin`).
     let _ = turso_exec(env,
         "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '')
          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id",
@@ -198,8 +283,8 @@ async fn store_collage(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8], key_hex
     Ok(fid)
 }
 
-/// Qism uchun saqlangan kollaj: `file_id` bo'yicha shifrlangan hujjat yuklab olinadi va xotirada ochiladi. `None` — kollaj yo'q yoki olinmadi.
-async fn stored_collage(env: &Env, a: i64, s: i64, e: i64) -> Option<Vec<u8>> {
+/// Qism uchun saqlangan kadrlar: `file_id` bo'yicha shifrlangan hujjat yuklab olinadi va xotirada ochiladi. `None` — yo'q yoki olinmadi.
+async fn stored_collage(env: &Env, a: i64, s: i64, e: i64) -> Option<Vec<Vec<u8>>> {
     let row = turso_exec(env, "SELECT collage_file_id, collage_key FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
         vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok().and_then(|r| first_row(&r))?;
     let fid = row["collage_file_id"].as_str().filter(|x| !x.is_empty())?.to_string();
@@ -208,21 +293,22 @@ async fn stored_collage(env: &Env, a: i64, s: i64, e: i64) -> Option<Vec<u8>> {
     let path = info["file_path"].as_str()?.to_string();
     let token = tg_secret(env, "TELEGRAM_BOT_TOKEN");
     let mut resp = Fetch::Url(format!("https://api.telegram.org/file/bot{token}/{path}").parse().ok()?).send().await.ok()?;
-    let mut bytes = resp.bytes().await.ok()?;
-    if bytes.len() < 2000 || bytes.len() > COVER_MAX {
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.len() < 2000 || bytes.len() > FRAMES_MAX {
         return None;
     }
-    let mut c = ctr::Ctr128BE::<Aes128>::new(&key.into(), &[0u8; 16].into());
-    c.apply_keystream(&mut bytes);
-    (bytes[0] == 0xFF && bytes[1] == 0xD8).then_some(bytes)
+    split_frames(&decrypt(&bytes, &key)).ok()
 }
 
 async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result<(), String> {
     let (season, text, markup) = compose(env, a, s, e).await?;
-    // Qism uchun kadrlar kollaji saqlangan bo'lsa (shifrlangan hujjat, `epizod_db.collage_file_id`) — worker shifrdan yechib, afisha O'RNIGA shu rasmni joylaydi.
-    if let Some(jpeg) = stored_collage(env, a, s, e).await {
-        if upload_photo_post(env, ch, &jpeg, &text, &markup).await.is_ok() {
-            return Ok(());
+    // Qism uchun kadrlar saqlangan bo'lsa (shifrlangan hujjat, `epizod_db.collage_file_id`) — worker shifrdan yechib, afisha O'RNIGA albom qiladi.
+    if let Some(frames) = stored_collage(env, a, s, e).await {
+        match post_frames(env, ch, &frames, &text, &markup).await {
+            Ok(()) => return Ok(()),
+            // Albom chiqib, faqat matn yuborilmagan — afisha ikkinchi marta joylanmasin.
+            Err((true, why)) => return Err(why),
+            Err((false, _)) => {}
         }
     }
     let photo = bare_name(season["photo_url"].as_str().unwrap_or(""));
@@ -533,5 +619,43 @@ mod watch_link_tests {
         assert_eq!(parse_watch("3_1_2_3"), None);
         assert_eq!(parse_watch("w"), None);
         assert_eq!(parse_watch(""), None);
+    }
+}
+
+#[cfg(test)]
+mod frames_tests {
+    use super::split_frames;
+
+    fn jpeg(n: usize) -> Vec<u8> {
+        let mut v = vec![0xFF, 0xD8];
+        v.extend(std::iter::repeat(7u8).take(n));
+        v
+    }
+    fn pack(frames: &[Vec<u8>]) -> Vec<u8> {
+        frames.iter().flat_map(|f| (f.len() as u32).to_be_bytes().into_iter().chain(f.iter().copied())).collect()
+    }
+
+    #[test]
+    fn splits_packed_frames() {
+        let fr: Vec<Vec<u8>> = (1..=10).map(|i| jpeg(i * 10)).collect();
+        assert_eq!(split_frames(&pack(&fr)).unwrap(), fr);
+    }
+
+    #[test]
+    fn old_single_jpeg_collage_is_one_frame() {
+        let one = jpeg(500);
+        assert_eq!(split_frames(&one).unwrap(), vec![one]);
+    }
+
+    #[test]
+    fn rejects_garbage_wrong_key_and_too_many() {
+        assert!(split_frames(&[]).is_err());
+        assert!(split_frames(&[1, 2, 3]).is_err());
+        assert!(split_frames(&[0, 0, 0, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9]).is_err()); // JPEG belgisi yo'q (kalit mos emas)
+        let fr: Vec<Vec<u8>> = (0..11).map(|_| jpeg(20)).collect();
+        assert!(split_frames(&pack(&fr)).is_err());
+        let mut cut = pack(&[jpeg(50)]);
+        cut.truncate(cut.len() - 3);
+        assert!(split_frames(&cut).is_err()); // uzilgan oqim
     }
 }

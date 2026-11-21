@@ -12852,7 +12852,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
 
     // Bazaga TO'G'RIDAN-TO'G'RI (CI skriptlari: video/statistika tozalash) yozilgach worker keshlari eskirib qoladi (ro'yxatlar o'zgarish belgisi bo'yicha keshlanadi,
     // belgi esa faqat worker orqali yozilganda yangilanardi). Shu yo'l hamma tegishli jadval belgilarini yangilaydi va hisoblagich keshlarini tashlaydi.
-    // 1080p (eng yuqori sifat) workflow'i 9 ta kadrdan yig'gan 3x3 kollaj (JPEG, SHIFRLANGAN: AES-128-CTR, kalit `X-Collage-Key` sarlavhasida; tana — xom bayt): afisha o'rniga asosiy post (`announce::collage_post`).
+    // 1080p (eng yuqori sifat) workflow'i videoning 20%..80% oralig'idan olgan 10 ta kadr (to'liq o'lchamli JPEG, bitta SHIFRLANGAN oqim: AES-128-CTR, kalit `X-Collage-Key` sarlavhasida; tana — xom bayt, har kadr oldidan 4 bayt uzunlik): afisha o'rniga asosiy post, ALBOM (`announce::collage_post`).
     if path == "/api/encode/collage" && method == Method::Post {
         let qurl = req.url().ok();
         let q = |k: &str| qurl.as_ref().and_then(|u| u.query_pairs().find(|(x, _)| x == k).map(|(_, v)| v.to_string())).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);

@@ -7732,3 +7732,10 @@ Foydalanuvchi talabi. 47 tadan 17 ta keraksiz workflow o'chirildi: bir martalik 
 - Bot klaviaturasi `trbot::kb(env)` (async): tanlangan tugma oldida ✅ — rejim (`✍️ Qo'lda tarjima` / `🤖 Avto tarjima`, `tr_manual`), natija (`📦 Hammasi bittada` / `📑 Alohida-alohida`, `tr_out` = all|each), til va format. Kelgan matndan `✅ ` olib tashlanib solishtiriladi (`untick`).
 - `tr_jobs.out` ustuni (migratsiya `mig_tr_out`), `claim` javobida `job.out`.
 - `tool/translate/translate.py`: `collect_images` endi `(rasmlar, egalar)` qaytaradi; `deliver` — `each` bo'lsa `build_each` har yuborilgan faylni o'z turida (rasm/PDF/ZIP-CBZ, nom `<asl>_uz.<kengaytma>`) qaytaradi, aks holda bitta fayl. Test: `test_each.py`.
+
+## Kanal posti: 10 ta kadr albomi (2026-11)
+
+- Avval: 9 kadr 3x3 kollajga (bitta rasm, har kadr kichik). Endi: 10 ta TO'LIQ o'lchamli (eng ko'pi 1920 px, 16:9) kadr, videoning **20%..80%** oralig'idan (intro/titr tushmasin); har bo'lakdan 6 nomzoddan eng batafsili tanlanadi (`tool/encode/run.py`: `make_frames`, `pack_frames`, `post_frames`).
+- Yuborish: kadrlar bitta oqimga (4 bayt uzunlik + JPEG) o'raladi, bir marta AES-128-CTR bilan shifrlanadi, `POST /api/encode/collage` (kalit `X-Collage-Key`). Worker (`announce.rs`: `split_frames`, `collage_post`, `upload_album`) saqlash kanaliga bitta shifrlangan hujjat qiladi (`epizod_db.collage_*` ustunlari o'zgarmadi) va kanalga `sendMediaGroup` albomi + uning tagida matn va «Tomosha qilish» tugmali alohida xabar (Telegram albomga inline tugma qo'ymaydi) joylaydi.
+- Eski (bitta JPEG kollaj) nusxalar ham ishlaydi: bitta kadr deb olinib, avvalgidek matn+tugmali bitta rasm bo'ladi.
+- Sinov: `tool/encode/test_collage.py` (10 kadr, 1920x1080, 20–80% oralig'i), `announce::frames_tests`.
