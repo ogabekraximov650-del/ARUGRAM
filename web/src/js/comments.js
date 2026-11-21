@@ -85,6 +85,12 @@ function preview(c) {
   return c.mediaType === 'sticker' ? 'Stiker' : c.mediaType === 'gif' ? 'GIF' : c.body;
 }
 
+/** Android `commentPreview`: paket belgilari (`[pe:..:..:x]`) olib tashlanadi. */
+function previewPlain(c) {
+  const t = `${c.body ?? ''}`.replace(/\[(?:pe:\d{1,16}:\d{1,9}|ce:[A-Za-z0-9_]{1,64}:\d{1,20}):([^\]]{0,16})\]/g, '$1');
+  return t || (c.mediaType === 'sticker' ? 'Stiker' : c.mediaType === 'gif' ? 'GIF' : '');
+}
+
 /** "3 daqiqa oldin" (`commentAgo`). */
 export function commentAgo(ms) {
   if (ms <= 0) return '';
@@ -359,9 +365,40 @@ async function sendCommentReport(commentId, reason) {
 
 function avatar(url, name, size) {
   const u = imageUrl(url);
-  const letter = esc((`${name}`.trim()[0] || '?').toUpperCase());
+  const letter = esc((`${name}`.trim().replace(/^@/, '')[0] || '?').toUpperCase());
   return `<span class="cm-ava" style="width:${size}px;height:${size}px;font-size:${(size * 0.42).toFixed(1)}px">
     <span class="l">${letter}</span>${u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</span>`;
+}
+
+/** Android `timeAgo`: hozir / N daq oldin / N soat oldin / N kun oldin / dd.MM.yyyy. */
+function timeAgoNative(ms) {
+  if (!ms || ms <= 0) return '';
+  const m = Math.floor((Date.now() - ms) / 60000);
+  if (m < 1) return 'hozir';
+  if (m < 60) return `${m} daq oldin`;
+  if (m < 60 * 24) return `${Math.floor(m / 60)} soat oldin`;
+  if (m < 60 * 24 * 7) return `${Math.floor(m / (60 * 24))} kun oldin`;
+  const d = new Date(ms + 5 * 3600000);   // Toshkent (GMT+5)
+  const two = (v) => String(v).padStart(2, '0');
+  return `${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
+}
+
+/** Material `AlertDialog` (Android bilan bir xil): sarlavha, matn/HTML, o'ng tomonda matnli tugmalar. */
+function mdDialog({ title, html = '', confirm, dismiss }) {
+  return new Promise((resolve) => {
+    const app = document.getElementById('app');
+    const wrap = document.createElement('div');
+    wrap.className = 'dlg-wrap md-dlg-wrap';
+    wrap.innerHTML = `<div class="md-dlg"><div class="md-t">${esc(title)}</div><div class="md-b">${html}</div>
+      <div class="md-btns">${dismiss ? `<span class="md-btn dis">${esc(dismiss)}</span>` : ''}${confirm ? `<span class="md-btn ok" style="color:${confirm.color || 'var(--accent)'}">${esc(confirm.label)}</span>` : ''}</div></div>`;
+    const close = (v) => { wrap.classList.remove('in'); setTimeout(() => wrap.remove(), 180); resolve(v); };
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(false); });
+    wrap.querySelector('.md-btn.dis')?.addEventListener('click', () => close(false));
+    wrap.querySelector('.md-btn.ok')?.addEventListener('click', () => close(true));
+    app.appendChild(wrap);
+    requestAnimationFrame(() => wrap.classList.add('in'));
+    wrap._close = close;
+  });
 }
 
 /** Pastdan chiqadigan oyna (o'z ko'rinishi bilan). */
@@ -404,7 +441,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
       <div class="cm-replying"></div>
       <div class="cm-row">
         <div class="cm-field">${emojiButtonHtml()}<textarea rows="1" maxlength="1000" placeholder="Izoh yozing..."></textarea></div>
-        <div class="cm-send">${icon('send', { size: 19, color: 'rgba(255,255,255,0.38)' })}</div>
+        <div class="cm-send">${icon('send', { size: 24, color: 'rgba(255,255,255,0.5)' })}</div>
       </div>
       <div class="cm-panel"></div>
     </div>`;
@@ -468,23 +505,25 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
 
   // ── Ro'yxat ──
   function rowHtml(c, small) {
-    const size = small ? 26 : 34;
-    const mine = currentUser()?.id === c.userId;
+    const size = small ? 28 : 34;
+    const me = currentUser();
+    const mine = me?.id === c.userId;
+    const admin = me?.is_admin === true;
     const media = !c.deleted && (c.mediaType === 'sticker' || c.mediaType === 'gif');
     return `<div class="cm-c${small ? ' small' : ''}" data-id="${esc(c.id)}">
       <div class="cm-prof">${avatar(c.photoUrl, nameOf(c), size)}</div>
       <div class="cm-main">
         <div class="cm-hd"><span class="cm-n cm-prof">${esc(nameOf(c))}</span>
-          <span class="cm-t">${esc(`${commentAgo(c.createdAt)} · ${commentClock(c.createdAt)}`)}</span></div>
+          <span class="cm-t">${esc(timeAgoNative(c.createdAt))}</span></div>
         ${media ? `<div class="cm-media" data-f="${esc(c.mediaFile)}" data-t="${c.mediaType}"></div>`
     : `<div class="cm-body${c.deleted ? ' del' : ''}">${c.deleted ? "Izoh o'chirilgan" : richText(c.body)}</div>`}
         ${!c.deleted ? `<div class="cm-acts">
-          <div class="cm-like${c.liked ? ' on' : ''}">${icon('thumb_up', { fill: c.liked, size: 20 })}${c.likes > 0 ? `<span>${c.likes}</span>` : ''}</div>
-          <div class="cm-tb reply">Javob berish</div>
-          ${mine ? `<div class="cm-tb del" style="color:${RED300}">O'chirish</div>` : ''}
+          <div class="cm-like${c.liked ? ' on' : ''}">${icon('favorite', { size: 16 })}${c.likes > 0 ? `<span>${c.likes}</span>` : ''}</div>
+          ${!c.parentId ? '<div class="cm-tb reply">Javob</div>' : ''}
+          ${mine || admin ? `<div class="cm-ic del">${icon('delete', { size: 16 })}</div>` : ''}
+          ${!mine ? `<div class="cm-ic more">${icon('warning', { size: 16 })}</div>` : ''}
         </div>` : ''}
       </div>
-      ${!mine && !c.deleted ? `<div class="cm-more">${icon('more_vert', { size: 19, color: 'rgba(255,255,255,0.45)' })}</div>` : ''}
     </div>`;
   }
 
@@ -493,9 +532,9 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
     chips.forEach((ch) => ch.classList.toggle('on', ch.dataset.s === ctl.sort));
     const items = ctl.items;
     if (ctl.loading && !items.length) {
-      itemsEl.innerHTML = `<div class="cm-center">${spinner(36, 2, C.accent)}</div>`;
+      itemsEl.innerHTML = `<div class="cm-center">${spinner(32, 2, C.accent)}</div>`;
     } else if (!items.length) {
-      itemsEl.innerHTML = `<div class="cm-empty">${icon('mode_comment', { fill: false, size: 46, color: 'rgba(255,255,255,0.2)' })}
+      itemsEl.innerHTML = `<div class="cm-empty">${icon('menu', { size: 48, color: 'rgba(255,255,255,0.2)' })}
         <div class="t">${esc(ctl.error ?? "Hali izoh yo'q — birinchi bo'ling")}</div></div>`;
     } else {
       itemsEl.innerHTML = items.map((c) => {
@@ -503,9 +542,8 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
         const reps = ctl.replies.get(c.id) || [];
         return `<div class="cm-block">
           ${rowHtml(c, false)}
-          ${c.replyCount > 0 ? `<div class="cm-rt" data-id="${esc(c.id)}">
-            ${ctl.loadingReplies.has(c.id) ? spinner(13, 2, 'rgba(255,255,255,0.38)') : icon(open ? 'keyboard_arrow_up' : 'keyboard_arrow_down', { size: 18, color: C.accent })}
-            <span>${open ? 'Javoblarni yashirish' : `${c.replyCount} ta javob`}</span></div>` : ''}
+          ${c.replyCount > 0 ? `<div class="cm-rt" data-id="${esc(c.id)}"><span>${open ? 'Javoblarni yashirish' : `${c.replyCount} ta javobni ko'rish`}</span></div>
+          ${ctl.loadingReplies.has(c.id) ? `<div class="cm-rl">${spinner(18, 2, C.accent)}</div>` : ''}` : ''}
           ${open ? `<div class="cm-replies">${reps.map((r) => `<div class="cm-rw">${rowHtml(r, true)}</div>`).join('')}</div>` : ''}
         </div>`;
       }).join('') + (ctl.hasMore ? `<div class="cm-more-load">${spinner(20, 2, 'rgba(255,255,255,0.38)')}</div>` : '');
@@ -525,8 +563,8 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
     if (e.target.closest('.cm-prof')) { if (c.userId > 0) hooks.openUser(c.userId); return; }
     if (e.target.closest('.cm-like')) { const err = await ctl.toggleLike(c.id); if (err) toast(err); return; }
     if (e.target.closest('.cm-tb.reply')) { startReply(c); return; }
-    if (e.target.closest('.cm-tb.del')) { confirmDelete(c); return; }
-    if (e.target.closest('.cm-more')) openMenu(c);
+    if (e.target.closest('.cm-ic.del')) { confirmDelete(c); return; }
+    if (e.target.closest('.cm-ic.more')) openMenu(c);
   });
 
   // ── Yozish ──
@@ -534,7 +572,7 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
   function paintSend() {
     const on = !blank() && !sending;
     sendEl.classList.toggle('on', on);
-    sendEl.innerHTML = sending ? spinner(18, 2, '#fff') : icon('send', { size: 19, color: on ? '#fff' : 'rgba(255,255,255,0.38)' });
+    sendEl.innerHTML = sending ? spinner(18, 2, '#fff') : icon('send', { size: 24, color: on ? '#fff' : 'rgba(255,255,255,0.5)' });
   }
   function autosize() { ta.style.height = 'auto'; ta.style.height = `${Math.min(ta.scrollHeight, 4 * 19 + 16)}px`; }
   ta.addEventListener('input', () => { autosize(); paintSend(); });
@@ -573,69 +611,56 @@ export function createCommentsTab(container, { animeId, seasonId, expanded = fal
   });
 
   // ── O'chirish ──
-  function confirmDelete(c) {
-    const app = document.getElementById('app');
-    const wrap = document.createElement('div');
-    wrap.className = 'dlg-wrap';
-    wrap.innerHTML = `<div class="dlg cm-dlg"><div class="cm-dlg-t">Izoh o'chirilsinmi?</div>
-      <div class="cm-dlg-b"><button class="btn cm-no">Yo'q</button><button class="btn cm-yes">Ha</button></div></div>`;
-    const close = () => { wrap.classList.remove('in'); setTimeout(() => wrap.remove(), 180); };
-    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(); });
-    wrap.querySelector('.cm-no').addEventListener('click', close);
-    wrap.querySelector('.cm-yes').addEventListener('click', async () => {
-      close();
-      const err = await ctl.remove(c.id);
-      if (err) toast(err);
-    });
-    app.appendChild(wrap);
-    requestAnimationFrame(() => wrap.classList.add('in'));
+  async function confirmDelete(c) {
+    const ok = await mdDialog({ title: "Izohni o'chirish", html: "Izoh (va javoblari) butunlay o'chiriladi.", confirm: { label: "O'chirish", color: '#F87171' }, dismiss: 'Bekor qilish' });
+    if (!ok || disposed) return;
+    const err = await ctl.remove(c.id);
+    if (err) toast(err);
   }
 
   // ── Shikoyat ──
   async function openMenu(c) {
-    const want = await bottomPanel((sh, close) => {
-      sh.innerHTML = `<div class="cm-menu-it">${icon('flag', { fill: false, size: 22, color: RED300 })}<span>Shikoyat qilish</span></div>`;
-      sh.querySelector('.cm-menu-it').addEventListener('click', () => close(true));
-    }, 'menu');
-    if (want !== true || disposed) return;
+    const want = await mdDialog({ title: nameOf(c), html: `<div class="md-prev">${esc(previewPlain(c))}</div>`, confirm: { label: 'Shikoyat qilish', color: '#F87171' }, dismiss: 'Yopish' });
+    if (!want || disposed) return;
     if (!currentUser()) { toast('Shikoyat yuborish uchun hisobingizga kiring'); return; }
-    const sent = await bottomPanel((sh, close) => {
-      sh.innerHTML = `<div class="cm-handle"></div>
-        <div class="cm-rh">${icon('flag', { fill: false, size: 20, color: RED300 })}<span>Shikoyat qilish</span></div>
-        <div class="cm-rd">Iltimos, shikoyat sababi haqida batafsil ma'lumot bering. Shikoyatni iloji boricha tezroq ko'rib chiqishga harakat qilamiz.</div>
-        <div class="cm-rq"><div class="n">${esc(nameOf(c))}</div><div class="b">${richText(preview(c))}</div></div>
-        <div class="cm-rta"><textarea rows="6" maxlength="${REPORT_MAX}" placeholder="Shikoyat sababini yozing..."></textarea><div class="cnt">0/${REPORT_MAX}</div></div>
-        <div class="cm-rerr"></div>
-        <div class="cm-rb"><button class="btn cm-cancel">Bekor qilish</button><button class="btn cm-go" disabled>Yuborish</button></div>`;
-      const t = sh.querySelector('textarea');
-      const go = sh.querySelector('.cm-go');
-      const errEl = sh.querySelector('.cm-rerr');
-      const cnt = sh.querySelector('.cnt');
-      let busy = false;
-      t.addEventListener('input', () => {
-        cnt.textContent = `${t.value.length}/${REPORT_MAX}`;
-        errEl.textContent = '';
-        go.disabled = busy || t.value.trim().length < REPORT_MIN;
+    let reason = '';
+    for (;;) {
+      const res = await new Promise((resolve) => {
+        const app = document.getElementById('app');
+        const wrap = document.createElement('div');
+        wrap.className = 'dlg-wrap md-dlg-wrap';
+        wrap.innerHTML = `<div class="md-dlg"><div class="md-t">Shikoyat</div>
+          <div class="md-b"><div class="md-field"><div class="md-lab">Sababini yozing (kamida 10 belgi)</div><textarea rows="3" maxlength="${REPORT_MAX}"></textarea></div><div class="cm-rerr"></div></div>
+          <div class="md-btns"><span class="md-btn dis">Bekor qilish</span><span class="md-btn ok" style="color:var(--accent)">Yuborish</span></div></div>`;
+        const t = wrap.querySelector('textarea');
+        const okEl = wrap.querySelector('.md-btn.ok');
+        const errEl = wrap.querySelector('.cm-rerr');
+        t.value = reason;
+        const close = (v) => { wrap.classList.remove('in'); setTimeout(() => wrap.remove(), 180); resolve(v); };
+        wrap.querySelector('.md-btn.dis').addEventListener('click', () => close(null));
+        let busy = false;
+        okEl.addEventListener('click', async () => {
+          if (busy) return;
+          busy = true; okEl.textContent = 'Yuborilmoqda...';
+          reason = t.value;
+          const err = await sendCommentReport(c.id, t.value);
+          busy = false; okEl.textContent = 'Yuborish';
+          if (err) { errEl.textContent = err; return; }
+          close(true);
+        });
+        app.appendChild(wrap);
+        requestAnimationFrame(() => wrap.classList.add('in'));
+        setTimeout(() => t.focus(), 250);
       });
-      sh.querySelector('.cm-cancel').addEventListener('click', () => { if (!busy) close(false); });
-      go.addEventListener('click', async () => {
-        if (busy) return;
-        busy = true; go.disabled = true; go.innerHTML = spinner(18, 2, '#fff');
-        const err = await sendCommentReport(c.id, t.value);
-        busy = false;
-        if (err) { go.textContent = 'Yuborish'; go.disabled = false; errEl.textContent = err; return; }
-        close(true);
-      });
-      setTimeout(() => t.focus(), 250);
-    }, 'report');
-    if (sent === true && !disposed) showReportDone();
+      if (res === true && !disposed) showReportDone();
+      return;
+    }
   }
 
   function showReportDone() {
     clearTimeout(reportTimer);
     reportDone = true;
-    bannerHost.innerHTML = `<div class="cm-banner">${icon('check_circle', { size: 20, color: C.success })}
-      <div>Shikoyatingiz qabul qilindi.<br>Tez orada shikoyatingizni tekshirib chiqamiz.</div></div>`;
+    bannerHost.innerHTML = `<div class="cm-banner">Shikoyatingiz qabul qilindi. Tez orada tekshirib chiqamiz.</div>`;
     reportTimer = setTimeout(() => { reportDone = false; if (!disposed) bannerHost.innerHTML = ''; }, 10000);
   }
 
