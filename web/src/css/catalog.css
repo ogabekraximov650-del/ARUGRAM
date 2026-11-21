@@ -2,13 +2,12 @@
 .cat-root { height: 100%; display: flex; flex-direction: column; }
 .cat-root > .home-head { flex-shrink: 0; padding-left: 20px; padding-right: 20px; }
 
-/* Tugmalar qatori (`_TabBar`): 46 px, qo'lda suriladi. */
+/* Tablar (Android `ScrollableTabRow`): matnli, 48 px, ostida 2 px chiziq; chekka 16 px. */
 .cat-tabs {
   flex-shrink: 0;
-  height: 46px;
+  height: 48px;
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: stretch;
   padding: 0 16px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -17,26 +16,23 @@
 }
 .cat-tabs::-webkit-scrollbar { display: none; }
 .cat-tab {
+  position: relative;
   flex-shrink: 0;
-  padding: 8px 14px;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  color: rgba(255, 255, 255, 0.65);
-  font-size: 13px;
-  font-weight: 600;
+  min-width: 90px;
+  padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 14px;
+  font-weight: 500;
   line-height: normal;
   white-space: nowrap;
   cursor: pointer;
-  transition: background-color 200ms ease-out, border-color 200ms ease-out, box-shadow 200ms ease-out, color 200ms ease-out;
+  transition: color 150ms;
 }
-.cat-tab.sel {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
-  font-weight: 800;
-  box-shadow: 0 4px 12px rgba(194, 65, 12, 0.32);
-}
+.cat-tab.sel { color: var(--accent2); font-weight: 700; }
+.cat-tab.sel::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--accent2); }
 
 /* Sahifalar (`PageView`) — barmoq bilan suriladi. */
 .cat-pager {
@@ -68,7 +64,7 @@
 .cat-pane-body { min-height: 100%; }
 
 .cat-grid {
-  padding: 6px 16px 24px 16px;
+  padding: 12px 16px 24px 16px;
   display: grid;
   grid-template-columns: 1fr 1fr;
   column-gap: 14px;
@@ -77,9 +73,9 @@
 /* Pastki panel + unga yopishgan "Filtrlash" tugmasi ostida qolmasin. */
 .cat-bottom-space { height: calc(max(var(--safe-bottom), 26px) + 12px + 74px + 10px + 42px); }
 
-.cat-loading { height: 100%; min-height: 300px; display: flex; align-items: center; justify-content: center; }
-.cat-empty { height: 280px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
-.cat-empty .msg { margin-top: 12px; color: rgba(255, 255, 255, 0.4); font-size: 14px; }
+.cat-loading { height: 260px; display: flex; align-items: center; justify-content: center; }
+.cat-empty { height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.cat-empty .msg { margin-top: 12px; color: var(--text-faint); font-size: 16px; }
 
 /* Tortib yangilash (`RefreshIndicator`) */
 .cat-ptr {
@@ -107,84 +103,80 @@
 .cat-ptr-c .spinner { animation: none; }
 .cat-ptr-c.spin .spinner { animation: spin 1s linear infinite; }
 
-/* ── "Filtrlash" tugmasi: pastki paneldan 10 px yuqorida ─────── */
-.cat-fbar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: calc(max(var(--safe-bottom), 26px) + 12px + 74px + 10px);
-  display: none;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 5;
-}
-.cat-fbar.show { display: flex; }
+/* ── Sarlavhadagi "Filtr" tugmasi (Android `FilterButton`) ───── */
 .cat-fbtn {
-  pointer-events: auto;
   display: flex;
   align-items: center;
-  border-radius: 24px;
-  background: var(--surface);
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--card);
   border: 1px solid var(--border);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.42);
-  overflow: hidden;
-}
-.cat-fbtn.on { background: var(--accent); border-color: var(--accent); }
-.cat-fbtn-main {
-  display: flex;
-  align-items: center;
-  padding: 11px 18px 11px 18px;
-  border-radius: 24px;
   cursor: pointer;
 }
-.cat-fbtn.on .cat-fbtn-main { padding-right: 12px; }
-.cat-fbtn-main .t { margin-left: 8px; color: #fff; font-size: 14px; font-weight: 800; line-height: 18px; white-space: nowrap; }
-.cat-fbtn-x { display: flex; padding: 11px 16px 11px 4px; border-radius: 24px; cursor: pointer; }
+.cat-fbtn.on { background: var(--accent-tint); border-color: rgba(194, 65, 12, 0.5); }
+.cat-fbtn .t { margin-left: 6px; color: #fff; font-size: 13px; font-weight: 600; line-height: normal; white-space: nowrap; }
 
-/* ── Filtr oynasi (`_FilterSheet`) ───────────────────────────── */
+/* ── Filtr oynasi (Android `ModalBottomSheet`: Surface, 28 px burchak, tutqich 32x4) ── */
 .sheet.cat-fsheet {
-  background: transparent;
+  background: var(--surface);
   border: 0;
-  border-radius: 0;
-  max-height: none;
-  overflow: visible;
-  padding: 0 14px calc(var(--safe-bottom) + 14px) 14px;
+  border-radius: 28px 28px 0 0;
+  max-height: 90vh;
+  padding: 0 20px calc(var(--safe-bottom) + 0px) 20px;
 }
-.sheet.cat-fsheet > .sheet-handle { display: none; }
-.cat-fs {
-  border-radius: 22px;
-  padding: 12px 16px 14px 16px;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-}
-.cat-fs-handle { flex-shrink: 0; align-self: center; width: 38px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.24); }
-.cat-fs-title { flex-shrink: 0; margin: 14px 0 12px; color: #fff; font-size: 16px; font-weight: 800; line-height: normal; }
-.cat-fs-scroll {
-  flex: 0 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
-}
+.sheet.cat-fsheet > .sheet-handle { width: 32px; height: 4px; border-radius: 2px; background: rgba(154, 154, 160, 0.4); margin: 22px auto; }
+.cat-fs { display: flex; flex-direction: column; }
+.cat-fs-scroll { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
 .cat-fs-scroll::-webkit-scrollbar { display: none; }
-.cat-fs-sec { margin-bottom: 8px; color: rgba(255, 255, 255, 0.85); font-size: 14px; font-weight: 700; line-height: normal; }
-.cat-fs-none { padding: 24px 0; text-align: center; color: rgba(255, 255, 255, 0.6); font-size: 13px; }
+.cat-fs-sec { margin-bottom: 10px; color: #fff; font-size: 16px; font-weight: 700; line-height: normal; }
 .cat-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .cat-chip {
-  padding: 8px 13px;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.07);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.75);
+  padding: 8px 14px;
+  border-radius: 12px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
   font-size: 13px;
   font-weight: 500;
   line-height: normal;
   cursor: pointer;
-  transition: background-color 160ms, border-color 160ms, color 160ms;
 }
-.cat-chip.sel { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
-.cat-fs-btns { flex-shrink: 0; display: flex; gap: 10px; margin-top: 14px; }
-.cat-fs-btns .btn { flex: 1; min-width: 0; height: 46px; border-radius: 13px; padding: 0 12px; font-size: 14px; }
-.cat-fs-clear { background: transparent; color: #fff; font-weight: 700; border: 1px solid var(--border); }
-.cat-fs-apply { background: var(--accent); color: #fff; font-weight: 800; }
+.cat-chip.sel { background: var(--accent); border-color: var(--accent2); color: #fff; }
+.cat-fs-btns { display: flex; gap: 12px; margin: 16px 0 20px; }
+.cat-fs-btn {
+  flex: 1;
+  padding: 14px 0;
+  text-align: center;
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border-bright);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: normal;
+  cursor: pointer;
+}
+.cat-fs-btn.apply { background: var(--accent); border-color: var(--accent2); }
+
+/* ── Tarjimonlar (Android `TranslatorViews`) ─────────────────── */
+.tr-list { padding: 12px 16px 24px 16px; display: flex; flex-direction: column; gap: 20px; }
+.tr-row { display: flex; align-items: center; padding: 6px 0; border-radius: 14px; cursor: pointer; }
+.tr-name { flex: 1; min-width: 0; margin-left: 10px; margin-right: 8px; color: #fff; font-size: 16px; font-weight: 700; line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tr-chev { flex-shrink: 0; margin-right: 6px; }
+.tr-cards { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; margin-top: 8px; }
+.tr-ava { position: relative; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; overflow: hidden; background: var(--accent-tint); border: 1px solid var(--border-bright); box-sizing: border-box; }
+.tr-ava .tr-ini { color: var(--accent2); font-weight: 700; line-height: 1; }
+.tr-ava img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+
+.tr-page { position: absolute; inset: 0; }
+.tr-scroll { position: absolute; inset: 0; overflow-y: auto; padding: 56px 16px 24px 16px; }
+.tr-back { position: absolute; top: 8px; left: 8px; width: 44px; height: 44px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0; cursor: pointer; z-index: 3; }
+.tr-head { display: flex; flex-direction: column; align-items: center; }
+.tr-h-name { margin-top: 12px; color: #fff; font-size: 21px; font-weight: 800; text-align: center; line-height: normal; }
+.tr-h-bio { margin-top: 8px; padding: 0 12px; color: var(--text-dim); font-size: 13px; line-height: 18px; text-align: center; }
+.tr-stats { display: flex; gap: 8px; padding-top: 18px; }
+.tr-stat { flex: 1; min-width: 0; padding: 10px 4px; border-radius: 14px; background: var(--card); border: 1px solid var(--border); display: flex; flex-direction: column; align-items: center; }
+.tr-stat-l { height: 26px; display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.55); font-size: 10.5px; line-height: 12px; text-align: center; }
+.tr-stat-v { margin-top: 4px; color: #fff; font-size: 17px; font-weight: 800; line-height: normal; white-space: nowrap; }
+.tr-h-sec { padding: 18px 0 14px; color: #fff; font-size: 15px; font-weight: 700; line-height: normal; }
+.tr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }

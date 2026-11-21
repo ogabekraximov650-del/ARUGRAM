@@ -11,13 +11,15 @@
 // Oflaynga xos qismlar ("Offline" belgisi, yuklab olinganlar filtri)
 // ATAYLAB yo'q: Mini App faqat onlayn.
 
-import { icon, spinner, seasonCardHtml, bindSeasonCards, cardWidth, ripple, sheet } from '../ui.js';
+import { C, icon, spinner, seasonCardHtml, bindSeasonCards, cardWidth, sheet } from '../ui.js';
 import { esc, toInt } from '../format.js';
 import { seasonsRepo } from '../seasons.js';
 import { hooks } from '../hooks.js';
+import { renderTranslatorsTab } from './translators.js';
 
 const TABS = [
   { key: 'hammasi', label: 'Barchasi' },
+  { key: 'tarjimonlar', label: 'Tarjimonlar' },
   { key: 'reyting', label: 'Reytingi baland' },
   { key: 'korilgan', label: "Eng ko'p ko'rilgan" },
   { key: 'ongoing', label: 'Ongoing' },
@@ -89,7 +91,7 @@ function animateScroll(el, to, ms, onDone) {
   return () => cancelAnimationFrame(raf);
 }
 
-// ── Filtr oynasi (`_FilterSheet`) ─────────────────────────────
+// ── Filtr oynasi (Android `FilterSheet`: ModalBottomSheet) ─────
 
 function chipsHtml(values, selected, kind) {
   return `<div class="cat-chips">${values.map((v, i) => `<div class="cat-chip${selected.has(v) ? ' sel' : ''}" data-k="${kind}" data-i="${i}">${esc(v)}</div>`).join('')}</div>`;
@@ -101,17 +103,15 @@ function openFilterSheet(current) {
   const selG = new Set(current.genres);
   const selY = new Set(current.years);
   return sheet((el, close) => {
-    el.innerHTML = `<div class="cat-fs glass">
-      <div class="cat-fs-handle"></div>
-      <div class="cat-fs-title">Filtrlash</div>
+    el.innerHTML = `<div class="cat-fs">
       <div class="cat-fs-scroll">
-        ${genres.length ? `<div class="cat-fs-sec">Janrlar</div>${chipsHtml(genres, selG, 'g')}<div style="height:18px"></div>` : ''}
-        ${years.length ? `<div class="cat-fs-sec">Yillar</div>${chipsHtml(years, selY, 'y')}` : ''}
-        ${!genres.length && !years.length ? '<div class="cat-fs-none">Hozircha filtrlaydigan narsa yo\'q.</div>' : ''}
+        <div class="cat-fs-sec">Janr</div>${chipsHtml(genres, selG, 'g')}
+        <div style="height:20px"></div>
+        <div class="cat-fs-sec">Yil</div>${chipsHtml(years, selY, 'y')}
       </div>
       <div class="cat-fs-btns">
-        <button class="btn cat-fs-clear">Tozalash</button>
-        <button class="btn cat-fs-apply">Filtrlash</button>
+        <div class="cat-fs-btn clear">Tozalash</div>
+        <div class="cat-fs-btn apply">Qo'llash</div>
       </div>
     </div>`;
     el.querySelectorAll('.cat-chip').forEach((c) => {
@@ -123,37 +123,23 @@ function openFilterSheet(current) {
         c.classList.toggle('sel', set.has(v));
       });
     });
-    const clr = el.querySelector('.cat-fs-clear');
-    const app = el.querySelector('.cat-fs-apply');
-    ripple(clr, () => close(makeFilter()));
-    ripple(app, () => close(makeFilter([...selG], [...selY])));
+    el.querySelector('.cat-fs-btn.clear').addEventListener('click', () => {
+      selG.clear(); selY.clear();
+      el.querySelectorAll('.cat-chip.sel').forEach((c) => c.classList.remove('sel'));
+    });
+    el.querySelector('.cat-fs-btn.apply').addEventListener('click', () => close(makeFilter([...selG], [...selY])));
   }, { cls: 'cat-fsheet' });
 }
 
-// ── "Filtrlash" tugmasi (`CatalogFilterBar` + `_FilterButton`) ─
+// ── Sarlavhadagi "Filtr" tugmasi (Android `FilterButton`) ─────
 
-function createFilterBar(onOpen, onClear) {
-  const app = document.getElementById('app');
-  const bar = document.createElement('div');
-  bar.className = 'cat-fbar';
-  app.appendChild(bar);
-  let count = 0;
-
-  function paint() {
-    const on = count > 0;
-    bar.innerHTML = `<div class="cat-fbtn${on ? ' on' : ''}">
-      <div class="cat-fbtn-main">${icon('tune', { size: 18, color: '#fff' })}<span class="t">${on ? `Filtrlash · ${count}` : 'Filtrlash'}</span></div>
-      ${on ? `<div class="cat-fbtn-x">${icon('close', { size: 19, color: '#fff' })}</div>` : ''}
-    </div>`;
-    ripple(bar.querySelector('.cat-fbtn-main'), () => onOpen());
-    const x = bar.querySelector('.cat-fbtn-x');
-    if (x) ripple(x, () => onClear());
-  }
-
+function createFilterButton(root, onOpen) {
+  root.addEventListener('click', onOpen);
   return {
-    setCount(c) { count = c; paint(); },
-    show() { bar.classList.add('show'); },
-    hide() { bar.classList.remove('show'); },
+    setCount(count) {
+      root.classList.toggle('on', count > 0);
+      root.innerHTML = `${icon('menu', { size: 18, color: count > 0 ? C.accent2 : 'rgba(255,255,255,0.7)' })}<span class="t">${count > 0 ? `Filtr · ${count}` : 'Filtr'}</span>`;
+    },
   };
 }
 
@@ -168,6 +154,8 @@ export function createCatalog(page) {
           <div class="ph-title">ARU<span class="m">MEDIATV</span></div>
           <div class="sub">Katalog</div>
         </div>
+        <div class="spacer"></div>
+        <div class="cat-fbtn"></div>
       </div>
       <div class="cat-tabs">${TABS.map((t, i) => `<div class="cat-tab${i === 0 ? ' sel' : ''}" data-i="${i}">${esc(t.label)}</div>`).join('')}</div>
       <div class="cat-pager">${TABS.map(() => `<div class="cat-pane"><div class="cat-ptr"><div class="cat-ptr-c">${spinner(20, 2.5)}</div></div><div class="cat-pane-body"></div></div>`).join('')}</div>
@@ -190,15 +178,19 @@ export function createCatalog(page) {
     dirty[i] = false;
     const body = bodies[i];
     const rows = listFor(TABS[i].key, filter);
-    if (seasonsRepo.loading && rows.length === 0) {
-      body.innerHTML = `<div class="cat-loading">${spinner(36, 2)}</div>`;
+    if (TABS[i].key === 'tarjimonlar') {
+      renderTranslatorsTab(body, filter.isEmpty ? seasonsRepo.items : listFor('hammasi', filter));
+      return;
+    }
+    if (seasonsRepo.loading && seasonsRepo.items.length === 0) {
+      body.innerHTML = `<div class="cat-loading">${spinner(32, 2)}</div>`;
       return;
     }
     if (rows.length === 0) {
       const f = !filter.isEmpty;
       body.innerHTML = `<div class="cat-empty">
-        ${icon(f ? 'filter_alt_off' : 'movie', { fill: f, size: 52, color: 'rgba(255,255,255,0.2)' })}
-        <div class="msg">${f ? 'Bu filtrga mos anime topilmadi' : "Bu bo'limda hozircha anime yo'q"}</div>
+        ${icon('menu', { size: 48, color: 'rgba(255,255,255,0.2)' })}
+        <div class="msg">${f ? "Filtr bo'yicha hech narsa topilmadi" : "Bu bo'limda hozircha anime yo'q"}</div>
       </div>`;
       return;
     }
@@ -282,12 +274,7 @@ export function createCatalog(page) {
     bar.setCount(filter.count);
     invalidate();
   }
-  function clearFilter() {
-    filter = makeFilter();
-    bar.setCount(0);
-    invalidate();
-  }
-  const bar = createFilterBar(openFilter, clearFilter);
+  const bar = createFilterButton(page.querySelector('.cat-fbtn'), openFilter);
   bar.setCount(0);
 
   let lastW = 0;
@@ -306,11 +293,10 @@ export function createCatalog(page) {
 
   return {
     onShow() {
-      bar.show();
       if (pager.clientWidth) pager.scrollLeft = index * pager.clientWidth;
       renderNear();
     },
-    onHide() { bar.hide(); },
+    onHide() {},
   };
 }
 

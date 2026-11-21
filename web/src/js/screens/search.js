@@ -7,7 +7,7 @@
 // o'sha mantiq JS'da (`searchFilter`). Ro'yxat Bosh sahifa bilan
 // umumiy `seasonsRepo` dan olinadi — qo'shimcha so'rov yo'q.
 
-import { icon, bindTap, bindImages, isPaid, paidBadge } from '../ui.js';
+import { icon, spinner, bindTap, bindImages, isPaid, paidBadge } from '../ui.js';
 import { imageUrl } from '../api.js';
 import { esc } from '../format.js';
 import { seasonsRepo } from '../seasons.js';
@@ -29,12 +29,11 @@ function cardHtml(s) {
   return `<div class="srch-card">
     <div class="srch-img">
       ${url ? `<img class="srch-poster" alt="" decoding="async" loading="lazy" src="${esc(url)}">` : ''}
-      ${!photo ? `<div class="srch-ph">${icon('movie', { fill: false, size: 40, color: 'rgba(255,255,255,0.7)' })}</div>` : ''}
       ${isPaid(s) ? `<div class="srch-paid">${paidBadge()}</div>` : ''}
     </div>
     <div class="srch-info">
       <div class="srch-name">${esc(s.nomi ?? '')}</div>
-      <div class="srch-genre">${esc(s.janri ?? '')}</div>
+      <div class="srch-genre">${esc(`${s.janri ?? ''}`.split(',').map((x) => x.trim()).filter(Boolean).join(', '))}</div>
     </div>
   </div>`;
 }
@@ -43,7 +42,13 @@ export function createSearch(page) {
   page.style.overflow = 'hidden';
   page.innerHTML = `
     <div class="srch-root">
-      <div class="srch-box glass">
+      <div class="home-head p20">
+        <div>
+          <div class="ph-title">ARU<span class="m">MEDIATV</span></div>
+          <div class="sub">Qidiruv</div>
+        </div>
+      </div>
+      <div class="srch-box">
         ${icon('search', { size: 24, color: 'rgba(255,255,255,0.7)' })}
         <input class="srch-input" type="search" enterkeyhint="search" autocomplete="off"
           autocorrect="off" spellcheck="false" placeholder="Anime qidirish...">
@@ -63,7 +68,7 @@ export function createSearch(page) {
   function render() {
     clearBtn.classList.toggle('on', input.value.length > 0);
     if (searching) {
-      body.innerHTML = `<div class="srch-center"><div class="spinner" style="width:36px;height:36px;border-width:4px;border-top-color:rgba(255,255,255,0.6);border-right-color:rgba(255,255,255,0.6)"></div></div>`;
+      body.innerHTML = `<div class="srch-center">${spinner(32, 2)}</div>`;
       return;
     }
     if (results.length === 0) {

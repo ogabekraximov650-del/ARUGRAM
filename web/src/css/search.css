@@ -1,18 +1,21 @@
 /* ── Qidiruv (`search_screen.dart`) ──────────────────────────── */
-.srch-root { height: 100%; display: flex; flex-direction: column; padding: 12px 16px 0 16px; }
+.srch-root { height: 100%; display: flex; flex-direction: column; padding: 0 16px 0 16px; }
+.srch-root > .home-head { flex-shrink: 0; margin: 0 -16px 8px -16px; }
 .srch-box {
   flex-shrink: 0;
   display: flex;
   align-items: center;
   border-radius: 18px;
-  padding: 4px 16px;
+  padding: 14px 16px;
+  background: var(--card);
+  border: 1px solid var(--border-bright);
 }
 .srch-input {
   flex: 1;
   min-width: 0;
   margin-left: 10px;
-  height: 48px;
-  padding: 12px 0;
+  height: 24px;
+  padding: 0;
   border: 0;
   outline: none;
   background: transparent;
@@ -20,10 +23,9 @@
   font: inherit;
   font-size: 16px;
   line-height: 24px;
-  letter-spacing: 0.5px;
   user-select: text;
   -webkit-user-select: text;
-  caret-color: var(--accent);
+  caret-color: var(--accent2);
   -webkit-appearance: none;
   appearance: none;
 }
@@ -44,7 +46,7 @@
 .srch-body {
   flex: 1;
   min-height: 0;
-  margin: 20px -16px 0 -16px;
+  margin: 16px -16px 0 -16px;
   padding: 0 16px;
   overflow-y: auto;
   overflow-x: hidden;
@@ -52,8 +54,8 @@
   overscroll-behavior: contain;
 }
 .srch-body::-webkit-scrollbar { display: none; }
-.srch-center { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-.srch-msg { margin-top: 12px; font-size: 14px; color: rgba(255, 255, 255, 0.54); }
+.srch-center { height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.srch-msg { margin-top: 12px; font-size: 16px; color: var(--text-faint); text-align: center; }
 
 .srch-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 14px; row-gap: 14px; }
 .srch-card {
@@ -61,7 +63,7 @@
   display: flex;
   flex-direction: column;
   border-radius: 18px;
-  background: var(--card-alt);
+  background: var(--card);
   border: 1px solid var(--border);
   overflow: hidden;
   cursor: pointer;
@@ -84,7 +86,6 @@
   transition: opacity 120ms;
 }
 .srch-poster.ok { opacity: 1; }
-.srch-ph { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
 .srch-paid { position: absolute; top: 8px; right: 8px; }
 .srch-info { flex-shrink: 0; padding: 8px 10px 10px 10px; }
 .srch-name {
@@ -96,4 +97,4 @@
   text-overflow: ellipsis;
   line-height: normal;
 }
-.srch-genre { font-size: 12px; color: rgba(255, 255, 255, 0.6); line-height: normal; word-break: break-word; }
+.srch-genre { font-size: 12px; color: rgba(255, 255, 255, 0.6); line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
