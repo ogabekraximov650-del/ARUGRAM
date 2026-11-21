@@ -607,8 +607,13 @@ def _clean_and_draw_rect(img, grp, uz):
     for (bx0, by0, bx1, by1) in grp["boxes"]:
         cv2.rectangle(mask, (max(0, bx0 - pad), max(0, by0 - pad)), (min(W - 1, bx1 + pad), min(H - 1, by1 + pad)), 255, -1)
     stroke = None
-    if ring_lap < 4.0:
-        # Silliq fon (tekis yoki gradient): har bir quti chekkalaridan silliq to'ldiriladi.
+    rp = region[ring] if ring.any() else region.reshape(-1, 3)
+    near = float((np.abs(rp.astype(np.int16) - bg.astype(np.int16)).max(axis=1) <= 14).mean())
+    if near >= 0.85:
+        # Tekis fon (oq/bir xil rang): quti fon rangi bilan to'ldiriladi (chekkadagi harf piksellari interpolyatsiyani buzmasin — "xira dog'" bo'lmasin).
+        img[mask > 0] = bg.astype(np.uint8)
+    elif ring_lap < 4.0:
+        # Silliq fon (gradient): har bir quti chekkalaridan silliq to'ldiriladi.
         for (bx0, by0, bx1, by1) in grp["boxes"]:
             smooth_fill(img, bx0 - pad - 3, by0 - pad - 3, bx1 + pad + 3, by1 + pad + 3)
     else:
@@ -1125,22 +1130,100 @@ def merge_same_bubble(img, groups, uz):
             seen[key] = len(out_g)
         out_g.append(g)
         out_u.append(u)
-    return out_g, out_u
+    # 2-o'tish: pufakcha topilmasa ham YAQIN qo'shni ikki qator (bir xil ramka/abzats) birlashtiriladi: x bo'yicha ustma-ust, oraliq ≤ 1.6 qator
+    # balandligi va oraliq TEKIS (orada chiziq/rasm yo'q) bo'lsa. Aks holda matnlar bir-birining ustiga tushadi.
+    import numpy as np
+    order = sorted(range(len(out_g)), key=lambda i: out_g[i]["box"][1])
+    merged = {}
+    gray = img.mean(axis=2) if img.ndim == 3 else img
+    for k in range(len(order) - 1):
+        i, j = order[k], order[k + 1]
+        i = merged.get(i, i)
+        a, b = out_g[i]["box"], out_g[j]["box"]
+        if not (out_u[i] and out_u[i].strip() and out_u[j] and out_u[j].strip()) or i == j:
+            continue
+        ox = min(a[2], b[2]) - max(a[0], b[0])
+        gap = b[1] - a[3]
+        hmin = max(1, min(a[3] - a[1], b[3] - b[1]))
+        if ox >= 0.5 * max(1, min(a[2] - a[0], b[2] - b[0])) and 0 <= gap <= 1.6 * hmin:
+            xs0, xs1 = max(a[0], b[0]), min(a[2], b[2])
+            strip = gray[a[3]:b[1] + 1, xs0:xs1] if gap > 1 else None
+            if strip is None or strip.size == 0 or float(strip.std()) < 14:
+                ga = out_g[i]
+                out_g[i] = {"box": (min(a[0], b[0]), min(a[1], b[1]), max(a[2], b[2]), max(a[3], b[3])),
+                            "boxes": list(ga["boxes"]) + list(out_g[j]["boxes"]), "text": ga.get("text", "")}
+                out_u[i] = (out_u[i].strip() + " " + out_u[j].strip()).strip()
+                merged[j] = i
+                out_u[j] = ""
+    keep = [t for t in range(len(out_g)) if t not in merged]
+    return [out_g[t] for t in keep], [out_u[t] for t in keep]
 
 
-def render_all(paths, per_page_groups, uz_by_page, out_dir: Path):
-    """Har rasmga tarjimani chizib, JPEG qilib saqlaydi. -> yangi yo'llar."""
+MIT_DIR = os.environ.get("MIT_DIR", "")
+MIT_PY = os.environ.get("MIT_PY", "")
+
+
+def mit_clean(paths, work: Path) -> dict:
+    """Sahifalarni ALOHIDA dastur — zyddnys/manga-image-translator (GPL-3.0; faqat ishga tushiriladi, kodi bizga qo'shilmaydi) — bilan TOZALAYDI:
+    matn topish + LaMa inpaint, `--prep-manual` (tarjimasiz, matni olib tashlangan bo'sh sahifalar). Qaytadi: {sahifa yo'li: tozalangan rasm yo'li}.
+    `MIT_DIR`/`MIT_PY` berilmagan yoki xato bo'lsa bo'sh lug'at (o'zimizning tozalash usuli ishlaydi)."""
+    if not (MIT_DIR and MIT_PY and Path(MIT_PY).exists() and Path(MIT_DIR).exists()):
+        return {}
+    try:
+        inp, out = work / "in", work / "out"
+        shutil.rmtree(work, ignore_errors=True)
+        inp.mkdir(parents=True)
+        out.mkdir(parents=True)
+        for p in paths:
+            shutil.copy(p, inp / f"{p.stem}{p.suffix}")
+        cfg = work / "cfg.json"
+        cfg.write_text(json.dumps({
+            "translator": {"translator": "original", "target_lang": "ENG", "no_text_lang_skip": True},
+            "detector": {"detector": "default", "detection_size": 2048},
+            "inpainter": {"inpainter": "lama_large", "inpainting_size": 2048}}))
+        r = subprocess.run([MIT_PY, "-m", "manga_translator", "local", "-i", str(inp), "-o", str(out), "--prep-manual", "-f", "png",
+                            "--config-file", str(cfg)], cwd=MIT_DIR, capture_output=True, text=True, timeout=3 * 3600)
+        log("  MIT tozalash:", r.returncode, (r.stdout or r.stderr or "")[-200:].replace("\n", " | "))
+        res = {}
+        for p in paths:
+            hits = [f for f in out.glob(f"{p.stem}.*") if "-orig" not in f.name]
+            if hits:
+                res[p] = hits[0]
+        return res
+    except Exception as e:  # noqa: BLE001
+        log(f"  MIT tozalash xatosi ({type(e).__name__}: {e}) — o'zimizning usul")
+        return {}
+
+
+def render_all(paths, per_page_groups, uz_by_page, out_dir: Path, cleaned=None):
+    """Har rasmga tarjimani chizib, JPEG qilib saqlaydi. `cleaned` — `mit_clean` natijasi: tarjima qilinadigan pufakchalar atrofi shu tozalangan
+    rasmdan olinadi (qolgan joylar o'zgarmaydi), keyin yangi matn chiziladi. -> yangi yo'llar."""
     import numpy as np
     from PIL import Image
     outs = []
+    cleaned = cleaned or {}
     for i, p in enumerate(paths):
         img = np.array(Image.open(p).convert("RGB"))
+        cl = None
+        if p in cleaned:
+            try:
+                cl = np.array(Image.open(cleaned[p]).convert("RGB"))
+                if cl.shape != img.shape:
+                    cl = None
+            except Exception:  # noqa: BLE001
+                cl = None
         groups_i, uz_i = merge_same_bubble(img, per_page_groups[i], uz_by_page[i])
         def _norm(t):
             return "".join(c for c in (t or "").lower() if c.isalnum())
         for grp, uz in zip(groups_i, uz_i):
             if uz and uz.strip() and _norm(uz) != _norm(grp.get("text")):   # tarjima asl bilan bir xil (ovoz effekti, nom) — tegilmaydi
                 try:
+                    if cl is not None:
+                        H, W = img.shape[:2]
+                        m = 10
+                        x0, y0, x1, y1 = grp["box"]
+                        x0, y0, x1, y1 = max(0, x0 - m), max(0, y0 - m), min(W, x1 + m), min(H, y1 + m)
+                        img[y0:y1, x0:x1] = cl[y0:y1, x0:x1]
                     clean_and_draw(img, grp, tidy_uz(uz.strip()))
                 except Exception as e:  # noqa: BLE001
                     log(f"  {p.name}: pufakchani chizib bo'lmadi ({e})")
@@ -1254,7 +1337,8 @@ async def process(app, r, runner):
             live.send("\U0001F3A8 Rasmlarga yozilmoqda...", force=True)
             out_dir = WORK / "out"
             out_dir.mkdir()
-            outs = await asyncio.to_thread(render_all, paths, groups, uz_pages, out_dir)
+            cleaned = await asyncio.to_thread(mit_clean, paths, WORK / "mit")
+            outs = await asyncio.to_thread(render_all, paths, groups, uz_pages, out_dir, cleaned)
             final = await asyncio.to_thread(build_output, outs, fmt, title, WORK)
             size = final.stat().st_size
             live.done(f"Fayl tayyor: {size / 1048576:.1f} MB ({len(outs)} sahifa)")
@@ -1327,7 +1411,8 @@ async def process(app, r, runner):
         live.send("\U0001F3A8 Rasmlarga yozilmoqda...", force=True)
         out_dir = WORK / "out"
         out_dir.mkdir()
-        outs = await asyncio.to_thread(render_all, paths, groups, uz_pages, out_dir)
+        cleaned = await asyncio.to_thread(mit_clean, paths, WORK / "mit")
+        outs = await asyncio.to_thread(render_all, paths, groups, uz_pages, out_dir, cleaned)
         final = await asyncio.to_thread(build_output, outs, fmt, title, WORK)
         size = final.stat().st_size
         live.done(f"Fayl tayyor: {size / 1048576:.1f} MB ({len(outs)} sahifa)")

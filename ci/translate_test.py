@@ -44,7 +44,10 @@ for zp in sorted(Path("ci/testdata").glob("*.zip")):
     uz_pages = [[next(it) for _ in page] for page in groups]
     (work / "result").mkdir()
     (work / "numbered").mkdir()
-    tr.render_all(paths, groups, uz_pages, work / "result")
+    cleaned = tr.mit_clean(paths, work / "mit")
+    print("MIT tozalagan sahifalar:", len(cleaned), "/", len(paths), flush=True)
+    tr.render_all(paths, groups, uz_pages, work / "result", cleaned)
+    shutil.rmtree(work / "mit", ignore_errors=True)
     tr.annotate_pages(paths, groups, work / "numbered")
     shutil.rmtree(work / "src")
     (work / "texts.json").write_text(json.dumps(

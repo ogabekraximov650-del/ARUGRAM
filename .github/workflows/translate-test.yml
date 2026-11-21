@@ -28,6 +28,27 @@ jobs:
       - uses: actions/checkout@v4
       - name: Shriftlar
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra fonts-comic-neue
+      # Tozalash: zyddnys/manga-image-translator (GPL-3.0) ALOHIDA dastur sifatida (faqat ishga tushiriladi) — matn topish + LaMa inpaint (`translate.py::mit_clean`).
+      # O'rnatilmasa (xato) ish davom etadi: o'zimizning tozalash usuli ishlaydi.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Tozalash dasturi o'rnatish (manga-image-translator)
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y -qq libgl1 libglib2.0-0
+          git clone --depth 1 https://github.com/zyddnys/manga-image-translator "$RUNNER_TEMP/mit"
+          python -m venv "$RUNNER_TEMP/mitenv"
+          "$RUNNER_TEMP/mitenv/bin/pip" install -q torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          "$RUNNER_TEMP/mitenv/bin/pip" install -q -r "$RUNNER_TEMP/mit/requirements.txt"
+          echo "MIT_DIR=$RUNNER_TEMP/mit" >> "$GITHUB_ENV"
+          echo "MIT_PY=$RUNNER_TEMP/mitenv/bin/python" >> "$GITHUB_ENV"
+      - name: Tozalash modellari keshi
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/mit/models
+          key: mit-models-v1
+
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -47,15 +68,10 @@ jobs:
       - name: Sinov
         if: steps.m.outputs.mit != '1'
         run: python3 ci/translate_test.py
-      - uses: actions/setup-python@v5
+      - name: MIT sinovi (faqat tozalash, tashxis)
         if: steps.m.outputs.mit == '1'
-        with:
-          python-version: '3.12'
-      - name: MIT sinovi (manga-image-translator, faqat tozalash)
-        if: steps.m.outputs.mit == '1'
-        run: |
-          sudo apt-get install -y -qq libgl1 libglib2.0-0
-          bash ci/mit_try.sh
+        run: bash ci/mit_try.sh
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:

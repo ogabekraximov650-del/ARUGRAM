@@ -105,6 +105,16 @@ g1 = {"box": (70, 72, 70 + int(f.getlength("YOUR DAILY QUESTS")), 96), "boxes": 
 g2 = {"box": (70, 122, 70 + int(f.getlength("ACCEPT?")), 146), "boxes": [(70, 122, 150, 146)], "text": "b"}
 mg, mu = ns["merge_same_bubble"](arr, [g1, g2], ["Kunlik topshiriq", "Qabul qilasizmi?"])
 assert len(mg) == 1 and mu[0] == "Kunlik topshiriq Qabul qilasizmi?", (len(mg), mu)
+# 5b) Pufakcha topilmasa ham yaqin ikki qator (tekis fonda) birlashadi; orada chiziq bo'lsa — birlashmaydi.
+img2 = np.full((300, 420, 3), 90, np.uint8)
+ga = {"box": (60, 60, 300, 90), "boxes": [(60, 60, 300, 90)], "text": "a"}
+gb = {"box": (60, 105, 200, 135), "boxes": [(60, 105, 200, 135)], "text": "b"}
+mg2, mu2 = ns["merge_same_bubble"](img2, [ga, gb], ["Birinchi", "Ikkinchi"])
+assert len(mg2) == 1 and mu2[0] == "Birinchi Ikkinchi", (len(mg2), mu2)
+img3 = img2.copy()
+img3[93:103, 40:360] = 0   # orada qora chiziq
+mg3, mu3 = ns["merge_same_bubble"](img3, [ga, gb], ["Birinchi", "Ikkinchi"])
+assert len(mg3) == 2, len(mg3)
 print("merge_same_bubble: OK")
 # 6) Coons silliq to'ldirish: vertikal gradient aniq tiklanadi (xato <= 3).
 H, W = 200, 300
