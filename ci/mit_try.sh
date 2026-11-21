@@ -11,7 +11,7 @@ for zp in sorted(glob.glob("ci/testdata/*.zip")):
     if ch not in open("ci/TRANSLATE_TEST").read():
         continue
     with zipfile.ZipFile(zp) as z:
-        for i, n in enumerate(sorted(z.namelist())[:3]):
+        for i, n in enumerate(sorted(z.namelist())[:5]):
             open(f"mit-out/in/{ch}_{i}.jpg", "wb").write(z.read(n))
 print(os.listdir("mit-out/in"))
 PY
@@ -28,7 +28,7 @@ echo "=== LOCAL HELP"
 echo "=== CONFIG-HELP"
 ../mitenv/bin/python -m manga_translator config-help 2>&1 | grep -v onnxruntime | head -230 | cut -c1-200
 cat > "$ROOT/mit-out/cfg.json" <<'JSON'
-{"translator": {"translator": "original", "target_lang": "ENG"},
+{"translator": {"translator": "original", "target_lang": "ENG", "no_text_lang_skip": true},
  "detector": {"detector": "default", "detection_size": 2048},
  "inpainter": {"inpainter": "lama_large", "inpainting_size": 2048}}
 JSON
