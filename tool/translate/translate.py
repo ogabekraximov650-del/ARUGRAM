@@ -259,6 +259,7 @@ async def collect_images(app, channel, pages, live):
     for i in range(0, len(ids), 100):
         msgs.extend(await app.get_messages(channel, ids[i:i + 100]))
     out = []
+    owners = []   # har rasm qaysi yuborilgan faylga (pages indeksi) tegishli
     for i, (p, m) in enumerate(zip(pages, msgs), 1):
         if not m or m.empty or not (m.photo or m.document):
             raise Fatal(f"{i}-fayl kanalda topilmadi")
@@ -266,10 +267,12 @@ async def collect_images(app, channel, pages, live):
         got = await app.download_media(m, file_name=str(raw / f"{i:05d}.bin"))
         if not got or Path(got).stat().st_size == 0:
             raise RuntimeError(f"{i}-fayl yuklab olinmadi")
-        out.extend(expand_file(Path(got), p.get("k") or "img", str(p.get("n") or ""), imgs, len(out) + 1))
+        part = expand_file(Path(got), p.get("k") or "img", str(p.get("n") or ""), imgs, len(out) + 1)
+        out.extend(part)
+        owners.extend([i - 1] * len(part))
     if not out:
         raise Fatal("fayllar ichida rasm topilmadi")
-    return out
+    return out, owners
 
 
 # ── OCR ──────────────────────────────────────────────────────
@@ -1307,12 +1310,62 @@ async def send_result(app, chat, final: Path, caption: str, jid: int, live):
         live.done("Asosiy akkaunt yubora olmadi — R2'ga yozildi, panel bot yetkazadi")
 
 
+def build_each(outs, owners, pages, dst: Path) -> list:
+    """'Alohida-alohida': har yuborilgan fayl uchun o'zi kabi tur: rasm -> rasm, PDF -> PDF, ZIP/CBZ -> ZIP/CBZ.
+    Qaytadi: [(fayl yo'li, nom)]. Tarjima qilinmagan (rasmsiz) fayllar o'tkaziladi."""
+    from collections import OrderedDict
+    groups = OrderedDict()
+    for path, o in zip(outs, owners):
+        groups.setdefault(o, []).append(path)
+    dst.mkdir(parents=True, exist_ok=True)
+    res, used = [], set()
+    for o, files in groups.items():
+        meta = pages[o] if o < len(pages) else {}
+        name = str(meta.get("n") or "")
+        kind = meta.get("k") or "img"
+        stem = re.sub(r'[\\/:*?"<>|]', "", Path(name).stem).strip()[:50] or f"fayl{o + 1}"
+        if stem in used:
+            stem = f"{stem}_{o + 1}"
+        used.add(stem)
+        if kind == "pdf":
+            f = build_output(files, "pdf", f"{stem}_uz", dst)
+        elif kind == "zip":
+            f = build_output(files, "cbz" if name.lower().endswith(".cbz") else "zip", f"{stem}_uz", dst)
+        else:
+            f = dst / f"{stem}_uz{files[0].suffix}"
+            shutil.copy(files[0], f)
+        res.append((f, f.name))
+    return res
+
+
+async def deliver(app, chat, outs, owners, job, fmt, title, jid, live):
+    """Tayyor sahifalarni yuboradi: 'each' — har fayl alohida, aks holda bitta fayl. Qaytadi: (jami bayt, fayllar soni)."""
+    if str(job.get("out") or "all") == "each":
+        items = await asyncio.to_thread(build_each, outs, owners, job["pages"], WORK / "each")
+        total = 0
+        for k, (f, nm) in enumerate(items, 1):
+            api("check", {"runner": job["_runner"], "id": jid})
+            live.send(f"⬆️ Yuborilmoqda {k}/{len(items)}...", force=True)
+            await send_result(app, chat, f, f"\U0001F310 {title} · {k}/{len(items)}" if len(items) > 1 else f"\U0001F310 {title}", jid, live)
+            total += f.stat().st_size
+        live.done(f"Fayllar tayyor: {len(items)} ta, {total / 1048576:.1f} MB ({len(outs)} sahifa)")
+        return total, len(items)
+    final = await asyncio.to_thread(build_output, outs, fmt, title, WORK)
+    size = final.stat().st_size
+    live.done(f"Fayl tayyor: {size / 1048576:.1f} MB ({len(outs)} sahifa)")
+    api("check", {"runner": job["_runner"], "id": jid})
+    live.send("⬆️ Yuborilmoqda...", force=True)
+    await send_result(app, chat, final, f"\U0001F310 {title}"[:1024], jid, live)
+    return size, 1
+
+
 async def process(app, r, runner):
     channel = int(r["channel"])
     job = r["job"]
     jid, title, source = int(job["id"]), str(job.get("title") or "Tarjima"), str(job.get("src") or "korean")
     fmt = str(job.get("fmt") or "pdf")
     chat = int(job["chat"])
+    job["_runner"] = runner
     live = Live(r)
     ident = {"runner": runner, "id": jid, "status_msg": live.base["status_msg"]}
     shutil.rmtree(WORK, ignore_errors=True)
@@ -1320,7 +1373,7 @@ async def process(app, r, runner):
     try:
         log(f"\U0001F310 Tarjima #{jid}: {title} ({source}, {len(job['pages'])} fayl, urinish {job.get('attempt')})")
         live.send("⬇️ Fayllar yuklab olinmoqda...", force=True)
-        paths = await collect_images(app, channel, job["pages"], live)
+        paths, owners = await collect_images(app, channel, job["pages"], live)
         live.done(f"Yuklab olindi: {len(paths)} ta rasm")
         mode = str(job.get("mode") or "")
 
@@ -1339,12 +1392,7 @@ async def process(app, r, runner):
             out_dir.mkdir()
             cleaned = await asyncio.to_thread(mit_clean, paths, WORK / "mit")
             outs = await asyncio.to_thread(render_all, paths, groups, uz_pages, out_dir, cleaned)
-            final = await asyncio.to_thread(build_output, outs, fmt, title, WORK)
-            size = final.stat().st_size
-            live.done(f"Fayl tayyor: {size / 1048576:.1f} MB ({len(outs)} sahifa)")
-            api("check", ident)
-            live.send("⬆️ Yuborilmoqda...", force=True)
-            await send_result(app, chat, final, f"\U0001F310 {title}", jid, live)
+            size, _n = await deliver(app, chat, outs, owners, job, fmt, title, jid, live)
             api("finish", {**ident, "ok": True, "size": size, "pages": len(outs)})
             log(f"  ✅ qo'lda tarjima #{jid} yuborildi ({used} pufakcha)")
             return
@@ -1413,15 +1461,8 @@ async def process(app, r, runner):
         out_dir.mkdir()
         cleaned = await asyncio.to_thread(mit_clean, paths, WORK / "mit")
         outs = await asyncio.to_thread(render_all, paths, groups, uz_pages, out_dir, cleaned)
-        final = await asyncio.to_thread(build_output, outs, fmt, title, WORK)
-        size = final.stat().st_size
-        live.done(f"Fayl tayyor: {size / 1048576:.1f} MB ({len(outs)} sahifa)")
-        log(f"  tayyor: {final.name} {size / 1048576:.1f} MB")
-
-        api("check", ident)   # admin shu orada o'chirgan bo'lsa — yuborilmaydi
-        live.send("⬆️ Yuborilmoqda...", force=True)
-        caption = f"\U0001F310 {title}"[:1024]
-        await send_result(app, chat, final, caption, jid, live)
+        size, _n = await deliver(app, chat, outs, owners, job, fmt, title, jid, live)   # yuborishdan oldin `check` (admin o'chirgan bo'lsa — yuborilmaydi)
+        log(f"  tayyor: {_n} fayl, {size / 1048576:.1f} MB")
         api("finish", {**ident, "ok": True, "size": size, "pages": len(outs)})
         log(f"  ✅ tarjima #{jid} yuborildi")
     except Lost:

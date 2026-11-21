@@ -50,7 +50,8 @@ pub(crate) const DDL: [&str; 4] = [
         error TEXT DEFAULT '',
         mode TEXT DEFAULT '',
         manual TEXT DEFAULT '',
-        boxes TEXT DEFAULT ''
+        boxes TEXT DEFAULT '',
+        out TEXT DEFAULT 'all'
     )",
     "CREATE INDEX IF NOT EXISTS idx_tr_q ON tr_jobs(state, queued_at)",
 ];
@@ -67,6 +68,20 @@ const BTN_GO: &str = "\u{2705} Tarjima qilish";
 const BTN_CLEAR: &str = "\u{1F5D1} Tozalash";
 const BTN_QUEUE: &str = "\u{1F4CB} Tarjima navbati";
 const BTN_MANUAL: &str = "\u{270D}\u{FE0F} Qo'lda tarjima";
+const BTN_AUTO: &str = "\u{1F916} Avto tarjima";
+const BTN_ALL: &str = "\u{1F4E6} Hammasi bittada";
+const BTN_EACH: &str = "\u{1F4D1} Alohida-alohida";
+/// Tanlangan tugma oldiga qo'yiladigan belgi.
+const TICK: &str = "\u{2705} ";
+
+/// Tugma matnidan tanlov belgisini olib tashlaydi (tanlangan tugma "✅ ..." bo'lib keladi).
+fn untick(t: &str) -> &str {
+    t.strip_prefix(TICK).unwrap_or(t)
+}
+
+fn mark(on: bool, label: &str) -> String {
+    if on { format!("{TICK}{label}") } else { label.to_string() }
+}
 
 /// (tugma, kod) — manba tili. Kod `tool/translate/translate.py` va tarjima so'rovida ishlatiladi.
 const LANGS: [(&str, &str); 6] = [
@@ -84,12 +99,19 @@ const FORMATS: [(&str, &str); 3] = [
     ("\u{1F5DC} ZIP", "zip"),
 ];
 
-fn keyboard() -> Value {
+/// Klaviatura: tanlangan rejim/natija/til/format tugmalari oldida yashil ✅.
+async fn kb(env: &Env) -> Value {
+    let manual = manual_on(env).await;
+    let each = out_each(env).await;
+    let (src, fmt, _) = settings(env).await;
+    let lang = |i: usize| mark(LANGS[i].1 == src, LANGS[i].0);
     encbot_keyboard(vec![
-        vec![BTN_GO.to_string(), BTN_MANUAL.to_string()],
-        LANGS[..3].iter().map(|l| l.0.to_string()).collect(),
-        LANGS[3..].iter().map(|l| l.0.to_string()).collect(),
-        FORMATS.iter().map(|f| f.0.to_string()).collect(),
+        vec![BTN_GO.to_string()],
+        vec![mark(manual, BTN_MANUAL), mark(!manual, BTN_AUTO)],
+        vec![mark(!each, BTN_ALL), mark(each, BTN_EACH)],
+        (0..3).map(lang).collect(),
+        (3..6).map(lang).collect(),
+        FORMATS.iter().map(|f| mark(f.1 == fmt, f.0)).collect(),
         vec![ENCBOT_BTN_STATUS.to_string(), BTN_QUEUE.to_string()],
         vec![BTN_CLEAR.to_string()],
         vec![postbot::BTN_HOME.to_string()],
@@ -110,6 +132,11 @@ async fn settings(env: &Env) -> (String, String, String) {
 async fn pending_count(env: &Env, chat: i64) -> i64 {
     turso_exec(env, "SELECT COUNT(*) AS n FROM tr_pages WHERE chat=? AND job_id=0", vec![TursoArg::int(chat)]).await
         .ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "n")).unwrap_or(0)
+}
+
+/// Natija har fayl alohida qaytsinmi (`tr_out` = "each").
+async fn out_each(env: &Env) -> bool {
+    config_get(env, "tr_out").await.as_deref() == Some("each")
 }
 
 /// Qo'lda tarjima rejimi yoqilganmi (`tr_manual`).
@@ -163,11 +190,12 @@ pub(crate) async fn menu(env: &Env, chat: i64) {
          Hammasi yuborilgach \u{00AB}{BTN_GO}\u{00BB} ni bosing \u{2014} tarjima qilingan bitta fayl qaytadi (o'zbekcha).\n\n\
          Fayl nomi uchun oddiy matn yozing.\n\n\
          \u{1F310} Manba tili: <b>{}</b> (\u{00AB}Avto\u{00BB} \u{2014} bot o'zi aniqlaydi)\n\u{1F4E6} Natija: <b>{}</b>\n\u{270F}\u{FE0F} Nom: <b>{}</b>\n\u{1F4E5} Yig'ilgan: <b>{n}</b> ta fayl\n\
-         \u{270D}\u{FE0F} Rejim: <b>{}</b> (\u{00AB}{BTN_MANUAL}\u{00BB} \u{2014} almashtirish)",
+         \u{270D}\u{FE0F} Rejim: <b>{}</b> (\u{00AB}{BTN_MANUAL}\u{00BB} / \u{00AB}{BTN_AUTO}\u{00BB})\n\u{1F4E6} Qaytishi: <b>{}</b> (\u{00AB}{BTN_ALL}\u{00BB} / \u{00AB}{BTN_EACH}\u{00BB})",
         lang_name(&src), fmt.to_uppercase(),
         if title.is_empty() { "(nomsiz)".to_string() } else { html_escape(&title) },
-        if manual_on(env).await { "QO'LDA (siz tarjima qilasiz)" } else { "avtomatik (sun'iy intellekt)" }),
-        Some(keyboard())).await;
+        if manual_on(env).await { "QO'LDA (siz tarjima qilasiz)" } else { "avtomatik (sun'iy intellekt)" },
+        if out_each(env).await { "har fayl alohida" } else { "hammasi bitta fayl" }),
+        Some(kb(env).await)).await;
 }
 
 /// Qabul qilingan faylning turi: (tur, nom) yoki None.
@@ -200,9 +228,9 @@ fn classify(msg: &Value) -> Option<(&'static str, String, i64)> {
 
 /// Tarjima rejimidagi xabar. `true` — ishlandi.
 pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
-    let text = msg["text"].as_str().unwrap_or("").trim().to_string();
-    if text == BTN_MANUAL {
-        let on = !manual_on(env).await;
+    let text = untick(msg["text"].as_str().unwrap_or("").trim()).trim().to_string();
+    if text == BTN_MANUAL || text == BTN_AUTO {
+        let on = text == BTN_MANUAL;
         config_put(env, "tr_manual", if on { "1" } else { "" }).await;
         encbot_send(env, chat, &if on {
             format!("\u{270D}\u{FE0F} <b>Qo'lda tarjima YOQILDI.</b>\n\n\
@@ -213,7 +241,17 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
                 <i>Sahifa</i> \u{2014} yuborgan har bir rasm (ZIP/CBZ/PDF ichidagilar ham tartib bilan alohida sahifa). Yozmagan raqamlaringiz asl holida qoladi.")
         } else {
             "\u{1F916} Avtomatik tarjima rejimi (sun'iy intellekt) yoqildi.".to_string()
-        }, Some(keyboard())).await;
+        }, Some(kb(env).await)).await;
+        return true;
+    }
+    if text == BTN_ALL || text == BTN_EACH {
+        let each = text == BTN_EACH;
+        config_put(env, "tr_out", if each { "each" } else { "all" }).await;
+        encbot_send(env, chat, &if each {
+            "\u{1F4D1} <b>Alohida-alohida:</b> yuborgan har bir faylingiz tarjimadan so'ng alohida, o'zingiz yuborgandek qaytadi.".to_string()
+        } else {
+            "\u{1F4E6} <b>Hammasi bittada:</b> yuborganlaringizning hammasi bitta fayl ichida qaytadi.".to_string()
+        }, Some(kb(env).await)).await;
         return true;
     }
     // Qo'lda tarjima: tarjima kutayotgan ish bor va xabarda `1.1#` qatorlari bor — yozilganlar saqlanadi.
@@ -223,9 +261,9 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
             if all.len() <= 200_000 {
                 let _ = turso_exec(env, "UPDATE tr_jobs SET manual=? WHERE id=?", vec![TursoArg::text(&all), TursoArg::int(id)]).await;
                 encbot_send(env, chat, &format!("\u{270D}\u{FE0F} Qabul qilindi: <b>{}</b> ta tarjima (#{id}).\nYana yuborishingiz yoki \u{00AB}{BTN_GO}\u{00BB} ni bosishingiz mumkin.",
-                    count_markers(&all)), Some(keyboard())).await;
+                    count_markers(&all)), Some(kb(env).await)).await;
             } else {
-                encbot_send(env, chat, "\u{26A0}\u{FE0F} Tarjima juda uzun (200 000 belgidan oshdi).", Some(keyboard())).await;
+                encbot_send(env, chat, "\u{26A0}\u{FE0F} Tarjima juda uzun (200 000 belgidan oshdi).", Some(kb(env).await)).await;
             }
             return true;
         }
@@ -246,17 +284,17 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
             .map(|r| rows_of(&r).len()).unwrap_or(0);
         config_put(env, "tr_cnt", "").await;
         config_put(env, "tr_title", "").await;
-        encbot_send(env, chat, &format!("\u{1F5D1} Tozalandi ({n} ta fayl o'chirildi). Yangidan boshlashingiz mumkin."), Some(keyboard())).await;
+        encbot_send(env, chat, &format!("\u{1F5D1} Tozalandi ({n} ta fayl o'chirildi). Yangidan boshlashingiz mumkin."), Some(kb(env).await)).await;
         return true;
     }
     if let Some(l) = LANGS.iter().find(|l| l.0 == text) {
         config_put(env, "tr_src", l.1).await;
-        encbot_send(env, chat, &format!("\u{1F310} Manba tili: <b>{}</b>", l.0), Some(keyboard())).await;
+        encbot_send(env, chat, &format!("\u{1F310} Manba tili: <b>{}</b>", l.0), Some(kb(env).await)).await;
         return true;
     }
     if let Some(f) = FORMATS.iter().find(|f| f.0 == text) {
         config_put(env, "tr_fmt", f.1).await;
-        encbot_send(env, chat, &format!("\u{1F4E6} Natija fayli: <b>{}</b>", f.0), Some(keyboard())).await;
+        encbot_send(env, chat, &format!("\u{1F4E6} Natija fayli: <b>{}</b>", f.0), Some(kb(env).await)).await;
         return true;
     }
 
@@ -266,14 +304,14 @@ pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
             // Oddiy matn — fayl nomi.
             let title: String = text.chars().take(80).collect();
             config_put(env, "tr_title", &title).await;
-            encbot_send(env, chat, &format!("\u{270F}\u{FE0F} Nom: <b>{}</b>", html_escape(&title)), Some(keyboard())).await;
+            encbot_send(env, chat, &format!("\u{270F}\u{FE0F} Nom: <b>{}</b>", html_escape(&title)), Some(kb(env).await)).await;
         } else {
-            encbot_send(env, chat, "Rasm, ZIP/CBZ yoki PDF fayl yuboring (rasmni \u{00AB}fayl\u{00BB} qilib yuborsangiz sifati saqlanadi).", Some(keyboard())).await;
+            encbot_send(env, chat, "Rasm, ZIP/CBZ yoki PDF fayl yuboring (rasmni \u{00AB}fayl\u{00BB} qilib yuborsangiz sifati saqlanadi).", Some(kb(env).await)).await;
         }
         return true;
     };
     if pending_count(env, chat).await >= TR_MAX_FILES {
-        encbot_send(env, chat, &format!("\u{26A0}\u{FE0F} Bir ishga {TR_MAX_FILES} tagacha fayl. Avval \u{00AB}{BTN_GO}\u{00BB} ni bosing."), Some(keyboard())).await;
+        encbot_send(env, chat, &format!("\u{26A0}\u{FE0F} Bir ishga {TR_MAX_FILES} tagacha fayl. Avval \u{00AB}{BTN_GO}\u{00BB} ni bosing."), Some(kb(env).await)).await;
         return true;
     }
     if !caption.is_empty() && config_get(env, "tr_title").await.is_none() {
@@ -303,7 +341,7 @@ async fn counter(env: &Env, chat: i64) {
         // Xabar o'chirilgan yoki matn bir xil — yangisi yuboriladi (bir xil matn xatosi ham shu yerga tushadi, zarari yo'q).
     }
     let sent = encbot_api(env, "sendMessage", json!({
-        "chat_id": chat, "text": text, "parse_mode": "HTML", "reply_markup": keyboard(),
+        "chat_id": chat, "text": text, "parse_mode": "HTML", "reply_markup": kb(env).await,
     })).await.ok().and_then(|v| v["message_id"].as_i64()).unwrap_or(0);
     if sent > 0 {
         config_put(env, "tr_cnt", &sent.to_string()).await;
@@ -317,14 +355,14 @@ async fn submit_manual(env: &Env, chat: i64) -> bool {
         return false; // yangi fayllar yig'ilgan — yangi ish (avvalgisi yo'qolmaydi: navbat ro'yxatidan o'chiriladi)
     }
     if count_markers(&manual) == 0 {
-        encbot_send(env, chat, &format!("\u{270D}\u{FE0F} #{id}: hali tarjima yuborilmagan.\nShunday yozing: <code>1.1# tarjima</code> (har qatorda bitta pufakcha), keyin \u{00AB}{BTN_GO}\u{00BB} ni bosing."), Some(keyboard())).await;
+        encbot_send(env, chat, &format!("\u{270D}\u{FE0F} #{id}: hali tarjima yuborilmagan.\nShunday yozing: <code>1.1# tarjima</code> (har qatorda bitta pufakcha), keyin \u{00AB}{BTN_GO}\u{00BB} ni bosing."), Some(kb(env).await)).await;
         return true;
     }
     let _ = turso_exec(env,
         "UPDATE tr_jobs SET state='queued', mode='render', attempts=0, error='', runner='', lease_until=0, queued_at=? WHERE id=? AND state='wait'",
         vec![TursoArg::int(now_ms()), TursoArg::int(id)]).await;
     let kick = kick(env).await;
-    encbot_send(env, chat, &format!("\u{2705} #{id}: {} ta tarjima qabul qilindi \u{2014} pufakchalarga joylanmoqda.\n\n{kick}", count_markers(&manual)), Some(keyboard())).await;
+    encbot_send(env, chat, &format!("\u{2705} #{id}: {} ta tarjima qabul qilindi \u{2014} pufakchalarga joylanmoqda.\n\n{kick}", count_markers(&manual)), Some(kb(env).await)).await;
     true
 }
 
@@ -334,12 +372,12 @@ async fn go(env: &Env, chat: i64) {
         "SELECT id, msg_id, name, kind FROM tr_pages WHERE chat=? AND job_id=0 ORDER BY msg_id ASC LIMIT ?",
         vec![TursoArg::int(chat), TursoArg::int(TR_MAX_FILES)]).await.map(|r| rows_of(&r)).unwrap_or_default();
     if rows.is_empty() {
-        encbot_send(env, chat, "\u{1F4ED} Hali fayl yuborilmagan. Rasmlarni yoki ZIP/CBZ/PDF yuboring.", Some(keyboard())).await;
+        encbot_send(env, chat, "\u{1F4ED} Hali fayl yuborilmagan. Rasmlarni yoki ZIP/CBZ/PDF yuboring.", Some(kb(env).await)).await;
         return;
     }
     let channel = tg_channel_id(env);
     if channel == 0 {
-        encbot_send(env, chat, "\u{274C} TG_CHANNEL_ID sozlanmagan.", Some(keyboard())).await;
+        encbot_send(env, chat, "\u{274C} TG_CHANNEL_ID sozlanmagan.", Some(kb(env).await)).await;
         return;
     }
     // Kanalga: 100 tadan `copyMessages` (bitta so'rovda; albom tartibi saqlanadi).
@@ -373,7 +411,7 @@ async fn go(env: &Env, chat: i64) {
                 let _ = encbot_api(env, "deleteMessages", json!({"chat_id": channel, "message_ids": chan})).await;
             }
             encbot_send(env, chat, "\u{274C} Fayllarni kanalga ko'chirib bo'lmadi (bot kanalda admin ekanini tekshiring). \
-                Fayllaringiz saqlanib turibdi \u{2014} \u{00AB}Tarjima qilish\u{00BB} ni qayta bosing.", Some(keyboard())).await;
+                Fayllaringiz saqlanib turibdi \u{2014} \u{00AB}Tarjima qilish\u{00BB} ni qayta bosing.", Some(kb(env).await)).await;
             return;
         }
         chan.extend(done);
@@ -384,13 +422,14 @@ async fn go(env: &Env, chat: i64) {
     let (src, fmt, title) = settings(env).await;
     let title = if title.is_empty() { "Tarjima".to_string() } else { title };
     let ins = turso_exec(env,
-        "INSERT INTO tr_jobs (chat, title, src, fmt, pages, queued_at, mode) VALUES (?,?,?,?,?,?,?) RETURNING id",
+        "INSERT INTO tr_jobs (chat, title, src, fmt, pages, queued_at, mode, out) VALUES (?,?,?,?,?,?,?,?) RETURNING id",
         vec![TursoArg::int(chat), TursoArg::text(&title), TursoArg::text(&src), TursoArg::text(&fmt),
              TursoArg::text(&Value::Array(pages).to_string()), TursoArg::int(now_ms()),
-             TursoArg::text(if manual_on(env).await { "detect" } else { "" })]).await;
+             TursoArg::text(if manual_on(env).await { "detect" } else { "" }),
+             TursoArg::text(if out_each(env).await { "each" } else { "all" })]).await;
     let Some(id) = ins.ok().and_then(|r| first_row(&r)).map(|r| jint(&r, "id")) else {
         let _ = encbot_api(env, "deleteMessages", json!({"chat_id": channel, "message_ids": chan})).await;
-        encbot_send(env, chat, "\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi). Qayta bosing \u{2014} fayllar saqlanib turibdi.", Some(keyboard())).await;
+        encbot_send(env, chat, "\u{274C} Navbatga qo'yib bo'lmadi (baza xatosi). Qayta bosing \u{2014} fayllar saqlanib turibdi.", Some(kb(env).await)).await;
         return;
     };
     // Faqat shu ishga olinganlar belgilanadi (shu orada yangi kelganlari keyingi ishga qoladi).
@@ -404,7 +443,7 @@ async fn go(env: &Env, chat: i64) {
     encbot_send(env, chat, &format!(
         "\u{2705} Navbatga qo'yildi: <b>#{id} {}</b>\n\u{1F4C4} Fayllar: {}\n\u{1F310} {} \u{2192} o'zbekcha \u{00B7} {}\n\
          \u{1F4CB} Navbatdagi tarjimalar: {n} ta\n\n{kick}",
-        html_escape(&title), rows.len(), lang_name(&src), fmt.to_uppercase()), Some(keyboard())).await;
+        html_escape(&title), rows.len(), lang_name(&src), fmt.to_uppercase()), Some(kb(env).await)).await;
 }
 
 /// Navbatda ish bo'lsa-yu, hech kim ishlamayotgan bo'lsa — `translate.yml` ni ishga tushiradi.
@@ -509,7 +548,7 @@ pub(crate) async fn queue_list(env: &Env, chat: i64) {
         .map(|r| rows_of(&r)).unwrap_or_default();
     let n = pending_count(env, chat).await;
     if rows.is_empty() {
-        encbot_send(env, chat, &format!("\u{1F4CB} Tarjima navbati bo'sh.\n\u{1F4E5} Yig'ilayotgan: {n} ta fayl."), Some(keyboard())).await;
+        encbot_send(env, chat, &format!("\u{1F4CB} Tarjima navbati bo'sh.\n\u{1F4E5} Yig'ilayotgan: {n} ta fayl."), Some(kb(env).await)).await;
         return;
     }
     let mut kb: Vec<Vec<Value>> = Vec::new();
@@ -548,18 +587,18 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, data: &str) -> bool {
                 Some(j) => {
                     channel_cleanup(env, j["pages"].as_str().unwrap_or("[]")).await;
                     let _ = turso_exec(env, "DELETE FROM tr_pages WHERE job_id=?", vec![TursoArg::int(id)]).await;
-                    encbot_send(env, chat, &format!("\u{1F5D1} #{id} o'chirildi."), Some(keyboard())).await;
+                    encbot_send(env, chat, &format!("\u{1F5D1} #{id} o'chirildi."), Some(kb(env).await)).await;
                 }
-                None => encbot_send(env, chat, &format!("#{id} allaqachon yo'q."), Some(keyboard())).await,
+                None => encbot_send(env, chat, &format!("#{id} allaqachon yo'q."), Some(kb(env).await)).await,
             }
         }
-        "tn" => encbot_send(env, chat, "O'chirilmadi.", Some(keyboard())).await,
+        "tn" => encbot_send(env, chat, "O'chirilmadi.", Some(kb(env).await)).await,
         _ => {
             let _ = turso_exec(env,
                 "UPDATE tr_jobs SET state='queued', attempts=0, error='', runner='', lease_until=0 WHERE id=? AND state='error'",
                 vec![TursoArg::int(id)]).await;
             let kick = kick(env).await;
-            encbot_send(env, chat, &format!("\u{1F501} #{id} yana navbatga qo'yildi.\n\n{kick}"), Some(keyboard())).await;
+            encbot_send(env, chat, &format!("\u{1F501} #{id} yana navbatga qo'yildi.\n\n{kick}"), Some(kb(env).await)).await;
         }
     }
     true
@@ -649,6 +688,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 "fmt": job["fmt"].as_str().unwrap_or("pdf"), "pages": pages, "attempt": jint(&got, "attempts"),
                 "mode": job["mode"].as_str().unwrap_or(""), "manual": job["manual"].as_str().unwrap_or(""),
                 "boxes": job["boxes"].as_str().unwrap_or(""),
+                "out": job["out"].as_str().unwrap_or("all"),
             }}));
         }
         return ok(json!({"none": true}));
@@ -720,7 +760,7 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 "\u{270D}\u{FE0F} <b>#{id}</b> \u{2014} raqamlangan fayl va asl matnlar yuqorida{}.\n\
                  Tarjimani shunday yuboring (har qatorda bitta pufakcha, bir necha xabar bo'lsa ham bo'ladi):\n<code>1.1# salom\n1.2# qayerga ketyapsan?\n2.1# bilmayman</code>\n\
                  Tugagach \u{00AB}{BTN_GO}\u{00BB} ni bosing. Yozmagan raqamlaringiz asl holida qoladi.",
-                if sent_any { "" } else { " (matn topilmadi)" }), Some(keyboard())).await;
+                if sent_any { "" } else { " (matn topilmadi)" }), Some(kb(env).await)).await;
             return ok(json!({"ok": true}));
         }
         if b["ok"].as_bool() == Some(true) {

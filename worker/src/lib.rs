@@ -1800,6 +1800,11 @@ async fn init_db(env: &Env) -> bool {
         }
         config_put(env, "mig_tr_manual", "1").await;
     }
+    // Manga tarjima: natija usuli (2026-11) — 'all' (hammasi bitta fayl) | 'each' (har fayl alohida).
+    if ok && config_get(env, "mig_tr_out").await.is_none() {
+        let _ = turso_exec(env, "ALTER TABLE tr_jobs ADD COLUMN out TEXT DEFAULT 'all'", vec![]).await;
+        config_put(env, "mig_tr_out", "1").await;
+    }
     // Kanal posti kollaji (2026-11): qism qatorida saqlash kanalidagi rasm `file_id` si.
     if ok && config_get(env, "mig_collage_cols").await.is_none() {
         for sql in [

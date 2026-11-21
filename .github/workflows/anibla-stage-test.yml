@@ -21,6 +21,7 @@ jobs:
       - run: python3 tool/anibla/test_stage.py
       - run: python3 tool/encode/test_collage.py
       - run: python3 tool/translate/test_manual.py
+      - run: python3 tool/translate/test_each.py
       - run: |
           sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra fonts-comic-neue
           pip install -q numpy opencv-python-headless pillow pyspellchecker
