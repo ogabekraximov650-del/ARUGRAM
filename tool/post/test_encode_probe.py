@@ -5,7 +5,8 @@ from pathlib import Path
 
 here = Path(__file__).parent
 node = next(n for n in ast.parse((here / "post.py").read_text()).body if isinstance(n, ast.FunctionDef) and n.name == "ffprobe")
-ns = {"subprocess": subprocess}
+import json
+ns = {"subprocess": subprocess, "json": json}
 exec(compile(ast.Module([node], []), "post.py", "exec"), ns)
 fp = ns["ffprobe"]
 

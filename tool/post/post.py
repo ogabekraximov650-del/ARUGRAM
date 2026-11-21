@@ -93,14 +93,17 @@ def target():
 
 
 def ffprobe(path, entry, stream=None):
+    """Bitta qiymat (kenglik/balandlik/davomiylik, butun son) yoki None. JSON chiqishi: ffmpeg 8.x da CSV chiqishi yon ma'lumotli (ICC profil) videolarda
+    buzilardi (w/h o'qilmay, Telegram'ga video 320x320 deb yozilardi)."""
     cmd = ["ffprobe", "-v", "error"]
     if stream:
         cmd += ["-select_streams", stream, "-show_entries", f"stream={entry}"]
     else:
         cmd += ["-show_entries", f"format={entry}"]
-    cmd += ["-of", "csv=p=0", str(path)]
+    cmd += ["-of", "json", str(path)]
     try:
-        v = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().split("\n")[0].strip()
+        j = json.loads(subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode() or "{}")
+        v = j["streams"][0][entry] if stream else j["format"][entry]
         n = int(float(v))
         return n if n > 0 else None
     except Exception:
