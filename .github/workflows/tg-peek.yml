@@ -62,6 +62,8 @@ jobs:
           K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/encode/session.enc -out "$OUT"
           head -c 16 "$OUT" | grep -q "SQLite format 3"
           echo "SESSION_PATH=$RUNNER_TEMP/pyro_session" >> "$GITHUB_ENV"
+      - name: ffmpeg (ffprobe)
+        run: command -v ffprobe >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg)
       - name: Kanal xabarlari
         env:
           TG_API_ID: ${{ secrets.TG_API_ID }}

@@ -8,7 +8,11 @@ pyrogram.utils.MIN_CHANNEL_ID = -1009999999999
 SESSION = os.environ["SESSION_PATH"]
 chan = int(open("ci/VD_CHANNEL_ID").read().strip())
 ids = []
+deep_ids = []   # "d3177" — xabarni TO'LIQ tekshirish: xom atributlar, yuklab olish va ffprobe (videolarni solishtirish uchun)
 for tok in open("ci/TG_PEEK").read().split():
+    if tok.startswith("d") and tok[1:].isdigit():
+        deep_ids.append(int(tok[1:]))
+        continue
     if "-" in tok.strip("-"):
         a, b = tok.split("-", 1)
         ids += list(range(int(a), int(b) + 1))
@@ -34,6 +38,41 @@ def brief(m):
     return f"{'hujjat/video' if d else 'boshqa'} nom={nm!r} hajm={sz} sana={m.date} izoh={cap!r} kimdan={getattr(m.from_user, 'id', None) or getattr(m.sender_chat, 'id', None)}"
 
 
+async def deep(app, chat, i):
+    import subprocess
+    from pyrogram.raw import functions, types
+    print(f"\n===== xabar {i}: TO'LIQ TEKSHIRUV =====")
+    peer = await app.resolve_peer(chat)
+    r = await app.invoke(functions.channels.GetMessages(channel=peer, id=[types.InputMessageID(id=i)]))
+    raw = r.messages[0] if r.messages else None
+    doc = getattr(getattr(raw, "media", None), "document", None)
+    if doc is None:
+        print("  hujjat yo'q:", type(getattr(raw, "media", None)).__name__)
+        return
+    print(f"  xom: mime={doc.mime_type} hajm={doc.size} dc={doc.dc_id} thumbs={len(doc.thumbs or [])} video_thumbs={len(getattr(doc, 'video_thumbs', None) or [])}")
+    print(f"  media bayroqlari: spoiler={getattr(raw.media, 'spoiler', None)} video={getattr(raw.media, 'video', None)} round={getattr(raw.media, 'round', None)}")
+    for a in doc.attributes:
+        print("  atribut:", type(a).__name__, {k: v for k, v in a.__dict__.items() if not k.startswith("_")})
+    print("  xabar matni:", repr((raw.message or "")[:120]), "| sana:", raw.date, "| kimdan:", getattr(raw.from_id, "user_id", None) or getattr(raw.from_id, "channel_id", None))
+    m = await app.get_messages(chat, i)
+    if doc.size > 600 * 1024 * 1024:
+        print("  juda katta — yuklab olinmadi")
+        return
+    path = await app.download_media(m, file_name=f"/tmp/deep_{i}.bin")
+    print("  yuklandi:", path, os.path.getsize(path))
+    head = open(path, "rb").read(4096)
+    print("  boshi (hex):", head[:32].hex(), "| ftyp:", b"ftyp" in head[:16])
+    with open(path, "rb") as f:
+        d = f.read(8 * 1024 * 1024)
+    mo, md = d.find(b"moov"), d.find(b"mdat")
+    print(f"  moov o'rni: {mo}, mdat o'rni: {md} (moov fayl boshida: {0 <= mo < (md if md >= 0 else 10**12)})")
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                          "stream=index,codec_type,codec_name,codec_tag_string,profile,width,height,sample_aspect_ratio,display_aspect_ratio,r_frame_rate,avg_frame_rate,pix_fmt,color_range,color_space,time_base,nb_frames:stream_side_data:stream_tags:format=format_name,duration,bit_rate:format_tags",
+                          "-of", "default=nw=1", path], capture_output=True, text=True)
+    print("  ffprobe:\n" + "\n".join("    " + x for x in (out.stdout or out.stderr).splitlines()[:80]))
+    os.remove(path)
+
+
 async def main():
     app = Client(SESSION, api_id=api_id() or int(os.environ["TG_API_ID"]), api_hash=os.environ["TG_API_HASH"], no_updates=True)
     async with app:
@@ -41,6 +80,13 @@ async def main():
             pass
         print("sessiya hisobi:", app.me.id, app.me.username)
         chat = await app.get_chat(chan)
+        if deep_ids:
+            for i in deep_ids:
+                try:
+                    await deep(app, chan, i)
+                except Exception as ex:  # noqa: BLE001
+                    print(f"  xabar {i} tekshiruvi xato: {type(ex).__name__}: {str(ex)[:200]}")
+            return
         print("kanal:", chat.id, chat.title, "a'zolar:", getattr(chat, "members_count", None))
         for i in ids:
             m = await app.get_messages(chan, i)
