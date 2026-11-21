@@ -13,7 +13,7 @@ ROUNDS = int(os.environ.get("ROUNDS", "4"))
 def once(tg: int):
     data = os.urandom(SIZE)
     req = urllib.request.Request(f"{API}/api/encode/uptest?tg={tg}", data=data, method="POST",
-                                 headers={"X-Encode-Token": TOKEN, "Content-Type": "application/octet-stream", "User-Agent": "arumediatv-speedtest"})
+                                 headers={"X-Encode-Token": TOKEN, "Content-Type": "application/octet-stream", "User-Agent": "arumediatv-encoder"})
     t = time.time()
     with urllib.request.urlopen(req, timeout=300) as r:
         j = json.loads(r.read() or b"{}")
