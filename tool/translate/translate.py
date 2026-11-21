@@ -881,6 +881,35 @@ def fix_ocr_words(text: str) -> str:
     return _re.sub(r"[A-Za-z]+", fix, text)
 
 
+def widen_to_bubble(img, g, reader):
+    """Past ishonchli (conf<0.5) blok oq pufakcha ichida bo'lsa — pufakchadagi BARCHA harf izlari bo'yicha quti kengaytirilib, matn qayta o'qiladi
+    (kursiv/ajratilgan shriftda OCR faqat bir qatorni oladi: "TkE Kunter" o'rniga "THE HUNTER GUILD'S"). Aniq yaxshilanmasa — blok o'zgarmaydi."""
+    import numpy as np
+    if float(g.get("conf", 1.0) or 0.0) >= 0.5 or reader is None:
+        return g
+    try:
+        f = find_bubble(img, g["box"])
+    except Exception:  # noqa: BLE001
+        f = None
+    if f is None or f[4]:   # topilmadi yoki to'q fon
+        return g
+    ys, xs = np.where(f[1])
+    if len(xs) < 20:
+        return g
+    ox, oy = f[2]
+    nb = (int(xs.min()) + ox, int(ys.min()) + oy, int(xs.max()) + ox + 1, int(ys.max()) + oy + 1)
+    b = g["box"]
+    # Kengaytma o'rtacha bo'lishi kerak (butun sahifa emas) va eski qutini o'z ichiga olishi kerak.
+    if (nb[2] - nb[0]) > 2.6 * (b[2] - b[0]) + 60 or (nb[3] - nb[1]) > 4 * (b[3] - b[1]) + 60:
+        return g
+    nb = (min(nb[0], b[0]), min(nb[1], b[1]), max(nb[2], b[2]), max(nb[3], b[3]))
+    t = reread_box(img, nb, reader)
+    letters = lambda x: len(re.sub(r"[^A-Za-z]", "", x or ""))
+    if letters(t) > letters(g.get("text")) + 3:
+        return dict(g, box=nb, text=t, conf=0.6)
+    return g
+
+
 def postprocess_groups(img, groups, reader, source):
     """OCR guruhlarini yakunlaydi: OCR topmagan pufakchalarni qo'shadi, keraksizlarini (reklama, kredit, shovqin) olib tashlaydi, inglizcha OCR xatolarini tuzatadi."""
     try:
@@ -890,6 +919,11 @@ def postprocess_groups(img, groups, reader, source):
         extra = []
     out = []
     for g in sorted(groups + extra, key=lambda x: (x["box"][1], x["box"][0])):
+        if source == "english":
+            try:
+                g = widen_to_bubble(img, g, reader)
+            except Exception as e:  # noqa: BLE001
+                log(f"  pufakchaga kengaytirishda xato ({e})")
         if not (g.get("text") or "").strip() and reader is not None:
             try:
                 g = dict(g, text=reread_box(img, g["box"], reader))
