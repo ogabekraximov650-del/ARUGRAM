@@ -19,13 +19,14 @@
 
 import { api, ApiError, currentUser, onUser, imageUrl, logout } from '../api.js';
 import { esc, formatCount } from '../format.js';
-import { C, icon, spinner, bindTap, ripple, toast } from '../ui.js';
+import { C, icon, spinner, bindTap, ripple, toast, mdDialog } from '../ui.js';
 import { myStats, formatBytes, formatHours, STAT_KINDS, openStatDetail } from './stats.js';
 import { openProfileEdit } from './profile-edit.js';
 import { openSettings } from './settings.js';
 import { openAdmin } from './admin.js';
 import { openSessions } from './sessions.js';
 import { openStorage } from './storage.js';
+import { cacheStats } from '../tg/chunk-cache.js';
 import { billing, formatLeft } from '../services/billing.js';
 import {
   openBilling, openSupport, openMyPacks, openTelegramAccount, isTelegramAuthorized, checkTelegram, uploadFile,
@@ -342,51 +343,75 @@ export function createProfile(page) {
   function statsHtml() {
     const s = myStats.stats;
     return `<div class="pf-stats">
-      ${statBox('anime', 'movie_filter', formatCount(s.animes))}
+      ${statBox('anime', 'movie', formatCount(s.animes))}
       ${statBox('episodes', 'play_circle', formatCount(s.episodes), false)}
       ${statBox('seasons', 'grid_view', formatCount(s.seasons))}
       ${statBox('favorites', 'bookmark', formatCount(s.favorites))}
       ${statBox('rated', 'star', formatCount(s.rated))}
-      ${statBox('comments', 'mode_comment', formatCount(s.comments))}
+      ${statBox('comments', 'comment', formatCount(s.comments))}
       ${statBox('watch', 'schedule', `${formatHours(s.watchMs)} soat`)}
+      <div class="glass pf-stat open" data-k="storage">
+        <div class="pf-stat-h">${icon('sd_storage', { size: 16, color: C.accent })}<span>Xotira</span></div>
+        <div class="pf-stat-v">${esc(storageText)}</div>
+      </div>
     </div>`;
   }
 
-  function tile(id, ic, label, { fill = true, trailing = '' } = {}) {
-    return `<div class="pf-tile" data-t="${id}">${icon(ic, { fill, size: 24, color: 'rgba(255,255,255,0.7)' })}
+  /** Trafik kartasi (Android `TrafficCard`): saytda toifalar yo'q — serverdagi jami "Oldingi hisob" bo'lib ko'rinadi. */
+  function trafficHtml() {
+    const total = myStats.stats.traffic || 0;
+    const row = total > 0 ? `<div class="pf-urow"><span class="dot" style="background:#6B6B70"></span><span class="lbl">Oldingi hisob</span>
+      <span class="sz">${esc(formatBytes(total).replace('.', ','))}</span><span class="pc">100.00%</span></div>` : '<div class="pf-traf-empty">Hozircha trafik sarflanmagan</div>';
+    return `<div class="glass pf-traf">
+      <div class="pf-traf-h">${icon('cloud_download', { size: 15, color: C.accent })}<span class="pf-traf-l">Trafik</span><span class="grow"></span><span class="pf-traf-v">${esc(formatBytes(total).replace('.', ','))}</span></div>
+      <div class="pf-traf-bar">${total > 0 ? '<div style="flex:1;background:#6B6B70"></div>' : ''}</div>
+      ${row}
+    </div>`;
+  }
+
+  function tile(id, ic, label, { trailing = '' } = {}) {
+    return `<div class="pf-tile" data-t="${id}"><span class="pf-tile-ic">${icon(ic, { size: 22, color: C.accent })}</span>
       <span class="pf-tile-l">${label}</span>${trailing}${icon('chevron_right', { size: 24, color: 'rgba(255,255,255,0.38)' })}</div>`;
   }
 
   function menuHtml() {
     const items = [
-      tile('notif', 'notifications', 'Bildirishnoma', { fill: false }),
-      currentUser()?.is_admin ? tile('admin', 'admin_panel_settings', 'Admin paneli') : '',
+      tile('notif', 'notifications', 'Bildirishnoma'),
       tile('settings', 'settings', 'Sozlamalar'),
-      isTelegramAuthorized() ? '' : tile('telegram', 'send', "Telegram'ni ulash"),
+      isTelegramAuthorized() ? '' : tile('telegram', 'send', 'Telegram accountni ulash'),
       tile('sessions', 'devices', 'Qurilmalar'),
-      tile('storage', 'storage', 'Xotiradan foydalanish'),
       tile('packs', 'emoji_emotions', 'Emoji, GIF va stikerlar'),
       tile('support', 'support_agent', "Admin bilan bog'lanish",
         { trailing: unread.count > 0 && !unread.admin ? '<span class="pf-dot"></span>' : '' }),
-      tile('about', 'info', 'Ilova haqida', { fill: false }),
+      tile('about', 'info', 'Ilova haqida'),
     ].filter(Boolean);
     return `<div class="glass pf-menu">${items.join('<div class="pf-div"></div>')}</div>`;
+  }
+
+  function adminHtml() {
+    return currentUser()?.is_admin ? `<div class="glass pf-menu pf-admin-grp">${tile('admin', 'lock', 'Admin paneli')}</div>` : '';
   }
 
   function render() {
     const u = currentUser();
     if (!u) { root.innerHTML = ''; return; }
     root.innerHTML = `
+      <div class="home-head p20 pf-head"><div><div class="ph-title">ARU<span class="m">MEDIATV</span></div><div class="sub">Profil</div></div></div>
       ${cardHtml(u)}
       <div class="pf-bill-slot">${billingHtml()}</div>
       <div class="pf-stats-slot">${statsHtml()}</div>
+      <div class="pf-traf-slot">${trafficHtml()}</div>
       ${menuHtml()}
+      ${adminHtml()}
       <div class="glass pf-danger" data-t="delete">
-        <span class="pf-danger-ic">${icon('delete_forever', { size: 22, color: C.accent })}</span>
+        <span class="pf-danger-ic">${icon('delete', { size: 22, color: C.accent })}</span>
         <span class="pf-danger-l">Accountni o'chirish</span>
       </div>`;
     bind();
   }
+
+  let storageText = '0 B';
+  cacheStats().then((c) => { storageText = formatBytes(c.used).replace('.', ','); renderStats(); }).catch(() => {});
 
   function renderBilling() {
     const slot = root.querySelector('.pf-bill-slot');
@@ -403,8 +428,11 @@ export function createProfile(page) {
     s1.innerHTML = statsHtml();
     const me = currentUser()?.id || 0;
     s1.querySelectorAll('.pf-stat.open').forEach((el) => bindTap(el, () => {
+      if (el.dataset.k === 'storage') { openStorage(); return; }
       if (me > 0) openStatDetail({ userId: me, kind: el.dataset.k, isMe: true });
     }));
+    const t = root.querySelector('.pf-traf-slot');
+    if (t) t.innerHTML = trafficHtml();
   }
 
   function bind() {
@@ -447,7 +475,7 @@ export function createProfile(page) {
   };
 
   function redrawMenu() {
-    const m = root.querySelector('.pf-menu');
+    const m = root.querySelector('.pf-menu:not(.pf-admin-grp)');
     if (m) { m.outerHTML = menuHtml(); bindMenu(); }
   }
 
@@ -463,6 +491,7 @@ export function createProfile(page) {
           case 'storage': openStorage(); break;
           case 'packs': openMyPacks(); break;
           case 'support': openSupport(); break;
+          case 'about': mdDialog({ title: 'ARUMEDIATV', html: 'Versiya: Mini App<br>Server: arumediatv.uzcom.workers.dev<br>Telegram Mini App', dismiss: 'Yopish' }); break;
           default: toast(`«${label}» bo'limi tez orada qo'shiladi`, 1600);
         }
       });
