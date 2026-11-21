@@ -1,6 +1,6 @@
 /* ── Katalog (`catalog_screen.dart`) ─────────────────────────── */
 .cat-root { height: 100%; display: flex; flex-direction: column; }
-.cat-root > .home-head { flex-shrink: 0; }
+.cat-root > .home-head { flex-shrink: 0; padding-left: 20px; padding-right: 20px; }
 
 /* Tugmalar qatori (`_TabBar`): 46 px, qo'lda suriladi. */
 .cat-tabs {

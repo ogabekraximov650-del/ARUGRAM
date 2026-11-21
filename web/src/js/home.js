@@ -8,16 +8,17 @@
 import { icon, spinner, seasonCardHtml, bindSeasonCards, cardWidth } from './ui.js';
 import { seasonsRepo } from './seasons.js';
 import { hooks } from './hooks.js';
+import { translatorLogos } from './translators.js';
 
 export function createHome(page) {
   page.innerHTML = `
     <div class="home-head">
       <div>
-        <img class="logo" src="assets/aru-mark.png" alt="ARU">
+        <div class="ph-title">ARU<span class="m">MEDIATV</span></div>
         <div class="sub">Anime dunyosi</div>
       </div>
       <div class="spacer"></div>
-      <div class="bell">${icon('notifications', { fill: false, size: 22, color: 'rgba(255,255,255,0.7)' })}</div>
+      <div class="bell">${icon('notifications', { fill: true, size: 22, color: 'rgba(255,255,255,0.7)' })}</div>
     </div>
     <div class="section-title">Ommabop anime</div>
     <div class="home-body"></div>
@@ -46,7 +47,9 @@ export function createHome(page) {
     if (w !== lastW) { lastW = w; render(); }
   });
   seasonsRepo.listen(render);
+  translatorLogos.listen(render);
   render();
   seasonsRepo.load();
+  translatorLogos.ensure();
   return {};
 }

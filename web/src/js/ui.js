@@ -15,6 +15,7 @@
 import { imageUrl } from './api.js';
 import { esc, formatCompact, formatCount, toInt } from './format.js';
 import { back as routerBack } from './router.js';
+import { translatorLogos } from './translators.js';
 
 export const C = {
   bg: '#0A0A0C', surface: '#101012', card: '#151517', cardAlt: '#1B1B1E',
@@ -197,8 +198,9 @@ export function glass(inner, { radius = 22, pad = '', cls = '', style = '' } = {
 
 // ── Bo'lim kartochkasi (`SeasonCard`, `home_screen.dart`) ──────────
 
+/** Yosh belgisi rangi (Android `SeasonCard`): 18+ qizil, 16+ apelsin, qolgani oltin; 92% shaffoflik. */
 function ageColor(yosh) {
-  if (yosh >= 18) return 'rgba(229,72,77,0.92)';
+  if (yosh >= 18) return 'rgba(239,68,68,0.92)';
   if (yosh >= 16) return 'rgba(226,98,15,0.92)';
   return 'rgba(255,201,60,0.92)';
 }
@@ -213,9 +215,31 @@ export function ageBadge(yosh) {
   return `<span class="age-badge" style="background:${ageColor(yosh)}">${yosh}+</span>`;
 }
 
+/** Java `String.hashCode()` (Android `coverBrush` nomdan rang olishi uchun aynan shu). */
+function javaHash(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) h = (Math.imul(31, h) + str.charCodeAt(i)) | 0;
+  return h;
+}
+
+function hsv(h, s, v) {
+  const f = (n) => {
+    const k = (n + h / 60) % 6;
+    return v - v * s * Math.max(0, Math.min(k, 4 - k, 1));
+  };
+  return `rgb(${Math.round(f(5) * 255)},${Math.round(f(3) * 255)},${Math.round(f(1) * 255)})`;
+}
+
+/** Rasm bo'lmaganda nomdan yasalgan to'q gradient (Android `coverBrush`). */
+export function coverGradient(name) {
+  const h = Math.abs(javaHash(`${name}`)) % 360;
+  return `linear-gradient(to bottom, ${hsv(h, 0.42, 0.34)}, ${hsv((h + 28) % 360, 0.55, 0.16)})`;
+}
+
 /**
- * `w` — kartochka eni (px). `opts.badges` (rasm ustidagi belgilar),
- * `opts.corner` (o'ng yuqoridagi qo'shimcha HTML).
+ * Bo'lim kartochkasi — Android `SeasonCard` ga mos (chap ustun: tarjimon logotipi + yosh; o'ng ustun: baho, ko'rishlar, "Pullik").
+ * `w` — eski chaqiruvlar uchun qoldirilgan (yozuv o'lchamlari endi qat'iy: 11 / 14 px).
+ * `opts.badges` (rasm ustidagi belgilar; false bo'lsa faqat "Pullik"), `opts.corner` (o'ng yuqoridagi qo'shimcha HTML).
  */
 export function seasonCardHtml(s, w, { badges = true, corner = '' } = {}) {
   const photo = imageUrl(s.photo_url);
@@ -228,34 +252,28 @@ export function seasonCardHtml(s, w, { badges = true, corner = '' } = {}) {
   const views = toInt(s.views_total);
   const yosh = toInt(s.yosh);
   const paid = isPaid(s);
-  const nameSize = Math.min(18, Math.max(12.5, w * 0.085));
-  const tagSize = Math.min(13.5, Math.max(10, nameSize * 0.78));
-  const lines = name.length > 26 && w >= 150 ? 3 : 2;
-  const textHeight = nameSize * 1.22 * lines + tagSize * 1.3 + 16;
-  const tag = [bolim > 0 ? `${bolim}-bo'lim` : '', eps > 0 ? `${formatCount(eps)} ta qism` : '']
-    .filter(Boolean).join(' · ');
+  const tag = [bolim > 0 ? `${bolim}-bo'lim` : '', eps > 0 ? `${eps} ta qism` : ''].filter(Boolean).join(' · ');
+  const logo = toInt(s.tr_id) > 0 ? translatorLogos.get(s.tr_id) : '';
+  const letter = esc(name.trim().slice(0, 1).toUpperCase());
   let top = '';
   if (badges) {
-    const row1 = `<div class="badge-row">
-      ${rCount > 0 ? `<span class="card-badge">${icon('star', { size: 12, color: C.gold })}<span class="t">${rating.toFixed(1)}</span></span>` : ''}
-      <span class="grow"></span>
+    const left = `${logo ? `<img class="tr-logo" alt="" src="${esc(logo)}" onerror="this.remove()">` : ''}${yosh > 0 ? ageBadge(yosh) : ''}`;
+    const right = `${rCount > 0 ? `<span class="card-badge">${icon('star', { size: 12, color: C.gold })}<span class="t">${rating.toFixed(1)}</span></span>` : ''}
       ${views > 0 ? `<span class="card-badge">${icon('visibility', { size: 12, color: 'rgba(255,255,255,0.7)' })}<span class="t">${esc(formatCompact(views))}</span></span>` : ''}
-    </div>`;
-    const row2 = yosh > 0 || paid ? `<div class="badge-row">
-      ${yosh > 0 ? ageBadge(yosh) : ''}<span class="grow"></span>${paid ? paidBadge() : ''}</div>` : '';
-    top = `<div class="badges">${row1}${row2}</div>`;
+      ${paid ? paidBadge() : ''}`;
+    top = `<div class="badges"><div class="bcol">${left}</div><div class="bcol end">${right}</div></div>`;
   } else if (paid) {
-    top = `<div class="badges">${paidBadge()}</div>`;
+    top = `<div class="badges"><div class="bcol"></div><div class="bcol end">${paidBadge()}</div></div>`;
   }
   return `
     <div class="season-card">
-      <div class="ph">${photo ? spinner(36, 2) : icon('movie', { fill: false, size: 36, color: 'rgba(255,255,255,0.38)' })}</div>
+      <div class="ph" style="background:${coverGradient(name)}"><span class="ph-l">${letter}</span></div>
       ${photo ? `<img class="poster" alt="" decoding="async" loading="lazy" src="${esc(photo)}">` : ''}
       ${top}
       ${corner ? `<div class="card-corner">${corner}</div>` : ''}
-      <div class="card-foot" style="min-height:${textHeight.toFixed(1)}px">
-        ${tag ? `<div class="tag" style="font-size:${tagSize.toFixed(2)}px">${esc(tag)}</div>` : ''}
-        <div class="name" style="font-size:${nameSize.toFixed(2)}px;-webkit-line-clamp:${lines}">${esc(name)}</div>
+      <div class="card-foot">
+        ${tag ? `<div class="tag">${esc(tag)}</div>` : ''}
+        <div class="name">${esc(name)}</div>
       </div>
     </div>`;
 }
@@ -266,8 +284,9 @@ export function bindImages(root, sel = 'img.poster') {
     const ph = img.previousElementSibling;
     const done = () => img.classList.add('ok');
     const fail = () => {
+      const inCard = !!img.closest('.season-card');   // kartochkada gradient + bosh harf qoladi (Android `placeholder`)
       img.remove();
-      if (ph) ph.innerHTML = icon('movie', { fill: false, size: 36, color: 'rgba(255,255,255,0.38)' });
+      if (ph && !inCard) ph.innerHTML = icon('movie', { fill: false, size: 36, color: 'rgba(255,255,255,0.38)' });
     };
     if (img.complete && img.naturalWidth > 0) done();
     else {

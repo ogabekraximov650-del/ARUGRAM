@@ -165,7 +165,7 @@ export function createCatalog(page) {
     <div class="cat-root">
       <div class="home-head">
         <div>
-          <img class="logo" src="assets/aru-mark.png" alt="ARU">
+          <div class="ph-title">ARU<span class="m">MEDIATV</span></div>
           <div class="sub">Katalog</div>
         </div>
       </div>
