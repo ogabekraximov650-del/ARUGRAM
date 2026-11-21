@@ -7726,3 +7726,9 @@ Topilgan xato: qism/bo'lim/anime o'chirilganda saqlash kanalidagi shifrlangan ko
 ## Workflow soni 30 tadan oshmasin (2026-11-20)
 
 Foydalanuvchi talabi. 47 tadan 17 ta keraksiz workflow o'chirildi: bir martalik (chan-move, ep-wipe, ep-wipe-tg, vd-wipe, stats-reset, fix-broken-ep, collage-clean, token-to-ample, web-offline), tashxis (enc-inspect, db-cols-check), eskirgan (deploy-web — sayt o'chirilgan, ad-test — reklama olib tashlangan, build-flutter-apk — Flutter to'xtatilgan, video, restart-autoencode, worker-stats). Skriptlar `ci/` da qoldi; kerak bo'lsa workflow git tarixidan tiklanadi. Yangi workflow qo'shishdan oldin eskisini olib tashlang (hozir 30).
+
+## Manga tarjima: ✅ tugmalar va "Alohida-alohida" natija (2026-11)
+
+- Bot klaviaturasi `trbot::kb(env)` (async): tanlangan tugma oldida ✅ — rejim (`✍️ Qo'lda tarjima` / `🤖 Avto tarjima`, `tr_manual`), natija (`📦 Hammasi bittada` / `📑 Alohida-alohida`, `tr_out` = all|each), til va format. Kelgan matndan `✅ ` olib tashlanib solishtiriladi (`untick`).
+- `tr_jobs.out` ustuni (migratsiya `mig_tr_out`), `claim` javobida `job.out`.
+- `tool/translate/translate.py`: `collect_images` endi `(rasmlar, egalar)` qaytaradi; `deliver` — `each` bo'lsa `build_each` har yuborilgan faylni o'z turida (rasm/PDF/ZIP-CBZ, nom `<asl>_uz.<kengaytma>`) qaytaradi, aks holda bitta fayl. Test: `test_each.py`.
