@@ -17,14 +17,15 @@
 /* ── Oynalar (baho, sifat) ────────────────────────────────────── */
 .pl-ov { position: absolute; inset: 0; z-index: 80; opacity: 0; transition: opacity 200ms; display: flex; }
 .pl-ov.in { opacity: 1; }
-.pl-rate-ov { background: rgba(0, 0, 0, 0.54); align-items: flex-end; }
-.pl-rate { width: 100%; margin: 0 16px calc(var(--safe-bottom) + 16px); border-radius: 22px; padding: 18px 18px 14px; transform: translateY(30px); transition: transform 220ms; }
+.pl-rate-ov { background: rgba(0, 0, 0, 0.32); align-items: center; justify-content: center; }
+.pl-rate { width: calc(100% - 48px); max-width: 360px; background: var(--surface); border-radius: 28px; padding: 24px; transform: scale(0.94); transition: transform 200ms; }
 .pl-ov.in .pl-rate { transform: none; }
-.pl-rate-t { color: #fff; font-size: 16px; font-weight: 700; text-align: center; }
-.pl-rate-s { color: rgba(255, 255, 255, 0.55); font-size: 12.5px; text-align: center; margin: 4px 0 14px; }
-.pl-rate-stars { display: flex; }
-.pl-rate-stars .st { flex: 1; display: flex; justify-content: center; padding: 6px 0; cursor: pointer; }
-.pl-rate-btns { display: flex; gap: 10px; margin-top: 14px; }
+.pl-rate-t { color: #F2F2F3; font-size: 24px; line-height: 32px; }
+.pl-rate-nums { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.pl-rate-nums .n { width: 46px; height: 46px; border-radius: 50%; background: var(--card-alt); color: #fff; font-size: 16px; font-weight: 700; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.pl-rate-nums .n.on { background: var(--accent); }
+.pl-rate-btns { display: flex; justify-content: flex-end; margin-top: 24px; }
+.pl-rate-cancel { color: var(--accent); font-size: 14px; font-weight: 500; padding: 10px 12px; cursor: pointer; }
 .pl-rate-btns .btn { flex: 1; height: 40px; border-radius: 20px; }
 .pl-qd-ov { background: rgba(0, 0, 0, 0.54); align-items: center; justify-content: center; padding: 0 24px; }
 .pl-qd { width: 100%; max-width: 420px; background: var(--card); border-radius: 22px; padding: 20px; }
@@ -169,11 +170,13 @@
 .pl-tabs { margin: 8px 16px 0; padding: 3px; display: flex; background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
 .pl-tab { flex: 1; height: 32px; display: flex; align-items: center; justify-content: center; border-radius: 11px; color: rgba(255, 255, 255, 0.54); font-size: 13px; cursor: pointer; }
 .pl-tab.on { background: var(--accent); color: #fff; font-weight: 600; }
-.pl-epnav { margin: 6px 16px; padding: 5px 6px; display: flex; align-items: center; background: var(--card); border: 1px solid var(--border); border-radius: 14px; }
-.pl-epnav button { width: 68px; height: 38px; border-radius: 12px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; color: #fff; cursor: pointer; padding: 0; }
-.pl-epnav button[disabled] { background: rgba(255, 255, 255, 0.035); border-color: rgba(255, 255, 255, 0.06); opacity: 0.4; }
-.pl-epnav .lb { flex: 1; text-align: center; color: #fff; font-size: 16px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pl-epnav .lb.dim { color: rgba(255, 255, 255, 0.54); }
+/* Qism almashtirish (Android `NavBtn`): pastda, faqat "Qismlar" tabida */
+.pl-epnav { display: none; margin: 6px 12px 10px; padding: 8px; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 20px; }
+.pl.et:not(.cx) .pl-epnav { display: flex; }
+.pl-epnav button { flex: 1; min-width: 0; height: 56px; border-radius: 14px; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.97); cursor: pointer; padding: 0; font-family: inherit; }
+.pl-epnav button.next:not([disabled]) { background: var(--accent); border-color: var(--accent); }
+.pl-epnav button[disabled] { background: rgba(255, 255, 255, 0.035); border-color: rgba(255, 255, 255, 0.06); color: rgba(255, 255, 255, 0.25); }
+.pl-epnav .lb { padding: 0 6px; font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pl-pages { position: relative; flex: 1; min-height: 0; }
 .pl-pane { position: absolute; inset: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding: 0 16px 120px; display: none; }
 .pl-pane::-webkit-scrollbar { display: none; }
@@ -181,37 +184,55 @@
 .pl-pane.cm-pane { padding: 0; }
 .pl-pane .mid { height: 100%; display: flex; align-items: center; justify-content: center; color: rgba(255, 255, 255, 0.5); }
 
-/* Qism va bo'lim qatorlari */
-.pl-ep { display: flex; align-items: center; margin-bottom: 8px; padding: 8px 12px; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 14px; cursor: pointer; }
-.pl-ep.cur { background: rgba(194, 65, 12, 0.14); border-color: rgba(194, 65, 12, 0.5); }
-.pl-ep .bx { width: 36px; height: 36px; border-radius: 10px; background: rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.pl-ep.cur .bx { background: rgba(194, 65, 12, 0.28); }
-.pl-ep .t { margin-left: 12px; flex: 1; color: #fff; font-weight: 600; font-size: 14px; }
-.pl-ep.cur .t { color: var(--accent); }
-.pl-ep .rdy { font-size: 11px; color: rgba(255, 255, 255, 0.45); margin-left: 8px; }
-.pl-sn { display: flex; align-items: center; margin-bottom: 10px; padding: 10px 12px; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 14px; cursor: pointer; }
-.pl-sn.cur { background: rgba(194, 65, 12, 0.12); border-color: rgba(194, 65, 12, 0.4); }
-.pl-sn .ph { width: 50px; height: 50px; border-radius: 8px; background: rgba(255, 255, 255, 0.1); overflow: hidden; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-.pl-sn .ph img { width: 100%; height: 100%; object-fit: cover; }
+/* Qism va bo'lim qatorlari (Android `EpisodeTile`, `SeasonsTab`) */
+.pl-empty { height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.pl-empty .m { margin-top: 12px; color: var(--text-faint); font-size: 16px; text-align: center; }
+.pl-eptiles { display: flex; flex-direction: column; gap: 8px; padding-bottom: 16px; }
+.pl-ep { border-radius: 16px; background: var(--card); border: 1px solid var(--border); overflow: hidden; }
+.pl-ep.cur { background: var(--accent-tint); border-color: rgba(194, 65, 12, 0.5); }
+.pl-ep.seen { opacity: 0.6; }
+.pl-ep .row { display: flex; align-items: center; min-height: 72px; }
+.pl-ep .main { flex: 1; min-width: 0; display: flex; align-items: center; padding: 12px 0 12px 12px; min-height: 48px; cursor: pointer; }
+.pl-ep .bx { width: 48px; height: 48px; border-radius: 13px; background: var(--card-alt); display: flex; align-items: center; justify-content: center; flex-shrink: 0; color: #fff; font-size: 16px; font-weight: 700; }
+.pl-ep.cur .bx { background: var(--accent); }
+.pl-ep .tx { flex: 1; min-width: 0; margin-left: 12px; }
+.pl-ep .t { color: #fff; font-size: 15.5px; font-weight: 700; line-height: normal; white-space: nowrap; }
+.pl-ep.cur .t { color: var(--accent2); }
+.pl-ep .st { color: var(--text-dim); font-size: 12px; line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-ep .share { width: 48px; height: 48px; margin-right: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.pl-ep .bar { margin: 0 12px 10px; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.pl-ep .bar .fill { height: 100%; background: linear-gradient(to right, var(--accent), var(--accent2)); }
+.pl-snlist { display: flex; flex-direction: column; gap: 10px; padding-bottom: 24px; }
+.pl-sn { display: flex; align-items: center; padding: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 16px; cursor: pointer; }
+.pl-sn.cur { background: var(--accent-tint); border-color: rgba(194, 65, 12, 0.5); cursor: default; }
+.pl-sn .ph { width: 54px; height: 54px; border-radius: 10px; background: var(--card-alt); overflow: hidden; flex-shrink: 0; }
+.pl-sn .ph img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .pl-sn .tx { flex: 1; min-width: 0; margin-left: 12px; }
-.pl-sn .n1 { color: #fff; font-weight: 600; font-size: 14px; }
-.pl-sn.cur .n1 { color: var(--accent); }
-.pl-sn .n2 { color: rgba(255, 255, 255, 0.45); font-size: 12px; }
+.pl-sn .n1 { color: #fff; font-weight: 600; font-size: 14px; line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-sn.cur .n1 { color: var(--accent2); }
+.pl-sn .n2 { color: var(--text-dim); font-size: 12px; line-height: normal; }
+.pl-sn-paid { color: var(--gold); font-size: 11px; font-weight: 700; margin-left: 8px; }
 
-/* Ma'lumot oynasi */
+/* Ma'lumot oynasi (Android `InfoTab`) */
 .pl-acts { display: flex; gap: 12px; }
-.pl-act { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 7px; padding: 9px 10px; background: var(--card); border: 1px solid var(--border); border-radius: 13px; cursor: pointer; }
-.pl-act .lb { color: rgba(255, 255, 255, 0.85); font-size: 12px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-act { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; cursor: pointer; }
+.pl-act .lb { color: #fff; font-size: 13px; font-weight: 600; line-height: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .pl-card { margin-top: 12px; background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 16px; }
-.pl-card.big { padding: 18px; }
 .pl-stat { display: flex; align-items: center; padding: 5px 0; }
-.pl-stat .l { color: rgba(255, 255, 255, 0.6); font-size: 13px; margin-left: 9px; }
-.pl-stat .v { flex: 1; text-align: right; color: #fff; font-size: 13.5px; font-weight: 600; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.pl-inf { display: flex; margin-bottom: 8px; font-size: 13px; }
-.pl-inf .l { width: 90px; flex-shrink: 0; color: rgba(255, 255, 255, 0.5); }
+.pl-stat .l { color: var(--text-dim); font-size: 13px; margin-left: 9px; line-height: normal; }
+.pl-stat .v { flex: 1; text-align: right; color: #fff; font-size: 13.5px; font-weight: 600; margin-left: 8px; line-height: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pl-inf { display: flex; margin-bottom: 8px; font-size: 13px; line-height: normal; }
+.pl-inf .l { width: 90px; flex-shrink: 0; color: var(--text-dim); }
 .pl-inf .v { flex: 1; color: #fff; }
-.pl-desc-t { color: rgba(255, 255, 255, 0.6); font-size: 12px; font-weight: 500; margin: 12px 0 6px; }
-.pl-desc { color: rgba(255, 255, 255, 0.8); font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+.pl-desc-t { color: var(--text-dim); font-size: 12px; font-weight: 500; margin: 10px 0 6px; line-height: normal; }
+.pl-desc { color: rgba(255, 255, 255, 0.82); font-size: 14px; line-height: 22px; white-space: pre-wrap; }
+.pl-tr-l { color: var(--text-dim); font-size: 12px; font-weight: 500; line-height: normal; }
+.pl-tr-row { display: flex; align-items: center; margin-top: 10px; }
+.pl-tr-ava { position: relative; width: 56px; height: 56px; border-radius: 50%; background: var(--card-alt); overflow: hidden; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.pl-tr-ava .in { color: #fff; font-size: 22px; font-weight: 700; line-height: 1; }
+.pl-tr-ava img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.pl-tr-n { margin-left: 14px; color: #fff; font-size: 17px; font-weight: 600; line-height: normal; }
+.pl-tr-bio { margin-top: 12px; }
 
 /* Oddiy rejimda panellar pleyer ramkasidan chiqib, butun ekranda chiziladi */
 .pl-box:not(.fs) .pl-scrim { position: fixed; inset: 0; z-index: 70; }

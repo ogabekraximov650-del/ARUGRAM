@@ -9,7 +9,7 @@ import { createEnhancer } from './enhance.js';
 import { api, imageUrl } from '../api.js';
 import { push, back as routerBack } from '../router.js';
 import { hooks } from '../hooks.js';
-import { icon, toast, promptDialog, bindTap } from '../ui.js';
+import { icon, spinner, toast, promptDialog, bindTap } from '../ui.js';
 import { esc, formatCount } from '../format.js';
 import { seasonsRepo } from '../seasons.js';
 import { billing } from '../services/billing.js';
@@ -139,17 +139,16 @@ function buildPlayer(el, route, season, opts) {
         <div class="pl-tabs">
           ${['Ma\'lumot', 'Qismlar', 'Bo\'limlar', 'Izohlar'].map((t, i) => `<div class="pl-tab" data-i="${i}">${t}</div>`).join('')}
         </div>
-        <div class="pl-epnav">
-          <button class="prev">${icon('skip_previous', { size: 24 })}</button>
-          <div class="lb"></div>
-          <button class="next">${icon('skip_next', { size: 24 })}</button>
-        </div>
       </div>
       <div class="pl-pages">
         <div class="pl-pane" data-p="0"></div>
         <div class="pl-pane" data-p="1"></div>
         <div class="pl-pane" data-p="2"></div>
         <div class="pl-pane cm-pane" data-p="3"></div>
+      </div>
+      <div class="pl-epnav">
+        <button class="prev">${icon('skip_previous', { size: 26 })}<span class="lb">Oldingi</span></button>
+        <button class="next"><span class="lb">Keyingi</span>${icon('skip_next', { size: 26 })}</button>
       </div>
     </div>`;
 
@@ -275,7 +274,7 @@ function buildPlayer(el, route, season, opts) {
   // ── Sarlavhalar, ro'yxatlar ────────────────────────────────────
   function paintTitle() {
     const name = sStr('nomi');
-    $('.pl-head .nm').textContent = name;
+    $('.pl-head .nm').textContent = `${bolim()}-bo'lim  ${name}`;
     $('.t1').textContent = name || (cur?.epizod_name ?? '');
     if (cur) {
       const en = `${cur.epizod_name ?? ''}`;
@@ -295,35 +294,72 @@ function buildPlayer(el, route, season, opts) {
   function paintNav() {
     const list = ordered(); const i = curIndex();
     const hasNext = i > 0; const hasPrev = i >= 0 && i < list.length - 1;
-    const lb = $('.pl-epnav .lb');
-    lb.textContent = i >= 0 ? `${epNum(list[i])}-qism` : (list.length ? 'Qismni tanlang' : '—');
-    lb.classList.toggle('dim', i < 0);
+    $('.pl-epnav .prev .lb').textContent = hasPrev ? `${epNum(list[i + 1])}-qism` : 'Oldingi';
+    $('.pl-epnav .next .lb').textContent = hasNext ? `${epNum(list[i - 1])}-qism` : 'Keyingi';
     $('.pl-epnav .prev').disabled = !hasPrev;
     $('.pl-epnav .next').disabled = !hasNext;
     $('.prev2').disabled = !hasPrev;
     $('.next2').disabled = !hasNext;
   }
 
+  const emptyHtml = (ic, text) => `<div class="pl-empty">${icon(ic, { size: 48, color: 'rgba(255,255,255,0.2)' })}<div class="m">${text}</div></div>`;
+  const clock = (ms) => {
+    const t = Math.max(0, Math.floor(ms / 1000));
+    const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const sec = t % 60;
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`;
+  };
+
+  /** Qism qatori (Android `EpisodeTile`): raqam/play belgisi, "N-qism", holat matni, ulashish. */
+  function epTile(e) {
+    const isCur = !!cur && epKey(e) === epKey(cur);
+    const h = watchHistory.findEpisode(A, S, epId(e));
+    const pos = toI(h?.positionMs); const dur = toI(h?.durationMs);
+    const frac = dur > 0 ? Math.min(1, Math.max(0, pos / dur)) : 0;
+    const finished = dur > 0 && pos > dur - 5000;
+    const resumable = dur > 0 && pos >= 3000 && !finished;
+    const seen = !isCur && finished;
+    const status = resumable ? `${clock(pos)} dan davom etasiz` : finished ? "Ko'rildi \u2713" : isCur ? 'Hozir ijro etilmoqda' : "Ko'rilmagan";
+    const en = `${e.epizod_name ?? ''}`.trim();
+    return `<div class="pl-ep${isCur ? ' cur' : ''}${seen ? ' seen' : ''}" data-k="${esc(epKey(e))}">
+      <div class="row">
+        <div class="main"><div class="bx">${isCur ? icon('play_arrow', { size: 26, color: '#fff' }) : `<span>${epNum(e)}</span>`}</div>
+          <div class="tx"><div class="t">${epNum(e)}-qism</div><div class="st">${esc(en ? `${status} \u00B7 ${en}` : status)}</div></div></div>
+        <div class="share" data-k="${esc(epKey(e))}">${icon('share', { size: 22, color: 'rgba(255,255,255,0.6)' })}</div>
+      </div>
+      ${resumable ? `<div class="bar"><div class="fill" style="width:${(frac * 100).toFixed(1)}%"></div></div>` : ''}
+    </div>`;
+  }
+
+  function shareEpisode(e) {
+    const link = `https://arumediatvuz.pages.dev/s/${A}/${S}/${epId(e)}`;
+    const text = `${sStr('nomi')} \u00B7 ${epNum(e)}-qism`;
+    if (navigator.share) { navigator.share({ text: `${text}\n${link}` }).catch(() => {}); return; }
+    const tg = window.Telegram?.WebApp;
+    const u = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+    try { if (tg?.openTelegramLink) { tg.openTelegramLink(u); return; } } catch (_) { /* */ }
+    window.open(u, '_blank');
+  }
+
   function paintEps() {
     const pane = panes[1];
-    if (loadingEps) { pane.innerHTML = `<div class="mid"><div class="spinner" style="width:36px;height:36px"></div></div>`; return; }
     const list = ordered();
-    if (!list.length) { pane.innerHTML = `<div class="mid">Qismlar topilmadi</div>`; return; }
-    pane.innerHTML = `<div class="pl-epgrid">${list.map((e) => {
-      const isCur = cur && epKey(e) === epKey(cur);
-      return `<div class="pl-eg${isCur ? ' cur' : ''}" data-k="${esc(epKey(e))}">${epNum(e)}-qism</div>`;
-    }).join('')}</div><div style="height:8px"></div>`;
-    pane.querySelectorAll('.pl-eg').forEach((n) => n.addEventListener('click', () => {
+    if (loadingEps && list.length === 0) { pane.innerHTML = `<div class="pl-empty">${spinner(32, 2)}</div>`; return; }
+    if (!list.length) { pane.innerHTML = emptyHtml('play_arrow', 'Qismlar topilmadi'); return; }
+    pane.innerHTML = `<div class="pl-eptiles">${list.map(epTile).join('')}</div>`;
+    pane.querySelectorAll('.pl-ep').forEach((n) => {
       const e = list.find((x) => epKey(x) === n.dataset.k);
-      if (!e) return;
-      if (cur && epKey(e) === epKey(cur)) togglePlay();
-      else playEpisode(e, { resumeMs: savedPosMs(e) });
-    }));
+      n.querySelector('.main').addEventListener('click', () => {
+        if (!e) return;
+        if (cur && epKey(e) === epKey(cur)) togglePlay();
+        else playEpisode(e, { resumeMs: savedPosMs(e) });
+      });
+      n.querySelector('.share').addEventListener('click', () => e && shareEpisode(e));
+    });
   }
 
   function centerOnCur() {
     requestAnimationFrame(() => {
-      const n = panes[1].querySelector('.pl-eg.cur');
+      const n = panes[1].querySelector('.pl-ep.cur');
       if (n && panes[1].clientHeight) panes[1].scrollTop = n.offsetTop - (panes[1].clientHeight - n.offsetHeight) / 2;
     });
   }
@@ -341,19 +377,19 @@ function buildPlayer(el, route, season, opts) {
 
   function paintSeasons() {
     const pane = panes[2];
-    if (seasonsList == null) { pane.innerHTML = `<div class="mid"><div class="spinner" style="width:36px;height:36px"></div></div>`; return; }
-    if (!seasonsList.length) { pane.innerHTML = `<div class="mid">Bo'limlar topilmadi</div>`; return; }
-    pane.innerHTML = seasonsList.map((s, i) => {
+    if (seasonsList == null) { pane.innerHTML = `<div class="pl-empty">${spinner(32, 2)}</div>`; return; }
+    if (!seasonsList.length) { pane.innerHTML = emptyHtml('play_arrow', "Bo'limlar topilmadi"); return; }
+    pane.innerHTML = '<div class="pl-snlist">' + seasonsList.map((s, i) => {
       const isCur = `${s.season_id}` === `${S}`;
       const b = s.bolim_id ?? s.season_id ?? '';
       const nm = `${s.nomi ?? ''}`;
       const u = imageUrl(s.photo_url);
       return `<div class="pl-sn${isCur ? ' cur' : ''}" data-i="${i}">
-        <div class="ph">${u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : icon('movie', { fill: false, size: 24, color: 'rgba(255,255,255,0.38)' })}</div>
-        <div class="tx"><div class="n1">${esc(nm || `${b}-bo'lim`)}</div><div class="n2">${esc(b)}-bo'lim</div></div>
-        ${s.free === false ? `<span class="paid-badge compact">${icon('workspace_premium', { size: 13, color: '#FFC93C' })}</span>` : ''}
-        ${isCur ? icon('play_arrow', { size: 24, color: '#C2410C' }) : ''}</div>`;
-    }).join('') + '<div style="height:8px"></div>';
+        <div class="ph">${u ? `<img src="${esc(u)}" alt="" loading="lazy" onerror="this.remove()">` : ''}</div>
+        <div class="tx"><div class="n1">${esc(nm || `${b}-bo'lim`)}</div><div class="n2">${esc(b)}-bo'lim \u00B7 ${toI(s.epizod_count)} qism</div></div>
+        ${s.free === false ? `<span class="pl-sn-paid">Pullik</span>` : ''}
+        ${isCur ? icon('play_arrow', { size: 24, color: '#E2620F' }) : ''}</div>`;
+    }).join('') + '</div>';
     pane.querySelectorAll('.pl-sn').forEach((n) => n.addEventListener('click', () => {
       const s = seasonsList[+n.dataset.i];
       if (!s || `${s.season_id}` === `${S}`) return;
@@ -371,24 +407,34 @@ function buildPlayer(el, route, season, opts) {
     const inf = (l, v) => (v ? `<div class="pl-inf"><div class="l">${l}</div><div class="v">${esc(v)}</div></div>` : '');
     const tav = sStr('tavsif');
     const created = sNum('created_at');
+    const trName = sStr('tr_name');
+    const trPhoto = sStr('tr_photo');
+    const trBio = sStr('tr_bio');
     pane.innerHTML = `
       <div class="pl-acts">
-        <div class="pl-act rate">${icon(mine > 0 ? 'star' : 'star', { fill: mine > 0, size: 19, color: '#FFC93C' })}<span class="lb">${mine > 0 ? `Bahoyingiz: ${mine}` : 'Baholash'}</span></div>
-        <div class="pl-act fav">${icon('favorite', { fill: fav, size: 19, color: '#C2410C' })}<span class="lb">${fav ? 'Sevimlilarda' : "Sevimlilarga qo'shish"}</span></div>
+        <div class="pl-act rate">${icon('star', { fill: mine > 0, size: 22, color: '#FFC93C' })}<span class="lb">${mine > 0 ? `Bahoyingiz: ${mine}` : 'Baholash'}</span></div>
+        <div class="pl-act fav">${icon('favorite', { fill: fav, size: 22, color: '#E2620F' })}<span class="lb">${fav ? 'Sevimlilarda' : "Sevimlilarga qo'shish"}</span></div>
       </div>
       <div class="pl-card">
         ${line('visibility', "Ko'rishlar", formatCount(sNum('views_total')))}
         ${line('schedule', 'Tomosha vaqti', `${formatHours(sNum('watch_ms_total'))} soat`)}
         ${line('favorite', "Sevimlilarga qo'shilgan", formatCount(sNum('fav_count')))}
         ${line('star', 'Reyting', rc > 0 ? `${formatRating(info?.rating || 0)}  (${formatCount(rc)} ta baho)` : 'hali baholanmagan')}
-        ${line('movie_creation', "Bo'lim", `${bolim()}-bo'lim · ${formatCount(sNum('epizod_count'))} qism`)}
+        ${line('movie_creation', "Bo'lim", `${bolim()}-bo'lim \u00B7 ${formatCount(sNum('epizod_count'))} qism`)}
         ${created > 0 ? line('event_available', "Qo'shilgan sana", formatMomentYmd(created)) : ''}
       </div>
-      <div class="pl-card big">
+      <div class="pl-card">
         ${inf('Turi', sStr('turi'))}${inf('Yili', sStr('yili'))}${inf('Janri', sStr('janri'))}
-        ${inf('Studio', sStr('studio'))}${inf('Tarjimon', sStr('tr_name') || sStr('tarjimon'))}${inf('Holati', sStr('holati'))}
+        ${inf('Studio', sStr('studio'))}${inf('Holati', sStr('holati'))}
         ${tav ? `<div class="pl-desc-t">Tavsif</div><div class="pl-desc">${esc(tav)}</div>` : ''}
-      </div>`;
+      </div>
+      ${trName ? `<div class="pl-card">
+        <div class="pl-tr-l">Tarjimon</div>
+        <div class="pl-tr-row"><span class="pl-tr-ava">${trPhoto ? `<img src="${esc(imageUrl(trPhoto))}" alt="" onerror="this.remove()">` : ''}<span class="in">${esc(trName.slice(0, 1).toUpperCase())}</span></span>
+          <span class="pl-tr-n">${esc(trName)}</span></div>
+        ${trBio ? `<div class="pl-desc pl-tr-bio">${esc(trBio)}</div>` : ''}
+      </div>` : ''}
+      <div style="height:24px"></div>`;
     pane.querySelector('.rate').addEventListener('click', async () => {
       const v = await ratingSheet(info?.myStars || 0);
       if (v == null) return;
@@ -405,6 +451,7 @@ function buildPlayer(el, route, season, opts) {
   let tpT = 0;
   function setTab(i) {
     tab = i;
+    el.classList.toggle('et', i === 1);
     panes.forEach((p, k) => p.classList.toggle('on', k === i));
     tabEls.forEach((t, k) => t.classList.toggle('on', k === i));
     if (i === 1) centerOnCur();

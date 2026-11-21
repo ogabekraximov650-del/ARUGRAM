@@ -79,33 +79,15 @@ function overlay(cls, build, hostEl) {
   });
 }
 
-/** Baholash (`_RatingSheet`): 10 ballik. */
+/** Baholash (Android `AlertDialog`: "Baholang (1–10)", 1..10 doiralar; raqam bosilsa darhol baholanadi). */
 export function ratingSheet(current) {
   return overlay('pl-rate-ov', (wrap, close) => {
-    let hover = current || 0;
-    wrap.innerHTML = `<div class="pl-rate glass">
-      <div class="pl-rate-t">Bu bo'limni baholang</div>
-      <div class="pl-rate-s"></div>
-      <div class="pl-rate-stars">${Array.from({ length: 10 }, (_, i) => `<div class="st" data-i="${i + 1}"></div>`).join('')}</div>
-      <div class="pl-rate-btns">
-        <button class="btn btn-outline pl-rate-cancel">Bekor qilish</button>
-        <button class="btn btn-filled pl-rate-ok">Baholash</button>
-      </div></div>`;
-    const sub = wrap.querySelector('.pl-rate-s');
-    const stars = [...wrap.querySelectorAll('.st')];
-    const ok = wrap.querySelector('.pl-rate-ok');
-    const paint = () => {
-      sub.textContent = hover > 0 ? `${hover} / 10` : '10 ballik tizim';
-      stars.forEach((s, i) => {
-        const on = i + 1 <= hover;
-        s.innerHTML = icon('star', { fill: on, size: 28, color: on ? C.gold : 'rgba(255,255,255,0.24)' });
-      });
-      ok.disabled = hover <= 0;
-    };
-    stars.forEach((s) => s.addEventListener('click', () => { hover = +s.dataset.i; paint(); }));
+    wrap.innerHTML = `<div class="pl-rate">
+      <div class="pl-rate-t">Baholang (1\u201310)</div>
+      <div class="pl-rate-nums">${Array.from({ length: 10 }, (_, i) => `<div class="n${i + 1 === current ? ' on' : ''}" data-i="${i + 1}">${i + 1}</div>`).join('')}</div>
+      <div class="pl-rate-btns"><div class="pl-rate-cancel">Bekor qilish</div></div></div>`;
+    wrap.querySelectorAll('.n').forEach((n) => n.addEventListener('click', () => close(+n.dataset.i)));
     wrap.querySelector('.pl-rate-cancel').addEventListener('click', () => close(null));
-    ok.addEventListener('click', () => { if (hover > 0) close(hover); });
-    paint();
   });
 }
 
