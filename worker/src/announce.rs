@@ -108,6 +108,18 @@ fn caption(season: &Value, ep_number: i64) -> String {
     out
 }
 
+/// Post matni qatorlari (HTML'siz oddiy matn): rich message'da har qator alohida paragraf bo'ladi. `caption` bilan bir xil mazmun.
+fn caption_lines(season: &Value, ep_number: i64) -> Vec<String> {
+    let film = season["turi"].as_str().unwrap_or("").trim().eq_ignore_ascii_case("film");
+    let ep = if film { "Film".to_string() } else { format!("{ep_number}-qism") };
+    let mut out = vec![format!("\u{2022} {}", season["nomi"].as_str().unwrap_or("").trim()), format!("\u{2022} {ep}")];
+    let tarjimon = season["tarjimon"].as_str().unwrap_or("").trim();
+    if !tarjimon.is_empty() {
+        out.push(format!("\u{2022} Ovoz berdi: {tarjimon}"));
+    }
+    out
+}
+
 /// Post matni va "Tomosha qilish" tugmasi (muqovali ham, kadrlar kollajli ham bir xil).
 async fn compose(env: &Env, a: i64, s: i64, e: i64) -> std::result::Result<(Value, String, Value), String> {
     let season = turso_exec(env,
@@ -130,6 +142,14 @@ async fn compose(env: &Env, a: i64, s: i64, e: i64) -> std::result::Result<(Valu
         "url": format!("https://t.me/{bot}?start={a}_{s}_{e}"),
     }]]});
     Ok((season, text, markup))
+}
+
+/// Post matni qatorlari (qism raqami bazadan).
+async fn lines_of(env: &Env, season: &Value, a: i64, s: i64, e: i64) -> Vec<String> {
+    let num = turso_exec(env, "SELECT epizod_number FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+        vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok()
+        .and_then(|r| first_row(&r)).map(|r| jint(&r, "epizod_number")).unwrap_or(0);
+    caption_lines(season, num)
 }
 
 /// Ochilgan oqimdan kadrlarni ajratadi: har kadr oldidan 4 bayt (big-endian) uzunlik (`tool/encode/run.py::pack_frames`). Eski (kollaj) nusxalar — bitta
@@ -189,8 +209,8 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8
         return Ok(false);
     }
     let sent = async {
-        let (_, text, markup) = compose(env, a, s, e).await.map_err(|e| (false, e))?;
-        post_frames(env, ch, &frames, &text, &markup).await
+        let (season, text, markup) = compose(env, a, s, e).await.map_err(|e| (false, e))?;
+        post_frames(env, ch, &frames, &lines_of(env, &season, a, s, e).await, &text, &markup).await
     }.await;
     if let Err((album_sent, why)) = sent {
         // Albom allaqachon chiqqan bo'lsa belgi QOLADI (qayta urinishda albom ikki marta chiqmasin).
@@ -213,14 +233,61 @@ fn decrypt(sealed: &[u8], key: &[u8; 16]) -> Vec<u8> {
 
 /// Kadrlarni kanalga joylaydi: 2..10 ta bo'lsa — albom (`sendMediaGroup`) va uning tagida matn + tugma xabari; bitta (eski kollaj) bo'lsa —
 /// matn+tugmali bitta rasm. Xato: `(albom_chiqdimi, sabab)`.
-async fn post_frames(env: &Env, ch: i64, frames: &[Vec<u8>], text: &str, markup: &Value) -> std::result::Result<(), (bool, String)> {
+async fn post_frames(env: &Env, ch: i64, frames: &[Vec<u8>], lines: &[String], text: &str, markup: &Value) -> std::result::Result<(), (bool, String)> {
     if frames.len() == 1 {
         return upload_photo_post(env, ch, &frames[0], text, markup).await.map(|_| ()).map_err(|e| (false, e));
+    }
+    // Eng yaxshisi: BITTA rich message — rasmlar (slideshow), matn, tugma (Bot API 10.x). Ishlamasa (eski API, xato) — albom + alohida xabar.
+    let url = markup["inline_keyboard"][0][0]["url"].as_str().unwrap_or("").to_string();
+    if !url.is_empty() {
+        match upload_rich(env, ch, frames, lines, &url).await {
+            Ok(_) => return Ok(()),
+            Err(why) => console_log!("rich message chiqmadi, albomga o'tildi: {why}"),
+        }
     }
     upload_album(env, ch, frames).await.map_err(|e| (false, e))?;
     send(env, "sendMessage", json!({"chat_id": ch, "text": text, "parse_mode": "HTML",
         "disable_web_page_preview": true, "reply_markup": markup})).await
         .map(|_| ()).map_err(|e| (true, format!("albom joylandi, lekin matn/tugma xabari yuborilmadi: {e}")))
+}
+
+/// `sendRichMessage` (Bot API 10.x, multipart): BITTA xabar — kadrlar slideshow (surib ko'riladi), ostida matn qatorlari, undan keyin tugma.
+/// Rasmlar `attach://f<i>` bilan. Asosiy bot, bo'lmasa kodlash boti.
+async fn upload_rich(env: &Env, ch: i64, frames: &[Vec<u8>], lines: &[String], url: &str) -> std::result::Result<Value, String> {
+    let mut blocks: Vec<Value> = vec![json!({"type": "slideshow", "blocks": (0..frames.len()).map(|i|
+        json!({"type": "photo", "photo": {"type": "photo", "media": format!("attach://f{i}")}})).collect::<Vec<_>>()})];
+    for l in lines {
+        blocks.push(json!({"type": "paragraph", "text": l}));
+    }
+    blocks.push(json!({"type": "buttons", "buttons": [{"text": "Tomosha qilish", "url": url}]}));
+    let rich = json!({"blocks": blocks}).to_string();
+    let mut last = String::new();
+    for token in [tg_secret(env, "TELEGRAM_BOT_TOKEN"), encbot_token(env)] {
+        if token.is_empty() {
+            continue;
+        }
+        let fd = web_sys::FormData::new().map_err(|_| "FormData".to_string())?;
+        fd.append_with_str("chat_id", &ch.to_string()).map_err(|_| "FormData".to_string())?;
+        fd.append_with_str("rich_message", &rich).map_err(|_| "FormData".to_string())?;
+        for (i, f) in frames.iter().enumerate() {
+            let arr = js_sys::Uint8Array::from(f.as_slice());
+            let parts = js_sys::Array::new();
+            parts.push(&arr);
+            let blob = web_sys::Blob::new_with_u8_array_sequence(&parts).map_err(|_| "Blob".to_string())?;
+            fd.append_with_blob_and_filename(&format!("f{i}"), &blob, &format!("frame{i}.jpg")).map_err(|_| "FormData".to_string())?;
+        }
+        let req = Request::new_with_init(
+            &format!("https://api.telegram.org/bot{token}/sendRichMessage"),
+            RequestInit::new().with_method(Method::Post).with_body(Some(fd.into())),
+        ).map_err(|e| e.to_string())?;
+        let mut r = Fetch::Request(req).send().await.map_err(|e| e.to_string())?;
+        let v: Value = r.json().await.map_err(|e| e.to_string())?;
+        if v["ok"] == json!(true) {
+            return Ok(v);
+        }
+        last = format!("sendRichMessage: {}", v["description"].as_str().unwrap_or("noma'lum"));
+    }
+    Err(if last.is_empty() { "bot tokeni yo'q".into() } else { last })
 }
 
 /// `sendMediaGroup` (multipart): kadrlar bitta albom (asosiy bot; bo'lmasa kodlash boti). Telegram albomni suriladigan post qilib ko'rsatadi.
@@ -304,7 +371,7 @@ async fn post(env: &Env, ch: i64, a: i64, s: i64, e: i64) -> std::result::Result
     let (season, text, markup) = compose(env, a, s, e).await?;
     // Qism uchun kadrlar saqlangan bo'lsa (shifrlangan hujjat, `epizod_db.collage_file_id`) — worker shifrdan yechib, afisha O'RNIGA albom qiladi.
     if let Some(frames) = stored_collage(env, a, s, e).await {
-        match post_frames(env, ch, &frames, &text, &markup).await {
+        match post_frames(env, ch, &frames, &lines_of(env, &season, a, s, e).await, &text, &markup).await {
             Ok(()) => return Ok(()),
             // Albom chiqib, faqat matn yuborilmagan — afisha ikkinchi marta joylanmasin.
             Err((true, why)) => return Err(why),
