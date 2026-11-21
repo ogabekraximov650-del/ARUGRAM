@@ -34,7 +34,10 @@ for zp in sorted(Path("ci/testdata").glob("*.zip")):
     groups = []
     for i, p in enumerate(paths, 1):
         img = np.array(Image.open(p).convert("RGB"))
-        g = tr.postprocess_groups(img, tr.group_dets(tr.ocr_image(reader, img), source), reader, source)
+        raw = tr.group_dets(tr.ocr_image(reader, img), source)
+        for q in raw:
+            print(f"  RAW {ch} s{i}: {q['text']!r} conf={q.get('conf')} box={tuple(map(int, q['box']))}", flush=True)
+        g = tr.postprocess_groups(img, raw, reader, source)
         groups.append(g)
         print(f"{ch} sahifa {i}: {len(g)} blok ({time.time() - t0:.0f}s)", flush=True)
     flat = [g["text"] for page in groups for g in page]
