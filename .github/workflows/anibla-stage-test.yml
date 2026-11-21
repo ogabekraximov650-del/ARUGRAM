@@ -21,11 +21,11 @@ jobs:
       - run: python3 tool/anibla/test_stage.py
       - run: python3 tool/encode/test_collage.py
       - run: python3 tool/translate/test_manual.py
-      - run: python3 tool/translate/test_each.py
       - run: |
           sudo apt-get install -y -qq fonts-dejavu-core fonts-dejavu-extra fonts-comic-neue
           pip install -q numpy opencv-python-headless pillow pyspellchecker
           python3 tool/translate/test_render.py
+          python3 tool/translate/test_each.py
           python3 tool/translate/test_classic.py
       - run: python3 -m py_compile tool/anibla/download.py tool/encode/run.py
       # Yo'qolgan funksiya/nom (NameError) ni CI'da ushlash: download.py ni import qilib, main() ishlatadigan nomlar borligini tekshiradi.
