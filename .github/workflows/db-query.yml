@@ -4,7 +4,7 @@ name: Baza so'rovi (faqat o'qish)
 on:
   push:
     branches: [main]
-    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED']
+    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED', 'ci/REPOST']
 
 permissions:
   contents: read
@@ -58,3 +58,7 @@ jobs:
       - name: Yuklash tezligi
         run: |
           if git diff --name-only HEAD~1 HEAD | grep -q '^ci/UPLOAD_SPEED$'; then python3 ci/upload_speed.py; else echo "ci/UPLOAD_SPEED o'zgarmagan — o'tkazildi"; fi
+      # Qismni kanalga qayta joylash: `ci/REPOST` o'zgarganda (qator: "<anime> <bo'lim> <qism>").
+      - name: Qayta joylash
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q '^ci/REPOST$'; then python3 ci/repost.py; else echo "ci/REPOST o'zgarmagan — o'tkazildi"; fi

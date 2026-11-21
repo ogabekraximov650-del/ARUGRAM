@@ -212,6 +212,9 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8
             let _ = turso_exec(env, "DELETE FROM announced WHERE anime_id=? AND season_id=? AND epizod_id=?",
                 vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
         }
+        // Admin ko'rsin: kollaj posti chiqmadi (avval faqat kodlovchi logida ko'rinardi).
+        tg_send(env, ADMIN_TELEGRAM_ID, &format!(
+            "\u{26A0}\u{FE0F} Kadrlar posti chiqmadi ({a}/{s}/{e}): <code>{}</code>", html_escape(&why))).await;
         return Err(why);
     }
     Ok(true)

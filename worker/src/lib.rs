@@ -11208,7 +11208,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh" | "/api/encode/collage" | "/api/encode/uptest"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh" | "/api/encode/collage" | "/api/encode/uptest" | "/api/encode/repost"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/tr/claim" | "/api/tr/peek" | "/api/tr/check" | "/api/tr/finish" | "/api/tr/progress"
         | "/api/cmp/claim" | "/api/cmp/peek" | "/api/cmp/check" | "/api/cmp/finish" | "/api/cmp/progress"
@@ -12866,6 +12866,20 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         let bytes = req.bytes().await?;
         return match announce::collage_post(env, a, s, e, &bytes, &key_hex).await {
             Ok(posted) => ok(json!({"ok": true, "posted": posted})),
+            Err(why) => json_resp(&json!({"error": why}), 502),
+        };
+    }
+
+    // Qismni kanalga QAYTA joylash (saqlangan kadrlar bilan) va natijani (yoki xato matnini) qaytarish — CI orqali (`ci/REPOST`). Admin tugmasi bilan bir xil `announce::repost`.
+    if path == "/api/encode/repost" && method == Method::Post {
+        let qurl = req.url().ok();
+        let q = |k: &str| qurl.as_ref().and_then(|u| u.query_pairs().find(|(x, _)| x == k).map(|(_, v)| v.to_string())).and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+        let (a, s, e) = (q("a"), q("s"), q("e"));
+        if a == 0 || s == 0 || e == 0 {
+            return json_resp(&json!({"error": "a, s, e kerak"}), 400);
+        }
+        return match announce::repost(env, a, s, e).await {
+            Ok(()) => ok_nostore(json!({"ok": true})),
             Err(why) => json_resp(&json!({"error": why}), 502),
         };
     }
