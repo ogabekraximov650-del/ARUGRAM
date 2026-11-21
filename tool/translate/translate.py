@@ -787,7 +787,7 @@ JUNK_WORDS = (".com", "scanlat", "feedback is", "editor", "quality check", "clea
 OCR_CONF = {frozenset(x) for x in (("h", "k"), ("u", "l"), ("u", "n"), ("l", "i"), ("o", "0"), ("c", "e"), ("e", "o"), ("a", "o"), ("r", "p"), ("t", "l"),
                                    ("m", "n"), ("n", "h"), ("d", "o"), ("g", "6"), ("s", "5"), ("b", "6"), ("b", "h"), ("v", "y"), ("u", "v"), ("a", "4"),
                                    ("i", "1"), ("l", "1"), ("f", "t"), ("c", "o"), ("r", "n"), ("q", "g"))}
-OCR_FIX = {"slng": "sung", "sune": "sung", "sng": "sung", "tke": "the", "tbe": "the", "tne": "the", "whal": "what", "wnat": "what", "bul": "but", "yau": "you", "yov": "you"}
+OCR_FIX = {"slng": "sung", "sune": "sung", "sng": "sung", "tke": "the", "tbe": "the", "tne": "the", "whal": "what", "glild": "guild", "gulld": "guild", "guilo": "guild", "wnat": "what", "bul": "but", "yau": "you", "yov": "you"}
 _SPELL = None
 
 
@@ -811,6 +811,8 @@ def keep_group(g) -> bool:
         return False
     if g.get("conf", 1.0) < 0.30:
         return False
+    if re.fullmatch(r"[a-z]{2,5}\s?\d{1,2}", t) and g.get("conf", 1.0) < 0.7:
+        return False   # "erel 3" kabi kichik harfli shovqin + raqam
     low = t.lower()
     return not any(w in low for w in JUNK_WORDS)
 
