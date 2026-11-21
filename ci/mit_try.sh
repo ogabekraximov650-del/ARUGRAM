@@ -25,7 +25,14 @@ echo "=== HELP"
 ../mitenv/bin/python -m manga_translator --help 2>&1 | head -80
 echo "=== LOCAL HELP"
 ../mitenv/bin/python -m manga_translator local --help 2>&1 | head -80
-echo "=== RUN"
-../mitenv/bin/python -m manga_translator local -i "$ROOT/mit-out/in" -o "$ROOT/mit-out/out" --translator none --inpainter lama_large --use-gpu=false 2>&1 | tail -60
+echo "=== CONFIG-HELP"
+../mitenv/bin/python -m manga_translator config-help 2>&1 | grep -v onnxruntime | head -230 | cut -c1-200
+cat > "$ROOT/mit-out/cfg.json" <<'JSON'
+{"translator": {"translator": "original", "target_lang": "ENG"},
+ "detector": {"detector": "default", "detection_size": 2048},
+ "inpainter": {"inpainter": "lama_large", "inpainting_size": 2048}}
+JSON
+echo "=== RUN (prep-manual + saqlash)"
+../mitenv/bin/python -m manga_translator local -i "$ROOT/mit-out/in" -o "$ROOT/mit-out/out" --prep-manual --save-text --config-file "$ROOT/mit-out/cfg.json" 2>&1 | grep -v onnxruntime | tail -60 | cut -c1-220
 echo "=== OUT"
-ls -la "$ROOT/mit-out/out" | head
+find "$ROOT/mit-out/out" -type f | head -30
