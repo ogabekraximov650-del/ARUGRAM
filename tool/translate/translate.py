@@ -417,14 +417,14 @@ def reread_box(img, box, reader) -> str:
     big3 = cv2.resize(gray, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
     clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(4, 4)).apply(big3)
     _, otsu = cv2.threshold(big3, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    tries = [big2, clahe, otsu, 255 - otsu, cv2.copyMakeBorder(otsu, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=255)]
+    tries = [big2, clahe, otsu]   # har biri CPU'da sekin — 3 tadan oshirilmaydi; har rasm bir marta o'qiladi
     for im in tries:
+        try:
+            res = reader.readtext(im, detail=1, paragraph=False, batch_size=8)
+        except Exception as e:  # noqa: BLE001
+            log(f"  qayta OCR xato ({e})")
+            break
         for conf in (0.2, 0.08):
-            try:
-                res = reader.readtext(im, detail=1, paragraph=False)
-            except Exception as e:  # noqa: BLE001
-                log(f"  qayta OCR xato ({e})")
-                break
             t = " ".join(t for _, t, c in sorted(res, key=lambda r: (r[0][0][1], r[0][0][0])) if c >= conf).strip()
             if len(re.sub(r"[^A-Za-z\u0400-\u04ff\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7a3]", "", t)) >= 3:
                 return t
