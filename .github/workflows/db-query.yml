@@ -4,7 +4,7 @@ name: Baza so'rovi (faqat o'qish)
 on:
   push:
     branches: [main]
-    paths: ['ci/DB_QUERY.sql']
+    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED']
 
 permissions:
   contents: read
@@ -24,6 +24,8 @@ jobs:
       PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
       # JONLI baza: worker `tool/migrate/new_turso.enc` dagi yangi bazani ishlatadi (deploy uni GitHub Secret'dan USTUN qo'yadi). Birinchi urinish
       # xato bilan ESKI (secret) bazani tozalagan edi — endi worker ishlatadigan baza tanlanadi. URL/token logda ko'rinmaydi.
       - name: Jonli baza ulanishi
@@ -52,3 +54,7 @@ jobs:
           echo "Baza manbasi: $SRC"
       - name: Ustunlar
         run: python3 ci/db_query.py
+      # SINOV: telefon -> worker -> Telegram yuklash tezligi (R2'siz). Faqat `ci/UPLOAD_SPEED` o'zgarganda (har safar 4 x 18 MiB x 2).
+      - name: Yuklash tezligi
+        run: |
+          if git diff --name-only HEAD~1 HEAD | grep -q '^ci/UPLOAD_SPEED$'; then python3 ci/upload_speed.py; else echo "ci/UPLOAD_SPEED o'zgarmagan — o'tkazildi"; fi

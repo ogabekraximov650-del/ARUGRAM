@@ -504,6 +504,21 @@ async fn upload_photo(env: &Env, ch: i64, bytes: &[u8]) -> std::result::Result<V
     Ok(v)
 }
 
+/// SINOV (faqat `/api/encode/uptest`): `bytes` saqlash kanaliga HUJJAT qilib yuboriladi va darhol o'chiriladi; qaytadi: Telegram'ga yuborish millisekundlari.
+pub(crate) async fn upload_speed_probe(env: &Env, bytes: &[u8]) -> std::result::Result<i64, String> {
+    let store = tg_channel_id(env);
+    if store == 0 {
+        return Err("saqlash kanali sozlanmagan".into());
+    }
+    let t0 = now_ms();
+    let sent = upload_document(env, store, bytes, "uptest.bin").await?;
+    let ms = now_ms() - t0;
+    if let Some(m) = sent["result"]["message_id"].as_i64() {
+        let _ = tg_api(env, "deleteMessage", json!({"chat_id": store, "message_id": m})).await;
+    }
+    Ok(ms)
+}
+
 /// `sendDocument` (multipart) — asosiy bot bilan (shifrlangan kollaj saqlash kanaliga).
 async fn upload_document(env: &Env, ch: i64, bytes: &[u8], name: &str) -> std::result::Result<Value, String> {
     let token = tg_secret(env, "TELEGRAM_BOT_TOKEN");

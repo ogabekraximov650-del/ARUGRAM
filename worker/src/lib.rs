@@ -11208,7 +11208,7 @@ fn needs_app_check(path: &str) -> bool {
     // himoyalangan. Ilova chaqiradiganlari (`queue`, `status`) esa
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
-        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh" | "/api/encode/collage"
+        | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh" | "/api/encode/collage" | "/api/encode/uptest"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/tr/claim" | "/api/tr/peek" | "/api/tr/check" | "/api/tr/finish" | "/api/tr/progress"
         | "/api/cmp/claim" | "/api/cmp/peek" | "/api/cmp/check" | "/api/cmp/finish" | "/api/cmp/progress"
@@ -12868,6 +12868,26 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
             Ok(posted) => ok(json!({"ok": true, "posted": posted})),
             Err(why) => json_resp(&json!({"error": why}), 502),
         };
+    }
+
+    // SINOV: telefon -> worker -> Telegram yuklash tezligi (R2'siz). Tana — xom bayt (18 MiB gacha); `?tg=1` bo'lsa Telegram'ga ham yuboriladi (va o'chiriladi).
+    // Javob: qabul qilish vaqti (worker ichida) va Telegram'ga yuborish vaqti, millisekund.
+    if path == "/api/encode/uptest" && method == Method::Post {
+        let tg = req.url().ok().and_then(|u| u.query_pairs().find(|(k, _)| k == "tg").map(|(_, v)| v.to_string())).as_deref() == Some("1");
+        let mut req = req;
+        let t0 = now_ms();
+        let bytes = req.bytes().await?;
+        let recv_ms = now_ms() - t0;
+        if bytes.len() > 20 * 1024 * 1024 {
+            return json_resp(&json!({"error": "20 MiB dan katta"}), 413);
+        }
+        let tg_ms = if tg {
+            match announce::upload_speed_probe(env, &bytes).await {
+                Ok(ms) => ms,
+                Err(why) => return json_resp(&json!({"error": why, "bytes": bytes.len()}), 502),
+            }
+        } else { 0 };
+        return ok_nostore(json!({"ok": true, "bytes": bytes.len(), "recv_ms": recv_ms, "tg_ms": tg_ms}));
     }
 
     if path == "/api/encode/refresh" && method == Method::Post {
