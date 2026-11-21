@@ -27,23 +27,24 @@ function formatSum(amount) {
   return `${out} so'm`;
 }
 
-function statBox(ic, label, value, { kind = '', fill = true } = {}) {
-  return `<div class="glass pp-stat${kind ? ' open' : ''}"${kind ? ` data-k="${kind}"` : ''}>
-    <div class="pp-stat-h">${icon(ic, { fill, size: 17, color: C.accent })}<span>${label}</span></div>
-    <div class="pp-stat-v">${esc(value)}</div>
+function statBox(label, value, { kind = '' } = {}) {
+  const muted = value == null;
+  return `<div class="pp-stat${kind ? ' open' : ''}"${kind ? ` data-k="${kind}"` : ''}>
+    <div class="pp-stat-v${muted ? ' muted' : ''}">${esc(muted ? 'Yashirilgan' : value)}</div>
+    <div class="pp-stat-l">${label}${kind ? ' ›' : ''}</div>
   </div>`;
 }
 
 function adminBox(d) {
   const until = toInt(d.subscription_until);
-  const now = Date.now();
-  const active = until > now;
-  const left = active ? Math.ceil((until - now) / 86400000) : 0;
+  const active = until > Date.now();
   const r = (l, v) => `<div class="pp-ar"><span class="l">${l}</span><span class="v">${esc(v)}</span></div>`;
-  return `<div class="glass pp-admin">
-    <div class="pp-admin-h">${icon('admin_panel_settings', { size: 17, color: C.accent })}<span>Admin uchun</span></div>
+  return `<div class="pp-admin">
+    <div class="pp-admin-h">ADMIN KO'RINISHI</div>
     ${r('Telegram ID', `${toInt(d.telegram_id)}`)}
-    ${r('Obuna', active ? `Faol · yana ${left} kun` : "Yo'q")}
+    ${r('Balans', formatSum(d.balance))}
+    ${r('Trafik', formatBytes(toInt(d.traffic)))}
+    ${r('Obuna', active ? `${formatMoment(until)} gacha` : "yo'q")}
     ${r("Ro'yxatdan o'tgan", formatMoment(d.created_at))}
     ${r('Oxirgi kirish', formatMoment(d.last_login_at))}
   </div>`;
@@ -84,33 +85,30 @@ export function openPublicProfile(userId) {
       const n = (k) => toInt(d[k]);
 
       const tiles = [];
-      if (has('animes')) tiles.push(statBox('movie_filter', STAT_KINDS.anime.label, formatCount(n('animes'))));
-      if (has('episodes')) tiles.push(statBox('play_circle', STAT_KINDS.episodes.label, formatCount(n('episodes')), { kind: 'episodes', fill: false }));
-      if (has('seasons')) tiles.push(statBox('grid_view', STAT_KINDS.seasons.label, formatCount(n('seasons')), { kind: 'seasons' }));
-      if (has('favorites')) tiles.push(statBox('bookmark', STAT_KINDS.favorites.label, formatCount(n('favorites')), { kind: 'favorites' }));
-      if (has('rated')) tiles.push(statBox('star', STAT_KINDS.rated.label, formatCount(n('rated')), { kind: 'rated' }));
-      if (has('comments')) tiles.push(statBox('mode_comment', STAT_KINDS.comments.label, formatCount(n('comments')), { kind: 'comments' }));
-      if (has('watch_ms')) tiles.push(statBox('schedule', STAT_KINDS.watch.label, `${formatHours(n('watch_ms'))} soat`));
+      const add = (k, label, fmt, kind) => { if (has(k)) tiles.push(statBox(label, fmt(n(k)), { kind })); };
+      add('animes', STAT_KINDS.anime.label, formatCount);
+      add('episodes', STAT_KINDS.episodes.label, formatCount, 'episodes');
+      add('seasons', STAT_KINDS.seasons.label, formatCount, 'seasons');
+      add('watch_ms', STAT_KINDS.watch.label, (v) => `${formatHours(v)} soat`);
+      add('favorites', STAT_KINDS.favorites.label, formatCount, 'favorites');
+      add('rated', STAT_KINDS.rated.label, formatCount, 'rated');
+      add('comments', STAT_KINDS.comments.label, formatCount, 'comments');
 
       const admin = d.admin_view === true;
+      const isMe = currentUser()?.id === id;
       body.innerHTML = `<div class="pp">
-        <div class="glass pp-card">
-          <div class="pp-av-wrap">
-            <div class="pp-av"><span class="pp-av-l">${esc(letter)}</span>${photo ? `<img alt="" src="${esc(photo)}" onerror="this.remove()">` : ''}</div>
-            ${premium ? `<span class="pp-prem">${icon('workspace_premium', { size: 12, color: 'rgba(0,0,0,0.87)' })}<span>PREMIUM</span></span>` : ''}
-          </div>
+        <div class="pp-card">
+          <div class="pp-av"><span class="pp-av-l">${esc(letter)}</span>${photo ? `<img alt="" src="${esc(photo)}" onerror="this.remove()">` : ''}</div>
           <div class="pp-info">
             <div class="pp-name">${esc(shown)}</div>
             ${username && name ? `<div class="pp-user">@${esc(username)}</div>` : ''}
-            <div class="pp-id"><span>ID: ${id}</span>${icon('content_copy', { size: 14, color: 'rgba(255,255,255,0.5)' })}</div>
-            ${admin ? `<div class="pp-bal">Balans: ${formatSum(d.balance)}</div>` : ''}
+            <div class="pp-chips"><span class="pp-chip pp-id">ID ${id}</span>${premium ? '<span class="pp-chip pp-prem">Premium</span>' : ''}</div>
           </div>
         </div>
-        <div style="height:14px"></div>
-        ${tiles.length === 0 ? `<div class="glass pp-locked">${icon('lock', { fill: false, size: 30, color: 'rgba(255,255,255,0.3)' })}
-          <div>Bu foydalanuvchi statistikasini yashirgan</div></div>`
+        ${admin ? adminBox(d) : ''}
+        ${tiles.length === 0 ? `<div class="pp-note">Bu foydalanuvchi statistikasini yashirgan</div>`
     : `<div class="pp-grid">${tiles.join('')}</div>`}
-        ${admin ? `${statBox('download', 'Trafik', formatBytes(n('traffic')))}<div style="height:12px"></div>${adminBox(d)}` : ''}
+        ${isMe ? '<div class="pp-note">Bu sizning profilingiz: balans va trafik boshqalarga ko\'rinmaydi.</div>' : ''}
       </div>`;
 
       bindTap(body.querySelector('.pp-id'), async () => {

@@ -268,7 +268,7 @@ function buildBilling(el, start) {
     const locked = billing.active;
     subEl.innerHTML = `
       ${locked ? `<div class="glass bill-card bill-active">
-        ${icon('verified', { size: 20, color: C.accent })}
+        ${icon('workspace_premium', { size: 20, color: C.accent })}
         <div class="col">
           <div class="t">Obunangiz faol</div>
           <div class="r"><span class="y">Yana </span>${countdown('tugadi')}</div>
