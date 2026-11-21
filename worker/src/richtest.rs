@@ -63,17 +63,21 @@ pub(crate) async fn run(env: &Env, chat: i64) {
     }
     let bot = bot_username(env).await;
     let bot = if bot.is_empty() { "telegram".to_string() } else { bot };
+    let lines = ["\u{2022} Sinov anime nomi", "\u{2022} 5-qism", "\u{2022} Ovoz berdi: Sinov tarjimon"];
+    let text_blocks = || -> Vec<Value> { lines.iter().map(|l| json!({"type": "paragraph", "text": l})).collect() };
+    // Haqiqiy post tartibi: rasmlar -> matn qatorlari -> tugma.
+    let real = |kind: &str| {
+        let mut b = vec![json!({"type": kind, "blocks": photo_blocks()})];
+        b.extend(text_blocks());
+        b.push(buttons_block(&bot));
+        json!({"blocks": b})
+    };
     let variants: Vec<(&str, Value)> = vec![
-        ("1) slideshow(3 rasm) + tugma", json!({"blocks": [
-            {"type": "slideshow", "blocks": photo_blocks()}, buttons_block(&bot)]})),
-        ("2) collage(3 rasm) + tugma", json!({"blocks": [
-            {"type": "collage", "blocks": photo_blocks()}, buttons_block(&bot)]})),
-        ("3) 3 ta alohida photo + tugma", json!({"blocks": all_blocks(&bot)})),
-        ("4) HTML: slideshow + tugma", json!({"html": format!(
-            "<tg-slideshow><img src=\"attach://f0\"><img src=\"attach://f1\"><img src=\"attach://f2\"></tg-slideshow>\
-             <tg-button-row><tg-button url=\"https://t.me/{bot}\">Tomosha qilish</tg-button></tg-button-row>")})),
-        ("5) slideshow + sarlavha matni + tugma", json!({"blocks": [
-            {"type": "paragraph", "text": "Sinov sarlavhasi"}, {"type": "slideshow", "blocks": photo_blocks()}, buttons_block(&bot)]})),
+        ("A) slideshow -> 3 qator matn -> tugma (haqiqiy post tartibi)", real("slideshow")),
+        ("B) collage -> 3 qator matn -> tugma", real("collage")),
+        ("C) slideshow -> bitta matn (qatorlar \\n bilan) -> tugma", json!({"blocks": [
+            {"type": "slideshow", "blocks": photo_blocks()},
+            {"type": "paragraph", "text": lines.join("\n")}, buttons_block(&bot)]})),
     ];
     let mut report = String::from("Rich Message sinovi:\n");
     for (name, rich) in &variants {
