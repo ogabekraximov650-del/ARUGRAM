@@ -93,29 +93,22 @@ fn episode_text(season: &Value, ep_number: i64) -> String {
 }
 
 /// Kanal posti matni (foydalanuvchi namunasi):
-///   • <bo'lim nomi>
-///   • <N-qism>  (film bo'lsa: Film)
-///   • Ovoz berdi: <bo'limdagi tarjimon>
+///   <anime nomi>
+///   <N-bo'lim M-qism> Joylandi  (film bo'lsa: Film Joylandi)
+///   <tarjimon>
 fn caption(season: &Value, ep_number: i64) -> String {
-    let film = season["turi"].as_str().unwrap_or("").trim().eq_ignore_ascii_case("film");
-    let ep = if film { "Film".to_string() } else { format!("{ep_number}-qism") };
-    let mut out = format!("\u{2022} {}\n\u{2022} {}",
-        html_escape(season["nomi"].as_str().unwrap_or("").trim()), html_escape(&ep));
-    let tarjimon = season["tarjimon"].as_str().unwrap_or("").trim();
-    if !tarjimon.is_empty() {
-        out.push_str(&format!("\n\u{2022} Ovoz berdi: {}", html_escape(tarjimon)));
-    }
-    out
+    caption_lines(season, ep_number).iter().map(|l| html_escape(l)).collect::<Vec<_>>().join("\n")
 }
 
 /// Post matni qatorlari (HTML'siz oddiy matn): rich message'da har qator alohida paragraf bo'ladi. `caption` bilan bir xil mazmun.
 fn caption_lines(season: &Value, ep_number: i64) -> Vec<String> {
-    let film = season["turi"].as_str().unwrap_or("").trim().eq_ignore_ascii_case("film");
-    let ep = if film { "Film".to_string() } else { format!("{ep_number}-qism") };
-    let mut out = vec![format!("\u{2022} {}", season["nomi"].as_str().unwrap_or("").trim()), format!("\u{2022} {ep}")];
+    let mut out = vec![
+        season["nomi"].as_str().unwrap_or("").trim().to_string(),
+        format!("{} Joylandi", episode_text(season, ep_number)),
+    ];
     let tarjimon = season["tarjimon"].as_str().unwrap_or("").trim();
     if !tarjimon.is_empty() {
-        out.push(format!("\u{2022} Ovoz berdi: {tarjimon}"));
+        out.push(tarjimon.to_string());
     }
     out
 }
@@ -725,5 +718,24 @@ mod frames_tests {
         let mut cut = pack(&[jpeg(50)]);
         cut.truncate(cut.len() - 3);
         assert!(split_frames(&cut).is_err()); // uzilgan oqim
+    }
+}
+
+#[cfg(test)]
+mod caption_tests {
+    use super::{caption, caption_lines};
+    use serde_json::json;
+
+    #[test]
+    fn caption_has_name_episode_translator() {
+        let season = json!({"nomi": "Solo <Leveling>", "bolim_id": 1, "turi": "serial", "tarjimon": "Aru Studio"});
+        assert_eq!(caption_lines(&season, 5), vec!["Solo <Leveling>", "1-bo'lim 5-qism Joylandi", "Aru Studio"]);
+        assert_eq!(caption(&season, 5), "Solo &lt;Leveling&gt;\n1-bo'lim 5-qism Joylandi\nAru Studio");
+    }
+
+    #[test]
+    fn film_and_no_translator() {
+        let season = json!({"nomi": "Film nomi", "turi": "film", "epizod_count": 1, "tarjimon": ""});
+        assert_eq!(caption_lines(&season, 1), vec!["Film nomi", "Film Joylandi"]);
     }
 }
