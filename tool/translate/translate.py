@@ -403,6 +403,34 @@ def group_dets(dets, source):
     return out
 
 
+def reread_box(img, box, reader) -> str:
+    """Bitta qutini bir necha usulda qayta o'qiydi (birinchi mazmunli natija olinadi): 2x kattalashtirish; 3x kulrang+kontrast; Otsu ikkilik; qora-oq inversiya.
+    Qiyshiq (kursiv) yoki xira shriftdagi pufakcha matni uchun."""
+    import cv2
+    import numpy as np
+    H, W = img.shape[:2]
+    crop = img[max(0, box[1] - 8):min(H, box[3] + 8), max(0, box[0] - 8):min(W, box[2] + 8)]
+    if crop.size == 0:
+        return ""
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY)
+    big2 = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    big3 = cv2.resize(gray, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+    clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(4, 4)).apply(big3)
+    _, otsu = cv2.threshold(big3, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    tries = [big2, clahe, otsu, 255 - otsu, cv2.copyMakeBorder(otsu, 30, 30, 30, 30, cv2.BORDER_CONSTANT, value=255)]
+    for im in tries:
+        for conf in (0.2, 0.08):
+            try:
+                res = reader.readtext(im, detail=1, paragraph=False)
+            except Exception as e:  # noqa: BLE001
+                log(f"  qayta OCR xato ({e})")
+                break
+            t = " ".join(t for _, t, c in sorted(res, key=lambda r: (r[0][0][1], r[0][0][0])) if c >= conf).strip()
+            if len(re.sub(r"[^A-Za-z\u0400-\u04ff\u3040-\u30ff\u4e00-\u9fff\uac00-\ud7a3]", "", t)) >= 3:
+                return t
+    return ""
+
+
 def find_missed(img, groups, reader=None):
     """OCR topolmagan matnli pufakcha/ramkalarni sun'iy intellektsiz topadi: sahifadagi OCH (>215) bog'langan sohalar orasidan pufakchaga o'xshaganlari
     (yopiq, to'ldirilganligi yuqori), ichida matnga o'xshash mayda "teshiklar" (harflar) bor, lekin mavjud OCR qutilari bilan qoplanmaganlari.
@@ -452,15 +480,7 @@ def find_missed(img, groups, reader=None):
             continue
         if cov(union) >= 0.4:
             continue
-        text = ""
-        if reader is not None:
-            try:
-                crop = img[max(0, union[1] - 6):union[3] + 6, max(0, union[0] - 6):union[2] + 6]
-                big = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
-                res = reader.readtext(big, detail=1, paragraph=False)
-                text = " ".join(t for _, t, c in sorted(res, key=lambda r: (r[0][0][1], r[0][0][0])) if c >= 0.2).strip()
-            except Exception as e:  # noqa: BLE001
-                log(f"  qo'shimcha OCR xato ({e})")
+        text = reread_box(img, union, reader) if reader is not None else ""
         out.append({"box": union, "boxes": boxes, "text": text})
         covered.append(union)
     return out
@@ -870,6 +890,11 @@ def postprocess_groups(img, groups, reader, source):
         extra = []
     out = []
     for g in sorted(groups + extra, key=lambda x: (x["box"][1], x["box"][0])):
+        if not (g.get("text") or "").strip() and reader is not None:
+            try:
+                g = dict(g, text=reread_box(img, g["box"], reader))
+            except Exception as e:  # noqa: BLE001
+                log(f"  bo'sh blokni qayta o'qishda xato ({e})")
         if g.get("text"):
             g = dict(g, text=re.sub(r"\s{2,}", " ", re.sub(r"[@#$%^&*{}<>|\\_=+`]", "", g["text"])).strip())
         if source == "english" and g.get("text"):
