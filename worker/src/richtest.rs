@@ -25,7 +25,7 @@ fn all_blocks(bot: &str) -> Vec<Value> {
 }
 
 fn buttons_block(bot: &str) -> Value {
-    json!({"type": "buttons", "buttons": [{"text": "Tomosha qilish", "url": format!("https://t.me/{bot}")}]})
+    json!({"type": "buttons", "buttons": [{"text": "Tomosha qilish", "url": format!("https://t.me/{bot}"), "style": "primary"}]})
 }
 
 /// Bitta variantni yuboradi: `rich` — InputRichMessage; rasmlar `attach://f0..f2` bilan multipart. Qaytadi: (ok, matn).

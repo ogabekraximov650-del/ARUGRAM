@@ -140,6 +140,7 @@ async fn compose(env: &Env, a: i64, s: i64, e: i64) -> std::result::Result<(Valu
     let markup = json!({"inline_keyboard": [[{
         "text": "Tomosha qilish",
         "url": format!("https://t.me/{bot}?start={a}_{s}_{e}"),
+        "style": "primary",
     }]]});
     Ok((season, text, markup))
 }
@@ -259,7 +260,7 @@ async fn upload_rich(env: &Env, ch: i64, frames: &[Vec<u8>], lines: &[String], u
     for l in lines {
         blocks.push(json!({"type": "paragraph", "text": l}));
     }
-    blocks.push(json!({"type": "buttons", "buttons": [{"text": "Tomosha qilish", "url": url}]}));
+    blocks.push(json!({"type": "buttons", "buttons": [{"text": "Tomosha qilish", "url": url, "style": "primary"}]}));
     let rich = json!({"blocks": blocks}).to_string();
     let mut last = String::new();
     for token in [tg_secret(env, "TELEGRAM_BOT_TOKEN"), encbot_token(env)] {
