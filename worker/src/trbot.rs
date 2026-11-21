@@ -228,7 +228,9 @@ fn classify(msg: &Value) -> Option<(&'static str, String, i64)> {
 
 /// Tarjima rejimidagi xabar. `true` — ishlandi.
 pub(crate) async fn on_message(env: &Env, msg: &Value, chat: i64) -> bool {
-    let text = untick(msg["text"].as_str().unwrap_or("").trim()).trim().to_string();
+    let raw = msg["text"].as_str().unwrap_or("").trim();
+    // «✅ Tarjima qilish» tugmasining o'zi ✅ bilan boshlanadi — uni tozalab bo'lmaydi.
+    let text = if raw == BTN_GO { raw.to_string() } else { untick(raw).trim().to_string() };
     if text == BTN_MANUAL || text == BTN_AUTO {
         let on = text == BTN_MANUAL;
         config_put(env, "tr_manual", if on { "1" } else { "" }).await;
