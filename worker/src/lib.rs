@@ -42,6 +42,7 @@ mod trbot;
 mod cmpbot;
 mod dubbot;
 mod announce;
+mod richtest;
 mod dbview;
 mod sessionbot;
 mod encupload;
@@ -13993,6 +13994,11 @@ async fn encbot_webhook(env: &Env, mut req: Request) -> Result<Response> {
     }
     if text == anibla::BTN {
         anibla::menu(env, chat).await;
+        return ok(json!({"ok": true}));
+    }
+    // Vaqtinchalik sinov (faqat admin): Rich Message (bir nechta rasm + tugma bitta xabarda) ishlaydimi — `richtest.rs`.
+    if text == "/richtest" {
+        richtest::run(env, chat).await;
         return ok(json!({"ok": true}));
     }
     // "👥 Adminlar" (`admins.rs`) — faqat asosiy admin.
