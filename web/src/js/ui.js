@@ -340,3 +340,23 @@ export function openLink(url) {
 export function haptic(kind = 'light') {
   try { window.Telegram?.WebApp?.HapticFeedback?.impactOccurred(kind); } catch (_) { /* */ }
 }
+
+/** Material `AlertDialog` (Android bilan bir xil): sarlavha, matn/HTML, o'ng tomonda matnli tugmalar. */
+export function mdDialog({ title, html = '', confirm, dismiss }) {
+  return new Promise((resolve) => {
+    const app = document.getElementById('app');
+    const wrap = document.createElement('div');
+    wrap.className = 'dlg-wrap md-dlg-wrap';
+    wrap.innerHTML = `<div class="md-dlg"><div class="md-t">${esc(title)}</div><div class="md-b">${html}</div>
+      <div class="md-btns">${dismiss ? `<span class="md-btn dis">${esc(dismiss)}</span>` : ''}${confirm ? `<span class="md-btn ok" style="color:${confirm.color || 'var(--accent)'}">${esc(confirm.label)}</span>` : ''}</div></div>`;
+    const close = (v) => { wrap.classList.remove('in'); setTimeout(() => wrap.remove(), 180); resolve(v); };
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(false); });
+    wrap.querySelector('.md-btn.dis')?.addEventListener('click', () => close(false));
+    wrap.querySelector('.md-btn.ok')?.addEventListener('click', () => close(true));
+    app.appendChild(wrap);
+    requestAnimationFrame(() => wrap.classList.add('in'));
+    wrap._close = close;
+  });
+}
+
+

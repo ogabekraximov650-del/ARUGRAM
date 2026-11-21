@@ -10,7 +10,7 @@
 //
 // To'xtagan joydagi kadr faqat ilovada yasaladi — saytda bo'lim posteri.
 
-import { icon, spinner, bindTap, glass, seasonCardHtml, bindSeasonCards, cardWidth, paidBadge, dialog } from '../ui.js';
+import { icon, spinner, bindTap, glass, seasonCardHtml, bindSeasonCards, cardWidth, paidBadge, mdDialog } from '../ui.js';
 import { imageUrl } from '../api.js';
 import { esc } from '../format.js';
 import { hooks } from '../hooks.js';
@@ -32,8 +32,8 @@ function clock(ms) {
 /** `12:46/01/01/2026` — soat/kun/oy/yil. */
 function fmtDate(ms) {
   if (!(ms > 0)) return '';
-  const d = new Date(ms);
-  return `${two(d.getHours())}:${two(d.getMinutes())}/${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()}`;
+  const d = new Date(ms + 5 * 3600000);   // Toshkent (GMT+5), Android bilan bir xil
+  return `${two(d.getUTCHours())}:${two(d.getUTCMinutes())}/${two(d.getUTCDate())}/${two(d.getUTCMonth() + 1)}/${d.getUTCFullYear()}`;
 }
 
 /** `43,21%` */
@@ -94,12 +94,9 @@ function shadowText(text, { size, weight = 500, alpha = 1, align = 'right' }) {
   return `<div class="lib-st" style="font-size:${size}px;font-weight:${weight};color:rgba(255,255,255,${alpha});text-align:${align}">${esc(text)}</div>`;
 }
 
-/** Bo'sh holat: `_EmptyState` / `_EmptyFavorites`. */
-function emptyBox({ loading, ic, text, sub = '', fill = true }) {
-  return `<div class="empty-glass">${glass(`
-    ${loading ? spinner(26, 2.4, 'rgba(255,255,255,0.7)') : icon(ic, { fill, size: 46, color: 'rgba(255,255,255,0.54)' })}
-    <div class="eg-t">${loading ? 'Yuklanmoqda...' : text}</div>
-    ${!loading && sub ? `<div class="eg-s">${sub}</div>` : ''}`, { radius: 20, pad: '24px' })}</div>`;
+/** Bo'sh holat (Android `EmptyState` / `LoadingBox`): 260 px, belgi 48 px, matn xira. */
+function emptyBox({ loading, ic, text }) {
+  return `<div class="lib-empty">${loading ? spinner(32, 2) : `${icon(ic, { size: 48, color: 'rgba(255,255,255,0.2)' })}<div class="m">${text}</div>`}</div>`;
 }
 
 /** Bosish + uzoq bosish (GestureDetector onTap / onLongPress). */
@@ -127,25 +124,10 @@ function bindPress(el, onTap, onLong) {
   });
 }
 
-/** "Rostdan ham bu tarixni o'chirib tashlaysizmi?" */
+/** "Rostdan ham bu tarixni o'chirib tashlaysizmi?" (Android `AlertDialog`). */
 function confirmRemove(item) {
-  dialog({
-    cls: 'lib-dlg',
-    content: (el, close) => {
-      el.innerHTML = `
-        <div class="lib-cf">
-          ${icon('delete', { fill: false, size: 42, color: 'rgba(255,255,255,0.7)' })}
-          <div class="lib-cf-t">Rostdan ham bu tarixni o'chirib tashlaysizmi?</div>
-          <div class="lib-cf-s">${esc(`${item.title} · ${item.bolimNumber}-bo'lim ${item.epizodNumber}-qism`)}</div>
-          <div class="lib-cf-row">
-            <button class="btn btn-outline lib-no">Yo'q</button>
-            <button class="btn btn-filled lib-yes">Ha, o'chirilsin</button>
-          </div>
-        </div>`;
-      el.querySelector('.lib-no').addEventListener('click', () => close(false));
-      el.querySelector('.lib-yes').addEventListener('click', () => close(true));
-    },
-  }).then((ok) => { if (ok === true) watchHistory.remove(item); });
+  mdDialog({ title: "Tarixdan o'chirish", html: "Rostdan ham bu tarixni o'chirib tashlaysizmi?", confirm: { label: "O'chirish", color: '#F87171' }, dismiss: 'Bekor qilish' })
+    .then((ok) => { if (ok === true) watchHistory.remove(item); });
 }
 
 // ── ANIME QATORI ────────────────────────────────────────────────
@@ -205,7 +187,7 @@ function openAnimeHistory(animeId, title, seasonId = null) {
       if (s === sig) return;
       sig = s;
       if (!rows.length) {
-        list.innerHTML = emptyBox({ loading: false, ic: 'history', text: "Hali hech narsa ko'rilmagan" });
+        list.innerHTML = emptyBox({ loading: false, ic: 'play_arrow', text: "Tarix bo'sh \u00B7 ko'rgan qismlaringiz shu yerda chiqadi" });
         return;
       }
       list.innerHTML = `<div class="lib-list lib-list-ah">${rows.map(episodeRowHtml).join('')}</div>`;
@@ -280,7 +262,7 @@ export function createLibrary(page) {
 
   page.innerHTML = `
     <div class="lib">
-      <div class="lib-head">Kutubxona</div>
+      <div class="home-head p20"><div><div class="ph-title">ARU<span class="m">MEDIATV</span></div><div class="sub">Kutubxona</div></div></div>
       <div class="lib-tabs">${TITLES.map((t, i) => `<div class="lib-tab${i === 0 ? ' active' : ''}" data-i="${i}"><span>${t}</span></div>`).join('')}</div>
       <div class="lib-pager">
         <div class="lib-pane" data-p="0"><div class="lib-hist"></div></div>
@@ -345,8 +327,6 @@ export function createLibrary(page) {
         loading: favorites.isLoading,
         ic: 'favorite',
         text: "Hali sevimli bo'lim qo'shilmagan",
-        sub: 'Pleyerdagi yurakchani bosing',
-        fill: false,
       });
       return;
     }

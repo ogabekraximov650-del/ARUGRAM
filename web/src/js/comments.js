@@ -28,7 +28,7 @@
 // ko'rinadi va yuborilmaydi — to'plamlar Mini App'da hali yo'q.
 
 import { api, currentUser, imageUrl } from './api.js';
-import { icon, spinner, toast, C } from './ui.js';
+import { icon, spinner, toast, C, mdDialog } from './ui.js';
 import { esc } from './format.js';
 import { hooks } from './hooks.js';
 import { richText, emojiButtonHtml, bindEmojiInput } from './screens/tg-emoji.js';
@@ -381,24 +381,6 @@ function timeAgoNative(ms) {
   const d = new Date(ms + 5 * 3600000);   // Toshkent (GMT+5)
   const two = (v) => String(v).padStart(2, '0');
   return `${two(d.getUTCDate())}.${two(d.getUTCMonth() + 1)}.${d.getUTCFullYear()}`;
-}
-
-/** Material `AlertDialog` (Android bilan bir xil): sarlavha, matn/HTML, o'ng tomonda matnli tugmalar. */
-function mdDialog({ title, html = '', confirm, dismiss }) {
-  return new Promise((resolve) => {
-    const app = document.getElementById('app');
-    const wrap = document.createElement('div');
-    wrap.className = 'dlg-wrap md-dlg-wrap';
-    wrap.innerHTML = `<div class="md-dlg"><div class="md-t">${esc(title)}</div><div class="md-b">${html}</div>
-      <div class="md-btns">${dismiss ? `<span class="md-btn dis">${esc(dismiss)}</span>` : ''}${confirm ? `<span class="md-btn ok" style="color:${confirm.color || 'var(--accent)'}">${esc(confirm.label)}</span>` : ''}</div></div>`;
-    const close = (v) => { wrap.classList.remove('in'); setTimeout(() => wrap.remove(), 180); resolve(v); };
-    wrap.addEventListener('click', (e) => { if (e.target === wrap) close(false); });
-    wrap.querySelector('.md-btn.dis')?.addEventListener('click', () => close(false));
-    wrap.querySelector('.md-btn.ok')?.addEventListener('click', () => close(true));
-    app.appendChild(wrap);
-    requestAnimationFrame(() => wrap.classList.add('in'));
-    wrap._close = close;
-  });
 }
 
 /** Pastdan chiqadigan oyna (o'z ko'rinishi bilan). */
