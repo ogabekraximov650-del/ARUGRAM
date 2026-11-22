@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SQLite JSONL dump (ample-rs `RECOVER_OUT`) -> Supabase Postgres, sxema `aru` (PostgREST'ga ochiq EMAS).
+"""SQLite JSONL dump (ample-rs `RECOVER_OUT`) -> Supabase Postgres, sxema `arumediatv` (PostgREST'ga ochiq EMAS).
 UZ: jadvallar `*.schema.sql` dan Postgres turlariga o'tkaziladi, qatorlar `*.jsonl` dan yoziladi, hisob solishtiriladi.
 EN: converts SQLite DDL, loads rows, verifies counts. Env: DUMP_DIR, PG_JSON (ref,user,password,db,region)."""
 import json, os, re, sys, glob
@@ -26,7 +26,7 @@ if not conn:
     sys.exit("Supabase'ga ulanib bo'lmadi")
 conn.autocommit = False
 cur = conn.cursor()
-cur.execute("set search_path to aru")
+cur.execute("set search_path to arumediatv")
 
 q = lambda n: '"' + n.replace('"', '""') + '"'
 
@@ -100,9 +100,9 @@ def convert(name, sql):
 
 tables = sorted(os.path.basename(f)[:-11] for f in glob.glob(D + "/*.schema.sql"))
 print("jadvallar:", len(tables))
-cur.execute("select tablename from pg_tables where schemaname='aru'")
+cur.execute("select tablename from pg_tables where schemaname='arumediatv'")
 for (t,) in cur.fetchall():
-    cur.execute(f"drop table if exists aru.{q(t)} cascade")
+    cur.execute(f"drop table if exists arumediatv.{q(t)} cascade")
 meta = {}
 for t in tables:
     sql = open(f"{D}/{t}.schema.sql").read()
@@ -110,7 +110,7 @@ for t in tables:
     try:
         cur.execute(ddl)
     except Exception as e:
-        conn.rollback(); cur = conn.cursor(); cur.execute("set search_path to aru")
+        conn.rollback(); cur = conn.cursor(); cur.execute("set search_path to arumediatv")
         sys.exit(f"DDL xato ({t}): {str(e)[:300]}\n{ddl[:600]}")
     meta[t] = cols
 conn.commit()
@@ -133,7 +133,7 @@ for t in tables:
                 cur.execute(f"alter table {q(t)} alter column {q(c)} drop identity if exists")
                 cur.execute(f"alter table {q(t)} alter column {q(c)} type text using {q(c)}::text")
                 print(f"  ! {t}.{c} -> TEXT (aralash qiymatlar)")
-    cur.execute("select column_name, data_type from information_schema.columns where table_schema='aru' and table_name=%s", (t,))
+    cur.execute("select column_name, data_type from information_schema.columns where table_schema='arumediatv' and table_name=%s", (t,))
     actual = dict(cur.fetchall())
     names = [c for c, _ in cols]
     data = []
@@ -151,9 +151,9 @@ for t in tables:
     if n != len(rows): bad += 1
     print(f"  {t}: {n}/{len(rows)} {ok}")
 # identity hisoblagichlari
-cur.execute("select table_name, column_name from information_schema.columns where table_schema='aru' and is_identity='YES'")
+cur.execute("select table_name, column_name from information_schema.columns where table_schema='arumediatv' and is_identity='YES'")
 for t, c in cur.fetchall():
-    cur.execute(f"select setval(pg_get_serial_sequence('aru.{q(t)}', %s), coalesce((select max({q(c)}) from {q(t)}), 0) + 1, false)", (c,))
+    cur.execute(f"select setval(pg_get_serial_sequence('arumediatv.{q(t)}', %s), coalesce((select max({q(c)}) from {q(t)}), 0) + 1, false)", (c,))
 conn.commit()
 # RLS: PostgREST sxemasi emas, lekin ehtiyot uchun
 for t in tables:
