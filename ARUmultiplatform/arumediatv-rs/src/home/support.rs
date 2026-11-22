@@ -462,7 +462,7 @@ impl Home {
             .center()
             .width(48.0)
             .height(48.0)
-            .lens(if can_send { ACCENT.with_opacity(0.55) } else { Color::rgba(255, 255, 255, 8) }, GLASS_ZOOM)
+            .flat_lens(if can_send { ACCENT.with_opacity(0.55) } else { Color::rgba(255, 255, 255, 8) }, GLASS_ZOOM)
             .radius(24.0)
             .on_click(move || {
                 if !ps.input.get().trim().is_empty() && !ps.busy.get() {

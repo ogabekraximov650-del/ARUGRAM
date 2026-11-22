@@ -379,7 +379,7 @@ impl Home {
     }
 
     fn pl_round(icon_path: &'static str, size: f32, boxsz: f32, f: Box<dyn Fn()>) -> Element {
-        column(vec![icon(icon_path, size).color(Color::WHITE)]).center().width(boxsz).height(boxsz).radius(boxsz / 2.0).lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(boxsz / 2.0).on_click(f)
+        column(vec![icon(icon_path, size).color(Color::WHITE)]).center().width(boxsz).height(boxsz).radius(boxsz / 2.0).flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(boxsz / 2.0).on_click(f)
     }
 
     /// Video maydoni (cover o'rnida): video, yuklanish/xato holati va shisha boshqaruv paneli.
@@ -472,7 +472,7 @@ impl Home {
 
     /// Shisha "tabletka" ichidagi matn (vaqt, sarlavha).
     fn gpill(e: Element) -> Element {
-        e.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(16.0).padding_xy(14.0, 8.0)
+        e.flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(16.0).padding_xy(14.0, 8.0)
     }
 
     /// Ikki marta bosib sek: ko'rsatkich (shisha doira, o'q va soniya).
@@ -483,7 +483,7 @@ impl Home {
             .center()
             .width(76.0)
             .height(76.0)
-            .lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
+            .flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
             .radius(38.0)
     }
 
@@ -542,11 +542,11 @@ impl Home {
         let layer = |a: f32, b: Element| row(vec![b.weight(w(a)), column(vec![]).weight((1000.0 - w(a)).max(0.001))]);
         let mid = |e: Element| column(vec![e]).justify(Justify::Center);
         // Chiziq — xira sutdek shisha, ozgina lupa.
-        let track = column(vec![]).height(th).radius(th / 2.0).lens(Color::rgba(255, 255, 255, 38), 1.25).radius(th / 2.0);
+        let track = column(vec![]).height(th).radius(th / 2.0).flat_lens(Color::rgba(255, 255, 255, 38), 1.25).radius(th / 2.0);
         let buf = layer(buffered, column(vec![]).height(th).radius(th / 2.0).bg(Color::rgba(255, 255, 255, 46)));
-        let played = layer(frac, column(vec![]).height(th).radius(th / 2.0).lens(Color::rgba(255, 255, 255, 90), 1.35).radius(th / 2.0));
+        let played = layer(frac, column(vec![]).height(th).radius(th / 2.0).flat_lens(Color::rgba(255, 255, 255, 90), 1.35).radius(th / 2.0));
         // Dumaloq — shisha, kuchliroq lupa.
-        let knob = row(vec![column(vec![]).weight(w(frac)).height(1.0), column(vec![]).width(thumb * 2.0).height(thumb * 2.0).radius(thumb).lens(Color::rgba(255, 255, 255, 60), 1.9).radius(thumb).border(1.5, Color::rgba(255, 255, 255, 170)), column(vec![]).weight((1000.0 - w(frac)).max(0.001)).height(1.0)]).align(Align::Center);
+        let knob = row(vec![column(vec![]).weight(w(frac)).height(1.0), column(vec![]).width(thumb * 2.0).height(thumb * 2.0).radius(thumb).flat_lens(Color::rgba(255, 255, 255, 60), 1.9).radius(thumb).border(1.5, Color::rgba(255, 255, 255, 170)), column(vec![]).weight((1000.0 - w(frac)).max(0.001)).height(1.0)]).align(Align::Center);
         let pd = p.clone();
         stack(vec![mid(track), mid(buf), mid(played), knob])
             .height(thumb * 2.0 + 14.0)
@@ -655,7 +655,7 @@ impl Home {
         let time = |a: i64, b: i64, sep: &str| {
             let (txt, size) = (format!("{}{sep}{}", mmss(a), mmss(b)), if fullscreen { 13.0 } else { 11.5 });
             let w = txt.chars().count() as f32 * size * 0.62 + 28.0;
-            column(vec![tx(txt, size, Color::WHITE).bold()]).center().width(w).height(if fullscreen { 38.0 } else { 34.0 }).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(19.0)
+            column(vec![tx(txt, size, Color::WHITE).bold()]).center().width(w).height(if fullscreen { 38.0 } else { 34.0 }).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(19.0)
         };
 
         if fullscreen {
@@ -700,13 +700,13 @@ impl Home {
             let (me, pc, ep) = (self.clone(), p.clone(), e.clone());
             let on = Some(e.id) == cur;
             let row_el = row(vec![tx(format!("{}-qism", e.number), 14.0, Color::WHITE).bold().weight(1.0), tx(if on { "ijroda" } else { "" }, 11.0, ACCENT2)]).align(Align::Center).padding_xy(14.0, 11.0);
-            let card = if on { row_el.gradient(ACCENT.with_opacity(0.55), ACCENT2.with_opacity(0.55)) } else { row_el.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM) };
+            let card = if on { row_el.gradient(ACCENT.with_opacity(0.55), ACCENT2.with_opacity(0.55)) } else { row_el.flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM) };
             kids.push(card.radius(16.0).margin_each(0.0, 0.0, 0.0, 6.0).on_click(move || {
                 pc.pl.ep_list.set(false);
                 me.play_episode(&pc, &ep, None, Some(0), true);
             }));
         }
-        let panel = scroll_column(&p.pl.ep_scroll, kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(24.0).padding(12.0).width(260.0);
+        let panel = scroll_column(&p.pl.ep_scroll, kids).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(24.0).padding(12.0).width(260.0);
         let pc = p.clone();
         stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 90)).on_click(move || pc.pl.ep_list.set(false)), row(vec![spacer(), panel.margin_each(0.0, 16.0, 16.0, 16.0)])])
     }
@@ -775,7 +775,7 @@ impl Home {
         kids.push(row(timers).gap(8.0).scroll(&self.chips_scroll2).height(44.0));
         let pc = p.clone();
         kids.push(row(vec![spacer(), self.chip("Yopish", true, move || pc.pl.settings.set(false))]).padding_each(0.0, 14.0, 0.0, 0.0));
-        let panel = scroll_column(&p.pl.set_scroll, kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).width(380.0).margin_each(0.0, 12.0, 0.0, 12.0);
+        let panel = scroll_column(&p.pl.set_scroll, kids).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).width(380.0).margin_each(0.0, 12.0, 0.0, 12.0);
         let pc = p.clone();
         stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.pl.settings.set(false)), row(vec![spacer(), panel, spacer()])])
     }

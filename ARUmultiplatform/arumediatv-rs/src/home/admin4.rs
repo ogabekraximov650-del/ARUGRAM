@@ -200,7 +200,7 @@ fn gfield(f: Element, label: &str) -> Element {
         .line_height(24.0)
         .padding_each(16.0, 26.0, 16.0, 10.0)
         .label_inside()
-        .glass(Color::rgba(255, 255, 255, 22))
+        .flat_glass(Color::rgba(255, 255, 255, 22))
         .hint_color(Color::rgba(255, 255, 255, 150))
         .accent(ACCENT2)
         .border(1.0, Color::TRANSPARENT)
@@ -209,7 +209,7 @@ fn gfield(f: Element, label: &str) -> Element {
 }
 
 fn modal(inner: Element, close: impl Fn() + 'static) -> Element {
-    let panel = inner.lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
+    let panel = inner.flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
     column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(close)
 }
 
@@ -1081,7 +1081,7 @@ fn gfield_small(st: &State<String>, label: &str) -> Element {
         .color(Color::WHITE)
         .size(14.0)
         .padding_xy(12.0, 10.0)
-        .glass(Color::rgba(255, 255, 255, 22))
+        .flat_glass(Color::rgba(255, 255, 255, 22))
         .hint(label)
         .hint_color(Color::rgba(255, 255, 255, 150))
         .accent(ACCENT2)

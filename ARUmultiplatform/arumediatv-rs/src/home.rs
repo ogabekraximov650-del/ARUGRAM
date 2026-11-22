@@ -36,6 +36,9 @@ const LIB_TABS: [&str; 3] = ["Tarix", "Yuklanmalar", "Sevimlilar"];
 const PLAY: &str = "M8,5v14l11,-7z";
 const HEART: &str = "M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z";
 const STAR: &str = "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z";
+/// Bosh sahifa sarlavhasi balandligi (dp): PageHeader 66 + oraliq 14 + "Ommabop anime" 34 + oraliq 14.
+const HOME_HEADER_H: f32 = 128.0;
+const WORKSPACE_PREMIUM: &str = "M9.68 13.69L12 11.93l2.31 1.76-.88-2.85L15.75 9h-2.84L12 6.19 11.09 9H8.25l2.31 1.84-.88 2.85zM20 10c0-4.42-3.58-8-8-8s-8 3.58-8 8c0 2.03.76 3.87 2 5.28V23l6-2 6 2v-7.72c1.24-1.41 2-3.25 2-5.28zm-8-6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6 2.69-6 6-6z";
 const EYE: &str = "M12,4.5C7,4.5 2.73,7.61 1,12c1.73,4.39 6,7.5 11,7.5s9.27,-3.11 11,-7.5c-1.73,-4.39 -6,-7.5 -11,-7.5zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5zM12,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z";
 const NAV: [(&str, &str); 5] = [
     ("Bosh sahifa", "M10,20v-6h4v6h5v-8h3L12,3 2,12h3v8z"),
@@ -148,14 +151,13 @@ fn name_colors(name: &str) -> (Color, Color) {
     (mk(hue, 0.30), mk((hue + 40.0) % 360.0, 0.14))
 }
 
+/// Kotlin `formatCompact` bilan bir xil: `1 284 512` -> `1,3 mln`, `12 400` -> `12,4 ming`.
 fn compact(n: i64) -> String {
-    if n >= 1_000_000 {
-        format!("{:.1}M", n as f64 / 1e6)
-    } else if n >= 1000 {
-        format!("{:.1}K", n as f64 / 1e3)
-    } else {
-        n.to_string()
+    if n < 1000 {
+        return n.to_string();
     }
+    let cut = |v: f64| format!("{v:.1}").replace('.', ",").trim_end_matches(",0").to_string();
+    if n < 1_000_000 { format!("{} ming", cut(n as f64 / 1000.0)) } else { format!("{} mln", cut(n as f64 / 1_000_000.0)) }
 }
 
 fn badge(children: Vec<Element>) -> Element {
@@ -163,8 +165,18 @@ fn badge(children: Vec<Element>) -> Element {
         .gap(3.0)
         .align(Align::Center)
         .bg(Color::rgba(0, 0, 0, 140))
-        .radius(9.0)
-        .padding_xy(7.0, 3.0)
+        .radius(10.0)
+        .padding_xy(8.0, 4.0)
+}
+
+/// Kotlin `PaidBadge`: qora 62% fon, tilla chegara, tojli belgi va "Pullik".
+fn paid_badge() -> Element {
+    row(vec![icon(WORKSPACE_PREMIUM, 12.0).color(GOLD), tx(" Pullik", 10.5, GOLD).black()])
+        .align(Align::Center)
+        .bg(Color::rgba(0, 0, 0, 158))
+        .radius(7.0)
+        .border(1.0, GOLD.with_opacity(0.7))
+        .padding_xy(7.0, 2.5)
 }
 
 impl Home {
@@ -405,72 +417,78 @@ impl Home {
                 column(vec![tx(letter, 84.0, Color::WHITE).black()]).gradient(a, b).radius(20.0).center()
             }
         };
-        let mut r1 = vec![];
-        if s.rating_count > 0 {
-            r1.push(badge(vec![icon(STAR, 12.0).color(GOLD), tx(format!("{:.1}", s.rating_avg), 10.5, Color::WHITE).bold()]));
-        } else {
-            r1.push(gap_box(0.0, 0.0));
-        }
-        r1.push(spacer());
-        if s.views > 0 {
-            r1.push(badge(vec![icon(EYE, 12.0).color(Color::WHITE), tx(compact(s.views), 10.5, Color::WHITE).bold()]));
-        }
-        let mut top = vec![row(r1)];
+        // Kotlin `SeasonCard`: chap ustunda yosh belgisi, o'ng ustunda (tepadan pastga) baho, ko'rishlar, "Pullik" — 6 dp oraliq bilan.
+        let mut left = vec![];
         if s.age > 0 {
             let c = if s.age >= 18 { Color::hex(0xEF4444) } else if s.age >= 16 { ACCENT2 } else { GOLD };
-            top.push(gap_box(0.0, 6.0));
-            top.push(row(vec![tx(format!("{}+", s.age), 10.5, Color::WHITE)
+            left.push(tx(format!("{}+", s.age), 10.5, Color::WHITE)
                 .black()
                 .bg(c.with_opacity(0.92))
                 .radius(7.0)
-                .border(1.0, Color::rgba(255, 255, 255, 70))
-                .padding_xy(7.0, 2.5)]));
+                .border(1.0, Color::rgba(255, 255, 255, 71))
+                .padding_xy(7.0, 2.5));
         }
+        let mut right = vec![];
+        if s.rating_count > 0 {
+            right.push(badge(vec![icon(STAR, 12.0).color(GOLD), tx(format!("{:.1}", s.rating_avg), 10.5, Color::WHITE).bold()]));
+        }
+        if s.views > 0 {
+            right.push(badge(vec![icon(EYE, 12.0).color(Color::rgba(255, 255, 255, 179)), tx(compact(s.views), 10.5, Color::WHITE).bold()]));
+        }
+        if s.free == Some(false) {
+            right.push(paid_badge());
+        }
+        let top = vec![row(vec![column(left).gap(6.0), spacer(), column(right).gap(6.0).align(Align::End)]).align(Align::Start)];
+        let mut tag_parts = vec![];
+        if s.section_no > 0 {
+            tag_parts.push(format!("{}-bo'lim", s.section_no));
+        }
+        if s.episodes > 0 {
+            tag_parts.push(format!("{} ta qism", s.episodes));
+        }
+        let tag = tag_parts.join(" \u{b7} ");
         let name: String = if s.name.chars().count() > 34 {
-            s.name.chars().take(33).collect::<String>() + "…"
+            s.name.chars().take(33).collect::<String>() + "\u{2026}"
         } else {
             s.name.clone()
         };
+        let mut txt = vec![];
+        if !tag.is_empty() {
+            txt.push(tx(tag, 11.0, Color::WHITE).bold());
+        }
+        txt.push(text(name).size(14.0).color(Color::WHITE).line_height(17.0).bold());
         let bottom = column(vec![
             spacer(),
-            column(vec![tx(format!("{}-bo'lim · {} ta qism", s.section_no, s.episodes), 12.0, Color::WHITE), tx(name, 16.0, Color::WHITE).bold()])
-                .padding_each(10.0, 30.0, 10.0, 12.0)
-                .gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 215))
+            column(txt)
+                .padding_each(10.0, 28.0, 10.0, 10.0)
+                .gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 224))
                 .radius(20.0),
         ]);
         let (me, s2) = (self.clone(), s.clone());
-        stack(vec![base, column(top).padding(8.0), bottom]).weight(1.0).height(h).on_click(move || me.open_season(s2.clone()))
+        stack(vec![base, column(top).padding(8.0), bottom]).bg(CARD).border(1.0, BORDER).radius(20.0).weight(1.0).height(h).on_click(move || me.open_season(s2.clone()))
     }
 
-    /// Sarlavha paneli: nom, tavsif va bo'lim nomi — lupali shisha ichida; qo'ng'iroq tugmasi alohida shisha doira.
+    /// Bosh sahifa sarlavhasi (Kotlin `PageHeader` + "Ommabop anime"): ro'yxat bilan birga suriladi (u ro'yxat tepasida joy qoldiradi, `header_h`).
     fn header(self: &Rc<Self>, top_inset: f32) -> Element {
-        let panel = column(vec![
-            row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
-            tx("Anime dunyosi", 14.0, Color::WHITE),
-            gap_box(0.0, 6.0),
-            tx("Ommabop anime", 18.0, Color::WHITE).bold(),
-            if self.poster_diag.with(|d| d.is_empty()) || !self.posters.borrow().is_empty() {
-                gap_box(0.0, 0.0)
-            } else {
-                tx(self.poster_diag.get(), 11.0, ERROR)
-            },
-        ])
-        .lens(Color::rgba(255, 255, 255, 4), GLASS_ZOOM)
-        .radius(24.0)
-        .padding_xy(18.0, 12.0);
-        let bell = column(vec![icon(BELL, 22.0).color(Color::WHITE)])
-            .width(48.0)
-            .height(48.0)
+        let off = self.scroll.offset() / density();
+        if off > HOME_HEADER_H + 8.0 {
+            return column(vec![]);
+        }
+        let bell = column(vec![icon(BELL, 22.0).color(Color::rgba(255, 255, 255, 179))])
+            .width(42.0)
+            .height(42.0)
             .center()
-            .lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM)
-            .radius(24.0);
+            .bg(CARD)
+            .border(1.0, BORDER)
+            .radius(14.0);
         let me_r = self.clone();
-        let refresh = column(vec![icon(REFRESH, 22.0).color(Color::WHITE)])
-            .width(48.0)
-            .height(48.0)
+        let refresh = column(vec![icon(REFRESH, 22.0).color(Color::rgba(255, 255, 255, 179))])
+            .width(42.0)
+            .height(42.0)
             .center()
-            .lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM)
-            .radius(24.0)
+            .bg(CARD)
+            .border(1.0, BORDER)
+            .radius(14.0)
             .on_click(move || {
                 uzcoders::android::toast("Yangilanmoqda...");
                 me_r.reload();
@@ -479,29 +497,44 @@ impl Home {
                 }
             });
         let bell = bell.on_click(|| uzcoders::android::toast("Bildirishnomalar tez orada"));
+        let titles = column(vec![
+            row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
+            gap_box(0.0, 2.0),
+            tx("Anime dunyosi", 13.0, Color::rgba(255, 255, 255, 115)),
+        ]);
+        let head = row(vec![titles.weight(1.0), refresh, gap_box(8.0, 0.0), bell]).align(Align::Center).padding_each(0.0, 16.0, 0.0, 4.0);
+        let diag = if self.poster_diag.with(|d| d.is_empty()) || !self.posters.borrow().is_empty() {
+            gap_box(0.0, 0.0)
+        } else {
+            tx(self.poster_diag.get(), 11.0, ERROR)
+        };
+        let y = top_inset - off;
         column(vec![
-            row(vec![panel.weight(1.0), refresh, bell]).gap(10.0).align(Align::Start),
+            head,
+            gap_box(0.0, 14.0),
+            tx("Ommabop anime", 18.0, Color::WHITE).bold().padding_each(4.0, 12.0, 0.0, 0.0),
+            diag,
             spacer(),
         ])
-        .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
+        .padding_each(16.0, y.max(-400.0), 16.0, 0.0)
     }
 
     /// Poster kartalari to'ri (2 ustun), faqat ko'rinadigan qatorlar quriladi.
     fn poster_grid(self: &Rc<Self>, items: Rc<Vec<Season>>, scroll: &ScrollState, card_h: f32, top: f32, bottom: f32) -> Element {
         let rows = items.len().div_ceil(2);
-        let ihp = (card_h + 12.0) * density();
+        let ihp = (card_h + 14.0) * density();
         let first = (scroll.offset() / ihp) as usize;
         let last = (((scroll.offset() + scroll.viewport().max(1200.0)) / ihp).ceil() as usize + 1).min(rows.saturating_sub(1));
         self.prioritize_in(&items, first.min(last), last);
         self.next_posters();
         let me = self.clone();
-        lazy_column(scroll, rows, card_h + 12.0, move |r| {
+        lazy_column(scroll, rows, card_h + 14.0, move |r| {
             let a = me.card(&items[2 * r], card_h);
             let b = match items.get(2 * r + 1) {
                 Some(s) => me.card(s, card_h),
                 None => spacer().weight(1.0),
             };
-            row(vec![a, b]).gap(12.0).padding_each(0.0, 0.0, 0.0, 12.0)
+            row(vec![a, b]).gap(14.0).padding_each(0.0, 0.0, 0.0, 14.0)
         })
         .padding_each(16.0, top, 16.0, bottom)
     }
@@ -575,7 +608,7 @@ impl Home {
         let sel = self.cat_tab.get();
         let n = self.genres.with(|g| g.len()) + self.years.with(|y| y.len());
         let fo = self.filter_open.clone();
-        let glass = |e: Element| e.lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
+        let glass = |e: Element| e.flat_lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
         let filter = glass(
             row(vec![icon(MENU, 18.0).color(if n > 0 { ACCENT2 } else { Color::WHITE }), tx(if n > 0 { format!("Filtr · {n}") } else { "Filtr".into() }, 14.0, Color::WHITE).bold()])
                 .gap(6.0)
@@ -679,7 +712,7 @@ impl Home {
         column(vec![
             spacer(),
             column(vec![scroll_column(&self.filter_scroll, kids).grow(1.0), gap_box(0.0, 10.0), buttons])
-                .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
+                .flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
                 .radius(32.0)
                 .padding_xy(18.0, 18.0)
                 .height(h * 0.62)
@@ -733,7 +766,7 @@ impl Home {
     /// Kutubxona sarlavhasi: nom va 3 ta bo'lim — shaffof lupali shisha kapsulalarda.
     fn library_bar(self: &Rc<Self>, top_inset: f32) -> Element {
         let sel = self.lib_tab.get();
-        let glass = |e: Element| e.lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
+        let glass = |e: Element| e.flat_lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
         let title = glass(column(vec![tx("Kutubxona", 24.0, Color::WHITE).black()]).padding_xy(22.0, 8.0)).radius(26.0);
         let tabs: Vec<Element> = LIB_TABS
             .iter()
@@ -812,7 +845,7 @@ impl Home {
                 gap_box(0.0, 2.0),
                 tx(format!("Sana: {}", fmt_date(h.updated_at)), 12.0, Color::WHITE),
             ])
-            .glass(Color::rgba(255, 255, 255, 20))
+            .flat_glass(Color::rgba(255, 255, 255, 20))
             .border(1.0, Color::rgba(255, 255, 255, 36))
             .radius(22.0)
             .padding(10.0)
@@ -823,34 +856,104 @@ impl Home {
     }
 
     /// Qidiruv paneli: sarlavha va yozish joyi — butunlay shaffof lupali shisha (pastgi panel kabi).
+    /// Kotlin `SearchScreen`: PageHeader("Qidiruv") + qidiruv maydoni (karta fon, yorqin chegara, 18 dp burchak).
     fn search_bar(&self, top_inset: f32) -> Element {
         let q = self.query.clone();
         let mut kids = vec![
-            icon(NAV[1].1, 22.0).color(Color::WHITE),
+            icon(NAV[1].1, 24.0).color(Color::rgba(255, 255, 255, 179)),
             field(&self.query)
                 .color(Color::WHITE)
                 .size(16.0)
                 .hint("Anime qidirish...")
-                .hint_color(Color::rgba(255, 255, 255, 140))
+                .hint_color(Color::rgba(255, 255, 255, 138))
                 .accent(ACCENT2)
                 .padding_xy(0.0, 10.0)
                 .no_border()
                 .weight(1.0),
         ];
         if !self.query.with(|v| v.is_empty()) {
-            kids.push(icon(CLOSE, 20.0).color(Color::WHITE).on_click(move || q.set(String::new())));
+            kids.push(icon(CLOSE, 20.0).color(Color::rgba(255, 255, 255, 179)).on_click(move || q.set(String::new())));
         }
-        column(vec![
-            tx("Qidiruv", 26.0, Color::WHITE).black().padding_each(6.0, 0.0, 0.0, 10.0),
-            row(kids)
-                .gap(10.0)
-                .align(Align::Center)
-                .lens(Color::rgba(255, 255, 255, 10), GLASS_ZOOM)
-                .radius(26.0)
-                .padding_xy(18.0, 5.0),
-            spacer(),
+        let bar = column(vec![
+            column(vec![
+                row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
+                gap_box(0.0, 2.0),
+                tx("Qidiruv", 13.0, Color::rgba(255, 255, 255, 115)),
+            ])
+            .padding_each(4.0, 16.0, 4.0, 4.0),
+            gap_box(0.0, 8.0),
+            row(kids).gap(10.0).align(Align::Center).bg(CARD).border(1.0, BORDER_BRIGHT).radius(18.0).padding_xy(16.0, 4.0),
+            gap_box(0.0, 16.0),
         ])
-        .padding_each(16.0, 12.0 + top_inset, 16.0, 0.0)
+        .bg(BG)
+        .padding_each(16.0, top_inset, 16.0, 0.0);
+        column(vec![bar, spacer()])
+    }
+
+    /// Matnni bir qatorga sig'dirib, sig'masa "…" bilan qisqartiradi (Kotlin `maxLines = 1` + `TextOverflow.Ellipsis`).
+    fn fit_text(text: &str, size: f32, max_w: f32) -> String {
+        thread_local! {
+            static BOLD: Font = Font::parse(include_bytes!("../assets/fonts/Roboto-Bold.ttf")).expect("Roboto Bold");
+        }
+        BOLD.with(|f| {
+            if f.text_width(text, size) <= max_w {
+                return text.to_string();
+            }
+            let mut t: Vec<char> = text.chars().collect();
+            while !t.is_empty() {
+                t.pop();
+                let cand: String = t.iter().collect::<String>().trim_end().to_string() + "\u{2026}";
+                if f.text_width(&cand, size) <= max_w {
+                    return cand;
+                }
+            }
+            "\u{2026}".to_string()
+        })
+    }
+
+    /// Kotlin `SearchCard`: tepada rasm ("Pullik" belgisi bilan), pastda nom va janrlar; nisbat 0,68.
+    fn search_card(self: &Rc<Self>, s: &Season, h: f32) -> Element {
+        let base = match self.posters.borrow().get(&s.photo_url) {
+            Some(img) => image_fill(img),
+            None => column(vec![]).bg(Color::rgba(255, 255, 255, 26)),
+        };
+        let mut layers = vec![base];
+        if s.free == Some(false) {
+            layers.push(column(vec![row(vec![spacer(), paid_badge()])]).padding(8.0));
+        }
+        let (w, _) = window_dp();
+        let inner = ((w - 32.0 - 14.0) / 2.0 - 20.0).max(40.0);
+        let name = Self::fit_text(&s.name, 14.0, inner);
+        let genres = Self::fit_text(&s.genres.join(", "), 12.0, inner);
+        let info = column(vec![tx(name, 14.0, Color::WHITE).bold(), tx(genres, 12.0, Color::rgba(255, 255, 255, 153))]).padding_each(10.0, 8.0, 10.0, 10.0);
+        let (me, s2) = (self.clone(), s.clone());
+        column(vec![stack(layers).weight(1.0), info])
+            .bg(CARD)
+            .border(1.0, BORDER)
+            .radius(18.0)
+            .weight(1.0)
+            .height(h)
+            .on_click(move || me.open_season(s2.clone()))
+    }
+
+    /// Qidiruv natijalari to'ri (Kotlin `SeasonGrid` + `SearchCard`).
+    fn search_grid(self: &Rc<Self>, items: Rc<Vec<Season>>, scroll: &ScrollState, card_h: f32, top: f32, bottom: f32) -> Element {
+        let rows = items.len().div_ceil(2);
+        let ihp = (card_h + 14.0) * density();
+        let first = (scroll.offset() / ihp) as usize;
+        let last = (((scroll.offset() + scroll.viewport().max(1200.0)) / ihp).ceil() as usize + 1).min(rows.saturating_sub(1));
+        self.prioritize_in(&items, first.min(last), last);
+        self.next_posters();
+        let me = self.clone();
+        lazy_column(scroll, rows, card_h + 14.0, move |r| {
+            let a = me.search_card(&items[2 * r], card_h);
+            let b = match items.get(2 * r + 1) {
+                Some(s) => me.search_card(s, card_h),
+                None => spacer().weight(1.0),
+            };
+            row(vec![a, b]).gap(14.0).padding_each(0.0, 0.0, 0.0, 14.0)
+        })
+        .padding_each(16.0, top, 16.0, bottom)
     }
 
     fn nav(self: &Rc<Self>, bottom_inset: f32) -> Element {
@@ -861,11 +964,11 @@ impl Home {
             .map(|(i, (label, path))| {
                 let on = i == sel;
                 let me = self.clone();
-                let mut kids = vec![icon(path, 22.0).color(if on { Color::WHITE } else { Color::rgba(255, 255, 255, 115) })];
+                let mut kids = vec![icon(path, if on { 22.0 * 1.22 } else { 22.0 }).color(if on { Color::WHITE } else { Color::rgba(255, 255, 255, 102) })];
                 if on {
-                    kids.push(tx(*label, 10.0, Color::WHITE).bold());
+                    kids.push(tx(*label, 9.0, Color::WHITE).bold().padding_each(0.0, 3.0, 0.0, 0.0));
                 }
-                let mut e = column(kids).center().weight(1.0).height(52.0).radius(20.0).on_click(move || {
+                let mut e = column(kids).center().weight(1.0).height(52.0).margin_each(4.0, 0.0, 4.0, 0.0).radius(20.0).on_click(move || {
                     if i == 3 && me.tab.get() != 3 {
                         me.dl_index.set(None);
                     }
@@ -880,8 +983,9 @@ impl Home {
         column(vec![
             spacer(),
             row(items)
-                .gap(4.0)
-                .lens(Color::rgba(255, 255, 255, 10), GLASS_ZOOM)
+                .gap(0.0)
+                .bg(SURFACE)
+                .border(1.0, BORDER)
                 .radius(28.0)
                 .padding_xy(6.0, 10.0)
                 .margin_each(16.0, 0.0, 16.0, 12.0 + bottom_inset),
@@ -912,19 +1016,20 @@ impl Home {
         }
         let ins = safe_insets();
         let (w, _) = window_dp();
-        let card_w = ((w - 32.0 - 12.0) / 2.0).max(80.0);
-        let card_h = card_w * 1.5;
+        let card_w = ((w - 32.0 - 14.0) / 2.0).max(80.0);
+        let card_h = card_w / 0.65;
         let tab = self.tab.get();
         // Ro'yxat BUTUN ekranni egallaydi; sarlavha va navigatsiya uning ustida (shisha) turadi, orqasidan posterlar ko'rinadi.
-        let header_h = 8.0 + 124.0;
+        let header_h = HOME_HEADER_H;
         let content = if tab == 1 {
             let qs = self.query.get().trim().to_lowercase();
             let items = self.memoized(format!("s{qs}"), |all| if qs.is_empty() { Vec::new() } else { all.iter().filter(|s| s.name.to_lowercase().contains(&qs)).cloned().collect() });
             if items.is_empty() {
                 let msg = if qs.is_empty() { "Anime nomini yozib qidiruv qiling" } else { "Qidiruv natijalari topilmadi" };
-                column(vec![tx(msg, 15.0, TEXT_DIM)]).center()
+                column(vec![tx(msg, 15.0, TEXT_FAINT)]).center()
             } else {
-                self.poster_grid(items, &self.search_scroll, card_h, 8.0 + 90.0 + ins.top, 90.0 + ins.bottom)
+                // PageHeader 66 + oraliq 8 + maydon 52 + oraliq 16 (Kotlin `SearchScreen`).
+                self.search_grid(items, &self.search_scroll, card_w / 0.68, 142.0 + ins.top, 24.0 + 66.0 + ins.bottom)
             }
         } else if tab == 2 {
             let items = self.catalog_items();
@@ -975,20 +1080,20 @@ impl Home {
                     let items = self.seasons.get();
                     let rows = items.len().div_ceil(2);
                     {
-                        let ihp = (card_h + 12.0) * density();
+                        let ihp = (card_h + 14.0) * density();
                         let first = (self.scroll.offset() / ihp) as usize;
                         let last = (((self.scroll.offset() + self.scroll.viewport().max(1200.0)) / ihp).ceil() as usize + 1).min(rows.saturating_sub(1));
                         self.prioritize(first.min(last), last);
                         self.next_posters();
                     }
                     let me = self.clone();
-                    lazy_column(&self.scroll, rows, card_h + 12.0, move |r| {
+                    lazy_column(&self.scroll, rows, card_h + 14.0, move |r| {
                         let a = me.card(&items[2 * r], card_h);
                         let b = match items.get(2 * r + 1) {
                             Some(s) => me.card(s, card_h),
                             None => spacer().weight(1.0),
                         };
-                        row(vec![a, b]).gap(12.0).padding_each(0.0, 0.0, 0.0, 12.0)
+                        row(vec![a, b]).gap(14.0).padding_each(0.0, 0.0, 0.0, 14.0)
                     })
                     .padding_each(16.0, header_h + ins.top, 16.0, 90.0 + ins.bottom)
                 }
@@ -1144,7 +1249,7 @@ mod tests {
         ui.set_scale(1.0);
         let size = Size::new(360.0, 640.0);
         let cmds = ui.frame(size);
-        assert!(cmds.iter().any(|c| matches!(c, DrawCmd::Backdrop { .. })));
+        assert_eq!(crate::theme::GLASS_ON, cmds.iter().any(|c| matches!(c, DrawCmd::Backdrop { .. })));
         assert!(cmds.iter().filter(|c| matches!(c, DrawCmd::Image { .. })).count() >= 4);
         if let Ok(dir) = std::env::var("ARU_SNAPSHOT_DIR") {
             let mut c = ui.canvas(360, 640);

@@ -211,7 +211,7 @@ impl Home {
             ])
             .gap(8.0),
         ])
-        .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
+        .flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
         .radius(28.0)
         .padding(22.0)
         .margin_each(24.0, 0.0, 24.0, 0.0);

@@ -494,7 +494,7 @@ impl Home {
             gap_box(0.0, 14.0),
             row(vec![spacer(), self.chip("Bekor qilish", false, move || pc.rating_open.set(false))]),
         ])
-        .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
+        .flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
         .radius(28.0)
         .padding(22.0)
         .margin_each(24.0, 0.0, 24.0, 0.0);
@@ -618,7 +618,7 @@ impl Home {
             if is_cur {
                 kids.push(icon(A_PLAY, 24.0).color(ACCENT2));
             }
-            let mut e = row(kids).gap(12.0).align(Align::Center).padding(10.0).glass(if is_cur { ACCENT.with_opacity(0.3) } else { Color::rgba(255, 255, 255, 20) }).border(1.0, if is_cur { ACCENT.with_opacity(0.6) } else { Color::rgba(255, 255, 255, 40) }).radius(16.0).height(66.0).margin_each(0.0, 0.0, 0.0, 10.0);
+            let mut e = row(kids).gap(12.0).align(Align::Center).padding(10.0).flat_glass(if is_cur { ACCENT.with_opacity(0.3) } else { Color::rgba(255, 255, 255, 20) }).border(1.0, if is_cur { ACCENT.with_opacity(0.6) } else { Color::rgba(255, 255, 255, 40) }).radius(16.0).height(66.0).margin_each(0.0, 0.0, 0.0, 10.0);
             if !is_cur {
                 e = e.on_click(move || {
                     m2.pop();

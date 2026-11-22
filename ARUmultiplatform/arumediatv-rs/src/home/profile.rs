@@ -67,7 +67,7 @@ impl Home {
     }
 
     pub(super) fn pglass(e: Element) -> Element {
-        e.lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
+        e.flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
     }
 
     fn stat(icon_path: &'static str, label: &str, value: String) -> Element {
@@ -213,7 +213,7 @@ impl Home {
             kids.push(row(std::iter::once(spacer()).chain(buttons).collect()).gap(8.0));
         }
         let scrim_close = close.clone();
-        let panel = column(kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(22.0).margin_each(24.0, 0.0, 24.0, 0.0);
+        let panel = column(kids).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(22.0).margin_each(24.0, 0.0, 24.0, 0.0);
         let scrim = column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45));
         if kind == 6 { scrim } else { scrim.on_click(scrim_close) }
     }
@@ -243,7 +243,7 @@ impl Home {
         let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.0, Color::WHITE).bold(), icon(P_COPY, 16.0).color(Color::WHITE)])
             .gap(9.0)
             .align(Align::Center)
-            .glass(Color::rgba(255, 255, 255, 24))
+            .flat_glass(Color::rgba(255, 255, 255, 24))
             .border(1.0, Color::rgba(255, 255, 255, 50))
             .radius(22.0)
             .padding_xy(14.0, 7.0);
@@ -278,7 +278,7 @@ impl Home {
         .gap(10.0)
         .align(Align::Center)
         .padding_xy(16.0, 16.0)])
-        .lens(ACCENT.with_opacity(0.45), GLASS_ZOOM)
+        .flat_lens(ACCENT.with_opacity(0.45), GLASS_ZOOM)
         .radius(24.0)
         .on_click(move || me_b.open_billing());
 
@@ -349,7 +349,14 @@ impl Home {
         };
         let (m1, m2) = (self.clone(), self.clone());
         let kids = vec![
-            row(vec![Self::pglass(column(vec![tx("Profil", 24.0, Color::WHITE).black()]).padding_xy(22.0, 8.0)).radius(26.0), spacer()]).padding_each(0.0, 0.0, 0.0, 12.0),
+            // Kotlin `PageHeader("Profil")`: ARU + MEDIATV va kichik "Profil" yozuvi.
+            column(vec![
+                row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
+                gap_box(0.0, 2.0),
+                tx("Profil", 13.0, Color::rgba(255, 255, 255, 115)),
+            ])
+            .padding_each(4.0, 16.0, 4.0, 4.0),
+            gap_box(0.0, 8.0),
             hero,
             gap_box(0.0, 16.0),
             billing,
@@ -366,7 +373,7 @@ impl Home {
             gap_box(0.0, 16.0),
             self.danger(P_EXIT, "Accountdan chiqish", move || m2.dlg.set(1)),
         ];
-        let body = scroll_column(&self.prof_scroll, kids).padding_each(16.0, 8.0 + ins.top, 16.0, 90.0 + ins.bottom);
+        let body = scroll_column(&self.prof_scroll, kids).padding_each(16.0, ins.top, 16.0, 90.0 + ins.bottom);
         let mut layers = vec![backdrop, body];
         if self.dlg.get() != 0 {
             layers.push(self.dialog());

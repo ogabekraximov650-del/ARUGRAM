@@ -7792,3 +7792,10 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 
 ### Worker Ample'ga HECH QACHON murojaat qilmaydi (2026-11-22)
 - Foydalanuvchi talabi: faqat Supabase. `db_endpoint` Ample tarmog'i olib tashlandi, cron'dagi Ample uyg'otish so'rovi, `JOBS_URL`/belgilar markazi (`hub_url`) o'chirildi, `deploy-worker.yml` `AMPLE_*`/`JOBS_URL` ni endi qo'ymaydi. Fondagi ishlarni worker cron'i o'zi bajaradi.
+
+### Rust ilova (arumediatv-rs) Kotlin bilan bir xil qilinmoqda; shisha vaqtincha o'chirildi (2026-11-22)
+- **Talab:** Rust versiya Kotlin Compose ilovasi bilan oddiy odam farqlay olmaydigan darajada bir xil bo'lsin; "shisha" (lupa) vaqtincha olib tashlansin.
+- **Shisha:** `theme.rs` dagi `GLASS_ON = false`; hamma `.lens(..)`/`.glass(..)` chaqiruvi `.flat_lens(..)`/`.flat_glass(..)` ga almashtirildi (`Flat` trait): urg'uli tint — to'liq apelsin, qolgani — `CARD` + 1 dp `BORDER`. Qaytarish: `GLASS_ON = true`.
+- **Ranglar:** `TEXT`, `TEXT_DIM`, `TEXT_FAINT` Kotlin `AruColors` qiymatiga o'tkazildi; `BORDER`, `CARD_ALT`, `ACCENT_TINT` qo'shildi.
+- **Tenglashtirilgan ekranlar:** Bosh sahifa (sarlavha ro'yxat bilan suriladi, karta 0,65 nisbat, 14 dp oraliq, baho/ko'rish/"Pullik" belgilari ustunda, `formatCompact` "1,3 mln"), pastki menyu (`SURFACE` fon, 9 sp yozuv), Qidiruv (`PageHeader`, maydon 18 dp, `SearchCard` 0,68), Profil sarlavhasi.
+- **Tekshirish:** `ARU_SNAPSHOT_DIR=/tmp/x cargo test bosh_sahifa` ekranlarni PNG qiladi (hostda, qurilmasiz). **Qoldi:** Katalog, Kutubxona, Bo'lim sahifasi, pleyer, izohlar, chat, admin; tarjimon logotipi kartada yo'q (Rust `Season` da `tr_id` yo'q).

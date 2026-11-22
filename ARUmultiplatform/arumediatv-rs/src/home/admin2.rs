@@ -18,7 +18,7 @@ fn post(session: &str, path: &str, body: Value) -> Result<Value, String> {
 }
 
 fn modal(inner: Element, close: impl Fn() + 'static) -> Element {
-    let panel = inner.lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
+    let panel = inner.flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
     column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(close)
 }
 
@@ -156,7 +156,7 @@ impl Home {
                 column(vec![
                     tx("Limit (0 — cheksiz)", 18.0, Color::WHITE).bold(),
                     gap_box(0.0, 10.0),
-                    field(&p.num).color(Color::WHITE).size(16.0).keyboard(KeyboardKind::Number).accent(ACCENT2).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
+                    field(&p.num).color(Color::WHITE).size(16.0).keyboard(KeyboardKind::Number).accent(ACCENT2).padding_xy(14.0, 12.0).flat_glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
                     gap_box(0.0, 14.0),
                     row(vec![spacer(), self.chip("Bekor", false, { let pc = pc.clone(); move || pc.limit_for.set(None) }), self.chip("Saqlash", true, move || {
                         ps.limit_for.set(None);
@@ -192,7 +192,7 @@ impl Home {
     }
 
     fn ch_add_dialog(self: &Rc<Self>, p: &Rc<ChannelsPage>) -> Element {
-        let styled = |f: Element, hint: &str| f.color(Color::WHITE).size(15.0).hint(hint).hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0);
+        let styled = |f: Element, hint: &str| f.color(Color::WHITE).size(15.0).hint(hint).hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).padding_xy(14.0, 12.0).flat_glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0);
         let mut kids = vec![tx("Kanal qo'shish", 18.0, Color::WHITE).bold(), gap_box(0.0, 10.0), styled(field(&p.input), "@username, -100... ID yoki t.me/+havola"), gap_box(0.0, 10.0)];
         let (pk, me) = (p.clone(), self.clone());
         kids.push(row(vec![self.chip(if p.busy.get() { "Tekshirilmoqda..." } else { "Tekshirish" }, true, move || {
@@ -316,7 +316,7 @@ impl Home {
             column(vec![
                 tx("Eng kichik versiya", 15.0, Color::WHITE).bold(),
                 tx("Bundan eski ilovalar yangilanmaguncha ishlamaydi. Masalan 0.1.0 yoki 0.1.0+9. Bo'sh — cheklov yo'q.", 12.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 8.0),
-                field(&p.version).color(Color::WHITE).size(15.0).accent(ACCENT2).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
+                field(&p.version).color(Color::WHITE).size(15.0).accent(ACCENT2).padding_xy(14.0, 12.0).flat_glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
                 gap_box(0.0, 10.0),
                 row(vec![self.chip("Saqlash", true, move || {
                     let v = ps.version.get().trim().to_string();

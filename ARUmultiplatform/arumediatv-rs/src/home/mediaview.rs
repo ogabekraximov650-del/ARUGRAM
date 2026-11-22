@@ -127,7 +127,7 @@ impl Home {
     }
 
     fn media_glass_btn(icon_path: &'static str, size: f32, boxsz: f32, f: impl Fn() + 'static) -> Element {
-        column(vec![icon(icon_path, size).color(Color::WHITE)]).center().width(boxsz).height(boxsz).radius(boxsz / 2.0).lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(boxsz / 2.0).on_click(f)
+        column(vec![icon(icon_path, size).color(Color::WHITE)]).center().width(boxsz).height(boxsz).radius(boxsz / 2.0).flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(boxsz / 2.0).on_click(f)
     }
 
     pub(super) fn media_page(self: &Rc<Self>, p: &Rc<MediaPage>) -> Element {

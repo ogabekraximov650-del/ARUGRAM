@@ -329,7 +329,7 @@ impl Home {
             let pm = p.clone();
             col.push(tx(p.cm.msg.get(), 12.5, ERROR).padding_xy(18.0, 2.0).on_click(move || pm.cm.msg.set(String::new())));
         }
-        col.push(column(bar_kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).margin_each(12.0, 4.0, 12.0, 8.0));
+        col.push(column(bar_kids).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).margin_each(12.0, 4.0, 12.0, 8.0));
         column(col)
     }
 
@@ -340,7 +340,7 @@ impl Home {
             let panel = column(vec![
                 tx("Shikoyat", 18.0, Color::WHITE).bold(),
                 gap_box(0.0, 10.0),
-                field(&p.cm.reason).color(Color::WHITE).size(15.0).hint("Sababini batafsil yozing (kamida 10 belgi)").hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
+                field(&p.cm.reason).color(Color::WHITE).size(15.0).hint("Sababini batafsil yozing (kamida 10 belgi)").hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).padding_xy(14.0, 12.0).flat_glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0),
                 gap_box(0.0, 16.0),
                 row(vec![
                     spacer(),
@@ -361,7 +361,7 @@ impl Home {
                 ])
                 .gap(8.0),
             ])
-            .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
+            .flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
             .radius(28.0)
             .padding(20.0)
             .margin_each(20.0, 0.0, 20.0, 0.0);

@@ -106,7 +106,7 @@ impl Home {
                 .line_height(24.0)
                 .padding_each(16.0, 26.0, 16.0, 10.0)
                 .label_inside()
-                .glass(Color::rgba(255, 255, 255, 22))
+                .flat_glass(Color::rgba(255, 255, 255, 22))
                 .hint_color(Color::rgba(255, 255, 255, 150))
                 .accent(ACCENT2)
                 .border(1.0, Color::TRANSPARENT)

@@ -477,7 +477,7 @@ impl Login {
                     ])
                     .gap(8.0)
                     .align(Align::Center)
-                    .glass(GLASS)
+                    .flat_glass(GLASS)
                     .radius(14.0)
                     .padding_xy(14.0, 14.0)
                     .on_click(move || {
@@ -534,7 +534,7 @@ impl Login {
                     body.push(gap_box(0.0, 16.0));
                     body.push(
                         column(vec![t("Qayta urinish", 16.0, Color::WHITE).bold()])
-                            .glass(ACCENT.with_opacity(0.62))
+                            .flat_glass(ACCENT.with_opacity(0.62))
                             .radius(16.0)
                             .padding_xy(0.0, 16.0)
                             .center()
@@ -601,7 +601,7 @@ impl Login {
                 } else {
                     t(label, 16.0, Color::WHITE).bold()
                 }])
-                    .glass(ACCENT.with_opacity(if self.busy.get() { 0.5 } else { 0.62 }))
+                    .flat_glass(ACCENT.with_opacity(if self.busy.get() { 0.5 } else { 0.62 }))
                     .radius(16.0)
                     .padding_xy(0.0, 16.0)
                     .center()
@@ -668,7 +668,7 @@ impl Login {
             .letter_spacing(0.5)
             .padding_each(16.0, 26.0, 16.0, 10.0)
             .label_inside()
-            .glass(GLASS)
+            .flat_glass(GLASS)
             .hint_color(TEXT_DIM)
             .accent(ACCENT2)
             .border(1.0, Color::TRANSPARENT)

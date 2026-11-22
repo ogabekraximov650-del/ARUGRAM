@@ -377,7 +377,7 @@ impl Home {
         let mut kids: Vec<Element> = Vec::new();
         let item = |label: &str, danger: bool, f: Box<dyn Fn()>| tx(label, 15.0, if danger { ERROR } else { Color::WHITE }).padding_xy(18.0, 13.0).on_click(f);
         let styled_num = |hint: &str| {
-            field(&p.num).color(Color::WHITE).size(16.0).hint(hint).hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).keyboard(KeyboardKind::Number).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0)
+            field(&p.num).color(Color::WHITE).size(16.0).hint(hint).hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).keyboard(KeyboardKind::Number).padding_xy(14.0, 12.0).flat_glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0)
         };
         match p.modal.get() {
             Modal::None => {}
@@ -450,7 +450,7 @@ impl Home {
                 kids.push(gap_box(0.0, 10.0));
                 kids.push(styled_num("Boshqa muddat (kun)"));
                 kids.push(gap_box(0.0, 8.0));
-                kids.push(field(&p.reason).color(Color::WHITE).size(15.0).hint("Sabab (foydalanuvchi ko'radi)").hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).padding_xy(14.0, 12.0).glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0));
+                kids.push(field(&p.reason).color(Color::WHITE).size(15.0).hint("Sabab (foydalanuvchi ko'radi)").hint_color(Color::rgba(255, 255, 255, 110)).accent(ACCENT2).padding_xy(14.0, 12.0).flat_glass(Color::rgba(255, 255, 255, 22)).border(1.0, Color::TRANSPARENT).radius(14.0));
                 let (m1, p1, u1, c1) = (self.clone(), p.clone(), u.clone(), close.clone());
                 kids.push(
                     row(vec![
@@ -476,7 +476,7 @@ impl Home {
                 kids.push(row(vec![spacer(), self.chip("Yo'q", false, close.clone()), self.chip("Ochish", true, move || { c1(); m1.user_act(&p1, u1.id, "unban", 0, 0, String::new(), "Blokdan chiqarildi".into()); })]).gap(8.0).padding_each(0.0, 14.0, 0.0, 0.0));
             }
         }
-        let panel = column(kids).lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(18.0).margin_each(20.0, 0.0, 20.0, 0.0);
+        let panel = column(kids).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(18.0).margin_each(20.0, 0.0, 20.0, 0.0);
         column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(close)
     }
 
@@ -633,7 +633,7 @@ impl Home {
                 ])
                 .gap(8.0),
             ])
-            .lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
+            .flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
             .radius(28.0)
             .padding(22.0)
             .margin_each(24.0, 0.0, 24.0, 0.0);
