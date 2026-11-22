@@ -141,7 +141,7 @@ export function createEngine(video, { info, ahead: aheadOpt = 60, behind = 10, s
   let streaming = true; // ManagedMediaSource "hozir yuklash mumkin" belgisi
   let objectUrl = '';
   const MAX_AHEAD = 90; // bufer 1.5 daqiqadan oshmasin (xotira)
-  const PREFETCH_BYTES = 12 * 1024 * 1024; // oldindan parallel so'raladigan hajm
+  const PREFETCH_BYTES = 24 * 1024 * 1024; // oldindan parallel so'raladigan hajm
   let ahead = Math.min(MAX_AHEAD, aheadOpt);
   let duration = 0;
   let gen = 0; // seek'dan keyin eski yuklashlar tashlanadi

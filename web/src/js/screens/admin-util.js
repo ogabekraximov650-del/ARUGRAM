@@ -1,6 +1,6 @@
 // Admin ekranlari uchun umumiy yordamchilar.
 
-import * as tgMedia from '../tg/media.js';
+import { uploadFile as vdUpload } from '../vd/upload.js';
 
 export const fileOf = (url) => `${url ?? ''}`.trim().split('?')[0].split('/').pop() || '';
 
@@ -22,11 +22,10 @@ export function toJpeg(file) {
   });
 }
 
-/** Rasmni Telegram orqali yuklaydi (ilovadagi `TelegramService.uploadFile`); bazaga yoziladigan fayl nomini qaytaradi. */
+/** Rasmni yuklaydi (ilovadagi `VdUpload`: Telegram hisobi kerak emas); bazaga yoziladigan fayl nomini qaytaradi. */
 export async function uploadImage(blob, prefix) {
-  if (!(await tgMedia.ensureTelegram())) throw new Error("Telegram ulanmagan — rasm yuklab bo'lmaydi");
   const name = `${prefix}_${Date.now()}.jpg`;
-  const res = await tgMedia.uploadFile(blob, name);
+  const res = await vdUpload(blob, name);
   return res?.name || name;
 }
 

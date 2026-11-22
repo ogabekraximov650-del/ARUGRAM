@@ -272,3 +272,26 @@
 /* Qulfni ochish tugmasi — "to'liq ekrandan chiqish" tugmasi o'rnida (yuqori o'ng) */
 .pl-box.fs .pl-unlock { top: calc(6px + var(--safe-top, 0px) + var(--content-top, 0px)); right: 8px; left: auto; }
 .pl-box.rot .pl-unlock { top: 6px; left: auto; right: calc(var(--safe-bottom, 0px) + var(--rot-gap) + 4px); }
+
+/* Yuklab olish (Android `EpisodeTile` / `QualityRow`) */
+.pl-ep .dlb { width: 48px; height: 48px; margin-right: 8px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }
+.pl-ep .share { margin-right: 0; }
+.dlring { width: 38px; height: 38px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: conic-gradient(var(--accent2) calc(var(--p) * 1%), rgba(255, 255, 255, 0.12) 0); position: relative; }
+.dlring::before { content: ''; position: absolute; inset: 3px; border-radius: 50%; background: var(--card); }
+.pl-ep.cur .dlring::before { background: var(--accent-tint); }
+.dlring span { position: relative; color: var(--accent2); font-size: 10px; font-weight: 700; }
+.dlq { padding: 0 12px 10px; }
+.dlr { display: flex; align-items: center; padding-top: 8px; }
+.dlr .in { flex: 1; min-width: 0; }
+.dlr .h { display: flex; align-items: center; gap: 8px; }
+.dlr .q { color: #fff; font-size: 13px; font-weight: 800; cursor: pointer; }
+.dlr .p { color: #fff; font-size: 13px; font-weight: 800; }
+.dlr .p.ok { color: var(--accent); }
+.dlr .b { color: rgba(255, 255, 255, 0.65); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.dlr .ch { display: flex; gap: 6px; margin-top: 3px; }
+.dlc { font-style: normal; padding: 1px 7px; border-radius: 6px; font-size: 10.5px; background: rgba(255, 255, 255, 0.12); color: rgba(255, 255, 255, 0.7); }
+.dlc.a { background: rgba(194, 65, 12, 0.18); color: var(--accent); }
+.dlc.w { background: rgba(255, 152, 0, 0.18); color: #FF9800; }
+.dlr .pb { margin: 5px 12px 0 0; height: 4px; border-radius: 3px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.dlr .pb div { height: 100%; background: var(--accent); }
+.dlr .sq { width: 36px; height: 36px; margin-left: 5px; border: 0; border-radius: 10px; background: rgba(255, 255, 255, 0.08); display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0; }

@@ -9,7 +9,9 @@ import { createEnhancer } from './enhance.js';
 import { api, imageUrl } from '../api.js';
 import { push, back as routerBack } from '../router.js';
 import { hooks } from '../hooks.js';
-import { icon, spinner, toast, promptDialog, bindTap } from '../ui.js';
+import { icon, spinner, toast, promptDialog, bindTap, mdDialog } from '../ui.js';
+import { dlStat, dlStart, dlPause, dlRemove, dlRefresh } from '../vd/downloads.js';
+import { formatBytes } from '../screens/stats.js';
 import { esc, formatCount } from '../format.js';
 import { seasonsRepo } from '../seasons.js';
 import { billing } from '../services/billing.js';
@@ -243,13 +245,10 @@ function buildPlayer(el, route, season, opts) {
     const b = busy || !!waiting;
     box.classList.toggle('busy', b);
     const w = $('.pl-wait');
-    // Tashxis: yuklanayotganda qaysi bosqichda ekani ko'rsatiladi (`vd/store.js dbg`).
-    const txt = waiting || (busy && window.__vdDbg ? `${window.__vdDbg}` : '');
+    const txt = waiting;
     w.textContent = txt;
     w.classList.toggle('on', !!txt);
   }
-  const onDbg = () => { if (!disposed && (busy || waiting)) paintBusy(); };
-  window.addEventListener('vd-dbg', onDbg);
 
   function paintPP() {
     const playing = intended;
@@ -325,7 +324,9 @@ function buildPlayer(el, route, season, opts) {
         <div class="main"><div class="bx">${isCur ? icon('play_arrow', { size: 26, color: '#fff' }) : `<span>${epNum(e)}</span>`}</div>
           <div class="tx"><div class="t">${epNum(e)}-qism</div><div class="st">${esc(en ? `${status} \u00B7 ${en}` : status)}</div></div></div>
         <div class="share" data-k="${esc(epKey(e))}">${icon('share', { size: 22, color: 'rgba(255,255,255,0.6)' })}</div>
+        <div class="dlb" data-k="${esc(epKey(e))}"></div>
       </div>
+      <div class="dlq" hidden></div>
       ${resumable ? `<div class="bar"><div class="fill" style="width:${(frac * 100).toFixed(1)}%"></div></div>` : ''}
     </div>`;
   }
@@ -354,8 +355,61 @@ function buildPlayer(el, route, season, opts) {
         else playEpisode(e, { resumeMs: savedPosMs(e) });
       });
       n.querySelector('.share').addEventListener('click', () => e && shareEpisode(e));
+      n.querySelector('.dlb').addEventListener('click', () => {
+        const q = n.querySelector('.dlq');
+        q.hidden = !q.hidden;
+        if (!q.hidden && e) qualitiesOf(e).forEach((x) => dlRefresh(fileNameOf(e[`url_${x}`]), toI(e[`size_${x}`])));
+        paintDl();
+      });
+    });
+    paintDl();
+  }
+
+  const dlBtn = (st) => {
+    if (st.done) return icon('check', { size: 24, color: '#4ADE80' });
+    if (st.run || st.queued) {
+      const pct = st.total > 0 ? Math.min(100, Math.floor((st.got / st.total) * 100)) : 0;
+      return `<div class="dlring" style="--p:${pct}"><span>${pct}</span></div>`;
+    }
+    return icon('download', { size: 24, color: 'rgba(255,255,255,0.6)' });
+  };
+  /** Yuklash holati: tugma (hamma sifat bo'yicha) va ochilgan sifat qatorlari — ro'yxatni qayta chizmasdan. */
+  function paintDl() {
+    const list = ordered();
+    panes[1].querySelectorAll('.pl-ep').forEach((n) => {
+      const e = list.find((x) => epKey(x) === n.dataset.k);
+      if (!e) return;
+      const qs = qualitiesOf(e);
+      const sts = qs.map((x) => dlStat(fileNameOf(e[`url_${x}`])));
+      const agg = { done: sts.some((x) => x.done), run: sts.some((x) => x.run || x.queued), got: 0, total: 0 };
+      sts.filter((x) => x.run || x.queued).forEach((x) => { if (x.total && x.got / x.total >= (agg.total ? agg.got / agg.total : 0)) { agg.got = x.got; agg.total = x.total; } });
+      if (!agg.done || agg.run) n.querySelector('.dlb').innerHTML = dlBtn(agg.run ? { ...agg, done: false } : agg);
+      else n.querySelector('.dlb').innerHTML = dlBtn(agg);
+      const box = n.querySelector('.dlq');
+      if (box.hidden) return;
+      box.innerHTML = qs.map((x) => {
+        const name = fileNameOf(e[`url_${x}`]); const st = dlStat(name);
+        const total = st.total || toI(e[`size_${x}`]);
+        const pct = total > 0 ? Math.min(100, Math.floor((st.got / total) * 100)) : 0;
+        const chips = `${st.queued && !st.run ? '<i class="dlc">navbatda</i>' : ''}${st.run && st.speed ? `<i class="dlc a">${formatBytes(st.speed)}/s</i>` : ''}${st.retry ? '<i class="dlc w">qayta urinilmoqda</i>' : ''}${st.error && !st.run ? `<i class="dlc w">xato</i>` : ''}`;
+        return `<div class="dlr" data-q="${x}"><div class="in"><div class="h"><b class="q">${x}</b><b class="p${st.done ? ' ok' : ''}">${st.done ? 100 : pct}%</b><span class="b">${formatBytes(st.done ? st.total : st.got)} / ${total > 0 ? formatBytes(total) : '\u2014'}</span></div>
+          ${chips ? `<div class="ch">${chips}</div>` : ''}<div class="pb"><div style="width:${st.done ? 100 : pct}%"></div></div></div>
+          ${st.done ? '' : `<button class="sq go">${icon(st.run || st.queued ? 'pause' : 'download', { size: 20, color: st.run || st.queued ? '#E2620F' : '#fff' })}</button>`}
+          <button class="sq rm">${icon('delete', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</button></div>`;
+      }).join('');
+      box.querySelectorAll('.dlr').forEach((r) => {
+        const x = r.dataset.q; const name = fileNameOf(e[`url_${x}`]);
+        r.querySelector('.q').addEventListener('click', () => playEpisode(e, { resumeMs: savedPosMs(e) }));
+        r.querySelector('.go')?.addEventListener('click', () => { const st = dlStat(name); if (st.run || st.queued) dlPause(name); else dlStart(name); });
+        r.querySelector('.rm').addEventListener('click', async () => {
+          const ok = await mdDialog({ title: 'Tozalash', html: `Rostanham ${x} sifatidagi videoni tozalab tashlaysizmi?`, confirm: { label: 'Tozalash', color: '#F87171' }, dismiss: 'Bekor qilish' });
+          if (ok) { await dlRemove(name); paintDl(); }
+        });
+      });
     });
   }
+  const onDl = () => { if (!disposed) paintDl(); };
+  window.addEventListener('aru-dl', onDl);
 
   function centerOnCur() {
     requestAnimationFrame(() => {
@@ -1119,12 +1173,12 @@ function buildPlayer(el, route, season, opts) {
     },
     dispose() {
       disposed = true;
-      window.removeEventListener('vd-dbg', onDbg);
       token += 1;
       clearTimeout(hideT); clearTimeout(noticeT); clearTimeout(singleT); clearInterval(sleepT);
       document.removeEventListener('visibilitychange', onVis);
       window.removeEventListener('aru-packsound', onPackSound);
       window.removeEventListener('aru-enhance-failed', onEnhFail);
+      window.removeEventListener('aru-dl', onDl);
       enhancer.destroy();
       window.removeEventListener('resize', applyRot);
       document.removeEventListener('fullscreenchange', onFsChange);

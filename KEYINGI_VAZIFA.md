@@ -7747,3 +7747,9 @@ Foydalanuvchi talabi: post qo'lda (ilova/veb admin tugmasi, `announce::repost`) 
 ## Mini App sayti qayta yoqildi (2026-11-22)
 
 `deploy-web.yml` qaytarildi (`web/**` o'zgarsa avtomatik; Pages loyihasi `arumediatv` yo'q bo'lsa o'zi yaratiladi). 30 ta workflow chegarasi uchun `anibla-stage-test.yml` olib tashlandi (`tool/post/test_*.py` qo'lda ishga tushadi). `web-offline.txt` o'chirildi.
+
+## Veb: yuklab olish, 18 MiB yuklash, pleyer tuzatishlari (2026-11-22)
+
+- `web/src/js/vd/downloads.js`: qism qatorida yuklash tugmasi (Android `EpisodeTile`/`QualityRow` kabi): sifat qatorlari, foiz, tezlik, pauza, tozalash. 18 MiB oynalar, 3 parallel, shifrlangan bo'laklar IndexedDB keshiga yoziladi va `chunk-cache.js setPinned` tufayli kesh to'lganda ham o'chmaydi. Brauzer fayliga saqlanmaydi (Telegram WebView buni bermaydi) — ilova ichida internetsiz ko'rish uchun.
+- `web/src/js/vd/upload.js` (Android `VdUpload.kt` nusxasi): <=18 MiB — `PUT /api/vd/small`; katta — brauzerda AES-128-CTR shifrlab R2 ga imzolangan havola bilan (`/api/vd/up/init`, `/complete`). Admin rasm va qism videolari endi Telegram hisobisiz. DIQQAT: R2 bucket CORS (PUT, origin arumediatv.pages.dev) sozlanmagan bo'lsa katta video brauzerdan yuklanmaydi.
+- Pleyer: tashxis matni (`dbg`) ko'rsatilmaydi va har bayt uchun DOM yangilanmaydi (qotishga sabab); bir so'rovda 8 MiB gacha, oldindan yuklash 24 MiB.

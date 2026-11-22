@@ -10,9 +10,7 @@ import { cacheGet, cachePut } from '../tg/chunk-cache.js';
 import { ctrApply } from '../tg/ctr.js';
 
 /** Tashxis izi: pleyer ekranida (yuklanayotganda) ko'rinadi — qaysi bosqichda to'xtagani aniq bo'lsin. */
-export function dbg(msg) {
-  try { window.__vdDbg = `${msg}`; window.dispatchEvent(new CustomEvent('vd-dbg')); } catch (_) { /* */ }
-}
+export function dbg() { /* tashxis matni ekranda ko'rsatilmaydi (foydalanuvchi talabi); har bayt uchun DOM yangilanmasin */ }
 
 export const BLOCK = 1024 * 1024;
 export const WINDOW = 18 * 1024 * 1024;
@@ -220,7 +218,7 @@ export function openVdFile(info) {
     });
     for (let k = 0; k < miss.length;) {
       let e = k;
-      while (e + 1 < miss.length && miss[e + 1] === miss[e] + 1 && e - k < 3 && Math.floor(miss[e + 1] / perWin) === Math.floor(miss[k] / perWin)) e++;
+      while (e + 1 < miss.length && miss[e + 1] === miss[e] + 1 && e - k < 7 && Math.floor(miss[e + 1] / perWin) === Math.floor(miss[k] / perWin)) e++;
       if (!t0) t0 = performance.now();
       startRun(miss[k], e - k + 1);
       for (let j = k; j <= e; j++) res[miss[j] - first] = inflight.get(miss[j]);

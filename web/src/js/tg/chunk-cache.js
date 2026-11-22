@@ -66,9 +66,35 @@ async function refreshQuota() {
   try { const e = await navigator.storage?.estimate?.(); quota = e?.quota || 0; usage = e?.usage || 0; } catch (_) { /* */ }
 }
 
+// "Yuklab olingan" videolar (`vd/downloads.js`): ularning bo'laklari (`vd:<nom>#<i>`) kesh to'lganda ham o'chmaydi.
+const pinnedNames = new Set();
+export function setPinned(names) { pinnedNames.clear(); for (const n of names) pinnedNames.add(n); }
+const isPinned = (k) => { if (!k.startsWith('vd:')) return false; const h = k.lastIndexOf('#'); return h > 3 && pinnedNames.has(k.slice(3, h)); };
+
+/** `prefix` bilan boshlanadigan hamma bo'laklarni o'chiradi (yuklab olingan videoni tozalash). */
+export async function cacheDeletePrefix(prefix) {
+  const d = await db(); if (!d) return 0;
+  const m = await index();
+  const keys = [...m.keys()].filter((k) => k.startsWith(prefix));
+  if (!keys.length) return 0;
+  const tx = d.transaction(['c', 'm', 'f'], 'readwrite');
+  for (const k of keys) { tx.objectStore('c').delete(k); tx.objectStore('f').delete(k); tx.objectStore('m').delete(k); }
+  await txDone(tx);
+  let freed = 0;
+  for (const k of keys) { const e = m.get(k); if (e) { freed += e.size; total -= e.size; usage = Math.max(0, usage - e.size); m.delete(k); } }
+  return freed;
+}
+
+/** Keshda `prefix` bo'laklaridan nechtasi va necha bayt borligi. */
+export async function cacheCountPrefix(prefix) {
+  const m = await index(); let n = 0; let bytes = 0;
+  for (const [k, v] of m) if (k.startsWith(prefix)) { n++; bytes += v.size; }
+  return { n, bytes };
+}
+
 async function evictOldest(d) {
   let oldK = null; let oldAt = Infinity;
-  for (const [k, v] of idx) if (v.at < oldAt) { oldAt = v.at; oldK = k; }
+  for (const [k, v] of idx) if (v.at < oldAt && !isPinned(k)) { oldAt = v.at; oldK = k; }
   if (oldK == null) return 0;
   const size = idx.get(oldK).size;
   const tx = d.transaction(['c', 'm', 'f'], 'readwrite');

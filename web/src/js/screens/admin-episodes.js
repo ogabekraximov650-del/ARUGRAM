@@ -7,7 +7,7 @@ import { api, currentUser } from '../api.js';
 import { esc } from '../format.js';
 import { push } from '../router.js';
 import { icon, appBar, bindAppBar, toast, confirmDialog, spinner, C } from '../ui.js';
-import * as tgMedia from '../tg/media.js';
+import { uploadFile as vdUpload } from '../vd/upload.js';
 import { fileOf, fmtSize } from './admin-util.js';
 
 const QS = ['360p', '480p', '720p', '1080p'];
@@ -168,11 +168,10 @@ function openEpisodeForm(animeId, seasonId, ep, onSaved) {
     const progBar = (u) => `<div class="ad-prog"><div style="width:${(u.p * 100).toFixed(1)}%"></div></div><div class="ss-h">${progText(u)}</div>`;
 
     async function upload(u, file, name, onDone) {
-      if (!(await tgMedia.ensureTelegram())) { toast("Video Telegram orqali yuklanadi: Profil → \"Telegram'ni ulash\""); return; }
       u.up = { p: 0, sent: 0, total: file.size };
       paint();
       try {
-        const res = await tgMedia.uploadFile(file, name, {
+        const res = await vdUpload(file, name, {
           onProgress: (sent, total) => { u.up = { p: total > 0 ? sent / total : 0, sent, total: total || file.size }; if (!closed) paintProgress(); },
         });
         u.up = null;
