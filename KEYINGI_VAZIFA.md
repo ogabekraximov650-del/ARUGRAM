@@ -7789,3 +7789,6 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 - **Alomat:** ilovada video/rasm "HTTP 200 error fayl topilmadi" (yozishma videosi ham), bazada ma'lumot esa bor edi.
 - **Sabab:** `JOBS_URL` (o'lik Ample) sozlangan bo'lgani uchun belgilar markazi (`hub_url`) javob bermadi va zaxira DO'ga o'tildi; u "uzoq ishlatilmagan" deb so'ralgan HAR kalitni (shu jumladan `vddel_<nom>` — "o'chirilgan" belgisi) "hozir" qilib qo'ydi -> hamma fayl o'chirilgan hisoblandi. Har so'rov markazni 4 soniya kutgani ham sekinlikka sabab edi.
 - **Tuzatish:** Supabase sozlangan bo'lsa `jobs_url_raw` bo'sh (Ample ishlatilmaydi; fondagi ishlarni worker cron'i o'zi bajaradi); o'chirilgan belgisi kaliti `vddel2_` ga ko'chirildi (DO'da buzilgan eski belgilar e'tiborga olinmaydi).
+
+### Worker Ample'ga HECH QACHON murojaat qilmaydi (2026-11-22)
+- Foydalanuvchi talabi: faqat Supabase. `db_endpoint` Ample tarmog'i olib tashlandi, cron'dagi Ample uyg'otish so'rovi, `JOBS_URL`/belgilar markazi (`hub_url`) o'chirildi, `deploy-worker.yml` `AMPLE_*`/`JOBS_URL` ni endi qo'ymaydi. Fondagi ishlarni worker cron'i o'zi bajaradi.

@@ -319,9 +319,8 @@ thread_local! {
 
 /// UZ: Ample ish yurituvchisi manzili. Baza Supabase'da bo'lsa Ample (o'lik server) ISHLATILMAYDI — aks holda belgilar markazi javob bermay,
 /// "o'chirilgan fayl" belgilari noto'g'ri qo'yilib, hamma fayl "topilmadi" bo'lib qolardi. EN: ignored when the DB is Supabase.
-fn jobs_url_raw(env: &Env) -> String {
-    if supabase_cfg(env).is_some() { return String::new(); }
-    tg_secret(env, "JOBS_URL")
+fn jobs_url_raw(_env: &Env) -> String {
+    String::new()
 }
 
 fn hub_url(env: &Env) -> Option<String> {
@@ -723,11 +722,8 @@ fn db_endpoint(env: &Env, sqls: &[&str]) -> Result<(String, String)> {
     // UZ: Supabase berilgan bo'lsa HAMMA so'rov shu yerga ketadi (`pipeline_post` o'zi RPC chaqiradi). EN: Supabase wins when configured.
     if supabase_cfg(env).is_some() { return Ok((String::new(), String::new())); }
     let turso_only = sqls.iter().any(|s| { let l = s.to_ascii_lowercase(); l.contains("post_jobs") || l.contains("anibla_jobs") });
-    if !turso_only {
-        let u = env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default();
-        let t = env.secret("AMPLE_TOKEN").map(|v| v.to_string()).unwrap_or_default();
-        if !u.is_empty() && !t.is_empty() { return Ok((u.trim_end_matches('/').to_string(), t)); }
-    }
+    // UZ: Ample ishlatilmaydi (o'lik server) — Supabase bo'lmasa faqat Turso. EN: Ample is no longer used.
+    let _ = turso_only;
     Ok((env.secret("TURSO_URL")?.to_string(), env.secret("TURSO_TOKEN")?.to_string()))
 }
 
@@ -776,7 +772,7 @@ async fn pipeline_post(env: &Env, url: &str, token: &str, body: String) -> Resul
         )?;
         return Ok(Fetch::Request(r).send().await?);
     }
-    let ample = env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default();
+    let ample = String::new();
     let is_ample = !ample.is_empty() && url.trim_end_matches('/') == ample.trim_end_matches('/');
     let mut br = is_ample && body.len() >= 1024 && AMPLE_BR.with(|f| f.get());
     loop {
@@ -15230,14 +15226,6 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     // UZ: cron har daqiqada: Ample 60 soniya bo'sh tursa uxlab qoladi, shuning uchun har daqiqada yengil so'rov (uyg'otish). Og'ir ishlar avvalgidek har 10 daqiqada.
     // EN: cron runs every minute: a light ping keeps Ample awake; the heavy jobs below still run every 10 minutes.
     {
-        let (au, at) = (env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default(), env.secret("AMPLE_TOKEN").map(|v| v.to_string()).unwrap_or_default());
-        if !au.is_empty() && !at.is_empty() {
-            let mut h = Headers::new();
-            let _ = h.set("Authorization", &format!("Bearer {at}"));
-            if let Ok(rq) = Request::new_with_init(&format!("{}/usage", au.trim_end_matches('/')), RequestInit::new().with_method(Method::Get).with_headers(h)) {
-                let _ = Fetch::Request(rq).send().await;
-            }
-        }
         // Fondagi ishlar (o'chirishdan keyingi tozalash): tugamagan bo'lsa Ample ish yurituvchisi qayta uyg'otiladi.
         jobs_cron(&env).await;
         if ((ev.schedule() / 60_000.0) as i64) % 10 != 0 { return; }
