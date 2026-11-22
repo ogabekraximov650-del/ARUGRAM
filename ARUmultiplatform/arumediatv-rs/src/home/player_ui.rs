@@ -400,6 +400,11 @@ impl Home {
                 (w, h)
             };
             layers.push(column(vec![column(vec![]).video().width(vw).height(vh)]).center());
+            // Oldingi video (masalan, support chatdagi) oxirgi kadri GL teksturasida qolib ketadi: yangi video birinchi kadrni
+            // chizguncha (Opening) tekstura qora qatlam bilan yopiladi.
+            if st.state == PState::Opening {
+                layers.push(column(vec![]).bg(Color::BLACK));
+            }
         } else {
             layers.push(cover);
         }

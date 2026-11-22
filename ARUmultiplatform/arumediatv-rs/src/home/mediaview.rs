@@ -169,6 +169,10 @@ impl Home {
             }
         });
         let mut layers: Vec<Element> = vec![column(vec![]).bg(Color::BLACK), video];
+        // Oldingi videoning oxirgi kadri tekstura'da qoladi: birinchi kadrgacha qora qatlam bilan yopiladi.
+        if st.as_ref().is_none_or(|s| s.state == PState::Opening) {
+            layers.push(column(vec![]).bg(Color::BLACK));
+        }
         let err = p.err.get();
         if p.loading.get() {
             layers.push(column(vec![spinner(48.0, 3.0, ACCENT2)]).center());
