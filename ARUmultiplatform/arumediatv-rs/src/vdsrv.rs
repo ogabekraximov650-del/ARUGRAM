@@ -12,6 +12,31 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 const CHUNK: u64 = 18 * 1024 * 1024;
+/// Diskdagi bo'lak o'lchami (Kotlin `BlockCache.BLOCK`).
+const BLOCK: u64 = 1024 * 1024;
+/// Bitta tarmoq so'rovida ko'pi bilan nechta bo'lak (ortiqcha bayt kelmasin).
+const RUN_MAX: u64 = 8;
+
+/// Telefondagi shifrlangan bo'lak keshi papkasi (UZ: ko'rilgan joy keyingi safar tarmoqsiz ochiladi — Kotlin `BlockCache` kabi).
+pub fn cache_dir() -> String {
+    let d = format!("{}/vdcache", uzcoders::android::files_dir());
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+fn block_len(total: u64, idx: u64) -> usize {
+    BLOCK.min(total - idx * BLOCK) as usize
+}
+
+fn block_read(name: &str, idx: u64, total: u64) -> Option<Vec<u8>> {
+    let p = format!("{}/{name}__{idx}", cache_dir());
+    let v = crate::secure::read(&p, &format!("vd:{name}:{idx}"))?;
+    if v.len() == block_len(total, idx) { Some(v) } else { None }
+}
+
+fn block_write(name: &str, idx: u64, plain: &[u8]) {
+    let _ = crate::secure::write(&format!("{}/{name}__{idx}", cache_dir()), &format!("vd:{name}:{idx}"), plain);
+}
 /// Bitta javobda eng ko'pi (Range oxiri ko'rsatilmasa): mijoz keyingi qismni o'zi so'raydi.
 const OPEN_ENDED_MAX: u64 = 32 * 1024 * 1024;
 
@@ -61,6 +86,14 @@ fn info(name: &str) -> Option<(u64, String)> {
     if let Some(v) = INFO.lock().ok()?.as_ref().and_then(|m| m.get(name).cloned()) {
         return Some(v);
     }
+    if let Some(t) = crate::secure::read_text(&format!("{}/{name}__info", cache_dir()), "vdinfo") {
+        if let Some((a, b)) = t.split_once('|') {
+            if let (Ok(size), true) = (a.parse::<u64>(), b.len() == 32) {
+                INFO.lock().ok()?.get_or_insert_with(HashMap::new).insert(name.to_string(), (size, b.to_string()));
+                return Some((size, b.to_string()));
+            }
+        }
+    }
     let body = serde_json::json!({ "names": [name] });
     let (code, text) = crate::api::request("POST", "/api/vd/info", "", Some(&body), Some(&session())).ok()?;
     if code != 200 {
@@ -73,6 +106,7 @@ fn info(name: &str) -> Option<(u64, String)> {
         return None;
     }
     INFO.lock().ok()?.get_or_insert_with(HashMap::new).insert(name.to_string(), (size, key.clone()));
+    let _ = crate::secure::write_text(&format!("{}/{name}__info", cache_dir()), "vdinfo", &format!("{size}|{key}"));
     Some((size, key))
 }
 
@@ -166,34 +200,71 @@ fn handle(mut s: TcpStream) -> std::io::Result<()> {
         return s.write_all(head.as_bytes());
     }
     // Sarlavha DARHOL yuboriladi (oyna isitilishini kutmasdan): pleyer ulanishni ochiq deb biladi va o'qish muddati bilan kutadi.
-    // Oynalar ketma-ket isitiladi va uzatiladi: birinchi oyna tayyor bo'lishi bilan bayt ketadi (avval hamma oyna isitilguncha kutilardi),
-    // keyingi oyna esa fonda oldindan isitiladi (Kotlin `VdAhead`).
+    // Bo'lak telefon keshida bo'lsa tarmoqsiz beriladi; bo'lmasa shu oynaning keyingi bo'laklari (ko'pi bilan RUN_MAX) bitta so'rovda olinadi,
+    // shifri ochiladi, keshga yoziladi va pleyerga uzatiladi. Keyingi oyna fonda oldindan isitiladi (Kotlin `VdAhead`).
     s.write_all(head.as_bytes())?;
     let mut buf = vec![0u8; 64 * 1024];
     let mut off = start;
     while off <= end {
+        let b = off / BLOCK;
+        if let Some(plain) = block_read(name, b, total) {
+            let bs = b * BLOCK;
+            let from = (off - bs) as usize;
+            let to = ((end - bs + 1) as usize).min(plain.len());
+            s.write_all(&plain[from..to])?;
+            off = bs + to as u64;
+            continue;
+        }
         let w = off / CHUNK;
-        let seg_end = end.min((w + 1) * CHUNK - 1);
         if !warm(name, w) {
             return Ok(());
         }
         if (w + 1) * CHUNK < total {
             prefetch(name, w + 1);
         }
-        let resp = match agent().get(&play_url(name)).set("Range", &format!("bytes={off}-{seg_end}")).timeout(Duration::from_secs(120)).call() {
-            Ok(r) if r.status() == 206 || (r.status() == 200 && off == 0 && seg_end + 1 == total) => r,
+        let win_last_block = ((w + 1) * CHUNK / BLOCK).saturating_sub(1);
+        let mut last_b = (end / BLOCK).min(win_last_block).min(b + RUN_MAX - 1);
+        // Keshda bor bo'laklarga yetganda to'xtaymiz (ular diskdan olinadi).
+        for k in (b + 1)..=last_b {
+            if std::path::Path::new(&format!("{}/{name}__{k}", cache_dir())).is_file() {
+                last_b = k - 1;
+                break;
+            }
+        }
+        let (rs, re) = (b * BLOCK, ((last_b + 1) * BLOCK).min(total) - 1);
+        let resp = match agent().get(&play_url(name)).set("Range", &format!("bytes={rs}-{re}")).timeout(Duration::from_secs(120)).call() {
+            Ok(r) if r.status() == 206 || (r.status() == 200 && rs == 0 && re + 1 == total) => r,
             _ => return Ok(()),
         };
         let mut r = resp.into_reader();
-        while off <= seg_end {
-            let want = ((seg_end - off + 1) as usize).min(buf.len());
+        let mut pos = rs;
+        let mut cur = b;
+        let mut blk: Vec<u8> = Vec::with_capacity(BLOCK as usize);
+        while pos <= re {
+            let want = ((re - pos + 1) as usize).min(buf.len());
             let n = r.read(&mut buf[..want])?;
             if n == 0 {
                 return Ok(());
             }
-            crate::vd::apply(&key, off, &mut buf[..n]);
-            s.write_all(&buf[..n])?;
-            off += n as u64;
+            crate::vd::apply(&key, pos, &mut buf[..n]);
+            // Pleyerga: faqat so'ralgan joydan (`off`) boshlab.
+            let upto = (pos + n as u64).min(end + 1);
+            if upto > off {
+                let skip = off.saturating_sub(pos) as usize;
+                s.write_all(&buf[skip..(upto - pos) as usize])?;
+                off = upto;
+            }
+            blk.extend_from_slice(&buf[..n]);
+            pos += n as u64;
+            while blk.len() >= block_len(total, cur) && !blk.is_empty() {
+                let l = block_len(total, cur);
+                block_write(name, cur, &blk[..l]);
+                blk.drain(..l);
+                cur += 1;
+                if cur * BLOCK >= total {
+                    break;
+                }
+            }
         }
     }
     Ok(())
