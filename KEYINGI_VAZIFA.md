@@ -7743,3 +7743,7 @@ Foydalanuvchi talabi. 47 tadan 17 ta keraksiz workflow o'chirildi: bir martalik 
 ## Kanal posti: avtomatik joylash O'CHIRILDI (2026-11-22)
 
 Foydalanuvchi talabi: post qo'lda (ilova/veb admin tugmasi, `announce::repost`) joylanadi. `announce.rs` dagi `AUTO_POST = false` — `episode_ready` va `collage_post` post chiqarmaydi (kollaj kadrlari baribir saqlanadi, qo'lda joylashda ishlatiladi). Qayta yoqish: `AUTO_POST = true`.
+
+## Mini App sayti qayta yoqildi (2026-11-22)
+
+`deploy-web.yml` qaytarildi (`web/**` o'zgarsa avtomatik; Pages loyihasi `arumediatv` yo'q bo'lsa o'zi yaratiladi). 30 ta workflow chegarasi uchun `anibla-stage-test.yml` olib tashlandi (`tool/post/test_*.py` qo'lda ishga tushadi). `web-offline.txt` o'chirildi.
