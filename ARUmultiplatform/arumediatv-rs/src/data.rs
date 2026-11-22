@@ -450,6 +450,8 @@ pub struct Episode {
     /// Intro oraliqlari (millisekund).
     pub intro: Vec<(i64, i64)>,
     pub added_at: i64,
+    /// Qismning jami ko'rilgan vaqti (ms).
+    pub watch_ms: i64,
 }
 
 /// `1:23`, `83` (soniya), `1:02:03` -> millisekund; xato -> 0.
@@ -518,6 +520,7 @@ pub fn parse_episodes(v: &Value) -> Vec<Episode> {
                             let b = intro_ms(o[format!("intro_{}", i + 1)].as_str().unwrap_or(""));
                             if a > 0 && b > a { Some((a, b)) } else { None }
                         }).collect(),
+                        watch_ms: num(&o["watch_ms_total"]),
                         added_at: { let r = num(&o["ready_at"]); if r > 0 { r } else { num(&o["created_at"]) } },
                     }
                 })

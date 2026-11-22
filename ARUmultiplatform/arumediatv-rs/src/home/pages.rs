@@ -94,6 +94,14 @@ impl Home {
                     Err(e) => p2.eps_err.set(e),
                 }
                 p2.eps_loading.set(false);
+                // Kotlin: bo'lim ochilganda oxirgi ko'rilgan (yoki birinchi) qism to'xtatilgan holda tayyorlanadi.
+                if ok && !p2.want_play.get() && p2.pl.cur.get().is_none() {
+                    let eps = p2.eps.get();
+                    let pick = eps.iter().rev().find(|e| e.urls.iter().any(|(_, u)| crate::downloads::progress_get(u).is_some())).or_else(|| eps.first()).cloned();
+                    if let Some(e) = pick {
+                        me.play_episode(&p2, &e, None, None, false);
+                    }
+                }
                 if p2.want_play.get() {
                     p2.want_play.set(false);
                     p2.pl.loading.set(false);
@@ -380,11 +388,11 @@ impl Home {
         let pc = p.clone();
         let body = body.on_swipe(move |d| pc.tab.set((pc.tab.get() as i32 + d).clamp(0, 3) as usize));
         // Muqova va yorliqlar tepada qoladi, ma'lumot/qism/izoh ro'yxati esa ularning OSTIDAN o'tadi (yorliq paneli shisha).
-        let top_h = 12.0 + ins.top + 40.0 + 8.0 + cover_h + 8.0 + 38.0 + 6.0;
+        let top_h = 12.0 + ins.top + 40.0 + 8.0 + cover_h + 6.0 + 34.0 + 8.0 + 38.0 + 6.0;
         let mut layers = vec![
             Self::glass_backdrop(),
             column(vec![body.padding_add(0.0, top_h, 0.0, ins.bottom).grow(1.0)]),
-            column(vec![column(vec![head_row, cover, tab_bar]).bg(BG), spacer()]),
+            column(vec![column(vec![head_row, cover, self.now_chip(p), tab_bar]).bg(BG), spacer()]),
         ];
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));
@@ -396,6 +404,22 @@ impl Home {
             layers.push(o);
         }
         stack(layers)
+    }
+
+    /// Kotlin "Hozir ijro": "N-qism  👁 ko'rish  ⏱ vaqt  📅 sana" — pleyer tagidagi kichik karta.
+    fn now_chip(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
+        const CLOCK: &str = "M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zM12.5,7H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67z";
+        const CAL: &str = "M16.53,11.06L15.47,10l-4.88,4.88 -2.12,-2.12 -1.06,1.06L10.59,17l5.94,-5.94zM19,3h-1V1h-2v2H8V1H6v2H5c-1.11,0 -1.99,0.9 -1.99,2L3,19c0,1.1 0.89,2 2,2h14c1.1,0 2,-0.9 2,-2V5c0,-1.1 -0.9,-2 -2,-2zM19,19H5V8h14v11z";
+        let Some(cur) = p.pl.cur.get() else { return gap_box(0.0, 8.0) };
+        let eps = p.eps.get();
+        let Some(ep) = eps.iter().find(|e| e.id == cur.0) else { return gap_box(0.0, 8.0) };
+        let dim = Color::rgba(255, 255, 255, 179);
+        let stat = |ic: &'static str, t: String| row(vec![icon(ic, 14.0).color(dim), gap_box(4.0, 0.0), tx(t, 11.5, dim).bold()]).align(Align::Center);
+        let mut kids = vec![tx(format!("{}-qism", ep.number), 11.5, Color::WHITE).bold(), stat(EYE, crate::data::format_count(ep.views)), stat(CLOCK, crate::data::format_hours(ep.watch_ms))];
+        if ep.added_at > 0 {
+            kids.push(stat(CAL, crate::data::fmt_moment(ep.added_at)));
+        }
+        row(vec![Self::card_box(row(kids).gap(10.0).align(Align::Center).padding_xy(10.0, 5.0)).radius(11.0), spacer()]).margin_each(16.0, 6.0, 16.0, 0.0)
     }
 
     fn season_info_tab(self: &Rc<Self>, p: &Rc<SeasonPage>, info: &Rc<SeasonInfo>) -> Element {
