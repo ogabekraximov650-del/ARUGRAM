@@ -294,6 +294,36 @@ impl Store {
         Ok((cols, out))
     }
 
+    /// UZ: bazadagi hamma jadval: `<nom>.schema.sql` (yaratish buyrug'i) va `<nom>.jsonl` (har qator — JSON obyekt; BLOB `{"$hex":..}`) `out` papkasiga yoziladi.
+    ///     Qaytadi: (jadval, qatorlar soni). FAQAT O'QISH (Telegram'ga, jurnalga yozmaydi). EN/RU: dump every table to JSONL for migration.
+    pub async fn dump_all(&self, out: &Path) -> Result<Vec<(String, usize)>> {
+        std::fs::create_dir_all(out)?;
+        let (_, tabs) = self.query_raw("select name, sql from sqlite_master where type='table' and name not like 'sqlite_%' and name not like '_litestream%' order by name", vec![]).await?;
+        let mut res = vec![];
+        for t in tabs {
+            let (Value::Text(name), sql) = (t[0].clone(), t[1].clone()) else { continue };
+            if let Value::Text(sql) = sql { std::fs::write(out.join(format!("{name}.schema.sql")), sql)?; }
+            let (cols, rows) = self.query_raw(&format!("select * from \"{}\"", name.replace('"', "\"\"")), vec![]).await?;
+            let mut buf = String::new();
+            for r in &rows {
+                let mut o = serde_json::Map::new();
+                for (c, v) in cols.iter().zip(r.iter()) {
+                    o.insert(c.clone(), match v {
+                        Value::Null => J::Null,
+                        Value::Integer(i) => json!(i),
+                        Value::Real(f) => json!(f),
+                        Value::Text(t) => json!(t),
+                        Value::Blob(b) => json!({"$hex": b.iter().map(|x| format!("{x:02x}")).collect::<String>()}),
+                    });
+                }
+                buf.push_str(&J::Object(o).to_string()); buf.push('\n');
+            }
+            std::fs::write(out.join(format!("{name}.jsonl")), buf)?;
+            res.push((name, rows.len()));
+        }
+        Ok(res)
+    }
+
     pub async fn marks(&self, bump: &[String], get: &[String], at: i64) -> Result<J> {
         for k in bump {
             self.conn.execute("insert into kv_marks(k,v) values(?1,?2) on conflict(k) do update set v=max(excluded.v, kv_marks.v+1)", vec![Value::Text(k.clone()), Value::Integer(at.max(1))]).await?;

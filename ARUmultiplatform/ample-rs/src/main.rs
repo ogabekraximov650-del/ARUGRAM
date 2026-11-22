@@ -226,6 +226,14 @@ async fn main() {
             Err(e) => { log(&format!("tiklab bo'lmadi (yangi bo'sh baza ochiladi): {}", e)); let _ = std::fs::remove_dir_all(&cfg.dir); store::Store::open(cfg.clone()).await.expect("baza ochilmadi") }
         }
     } else { store::Store::open(cfg.clone()).await.expect("baza ochilmadi") };
+    // UZ: FAQAT TIKLASH rejimi (migratsiya): baza Telegram nusxasidan tiklanadi, jadvallar `RECOVER_OUT` papkasiga yoziladi va chiqiladi.
+    //     Hech qanday zaxiralash/o'chirish ishga tushmaydi — Telegram kanaliga TEGILMAYDI. EN/RU: read-only recovery + dump mode.
+    if let Some(out) = env("RECOVER_OUT") {
+        match store.dump_all(std::path::Path::new(&out)).await {
+            Ok(v) => { for (t, n) in v { log(&format!("jadval {t}: {n} qator")); } std::process::exit(0); }
+            Err(e) => { log(&format!("dump xato: {e}")); std::process::exit(1); }
+        }
+    }
     let st: Shared = Arc::new(Mutex::new(store));
     {
         let mut s = st.lock().await;

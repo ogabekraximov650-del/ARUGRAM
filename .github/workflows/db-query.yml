@@ -4,7 +4,7 @@ name: Baza so'rovi (faqat o'qish)
 on:
   push:
     branches: [main]
-    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED', 'ci/REPOST']
+    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED', 'ci/REPOST', 'ci/DB_RECOVER']
 
 permissions:
   contents: read
@@ -54,6 +54,31 @@ jobs:
           echo "Baza manbasi: $SRC"
       - name: Ustunlar
         run: python3 ci/db_query.py
+      # TIKLASH (faqat o'qish): baza Telegram "Database" kanalidagi shifrlangan nusxadan tiklanadi va jadvallar/qatorlar soni chiqariladi (migratsiya uchun).
+      # Telegram kanaliga HECH NARSA YOZILMAYDI. `JR_KEY` GitHub Secret bo'lishi kerak. Faqat `ci/DB_RECOVER` o'zgarganda ishlaydi.
+      - name: Telegram nusxasidan tiklash
+        env:
+          JR_KEY: ${{ secrets.JR_KEY }}
+        run: |
+          if ! git diff --name-only HEAD~1 HEAD | grep -q '^ci/DB_RECOVER$'; then echo "ci/DB_RECOVER o'zgarmagan — o'tkazildi"; exit 0; fi
+          if [ -z "${JR_KEY:-}" ]; then echo "::error::JR_KEY GitHub Secret qo'yilmagan"; exit 1; fi
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          DB=$(grep -E '^CHANNEL_ID=' ARUmultiplatform/tgstore/channels.txt | head -1 | cut -d= -f2- | tr -d '[:space:]')
+          echo "::add-mask::$DB"
+          (cd ARUmultiplatform/ample-rs && cargo build --release 2>&1 | tail -3)
+          for F in ARUmultiplatform/tgstore/bot.enc tool/bot/main_bot.enc; do
+            [ -f "$F" ] || continue
+            BOT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$F" 2>/dev/null | tr -d '[:space:]')
+            [ -n "$BOT" ] || continue
+            echo "::add-mask::$BOT"
+            rm -rf "$RUNNER_TEMP/jr" "$RUNNER_TEMP/dump"
+            echo "Urinish: $F"
+            if TG_BOT_TOKEN="$BOT" TG_CHANNEL_ID="$DB" JR_KEY="$JR_KEY" JR_DIR="$RUNNER_TEMP/jr" RECOVER_OUT="$RUNNER_TEMP/dump" \
+                 ./ARUmultiplatform/ample-rs/target/release/tgstore-jr 2>&1 | tee "$RUNNER_TEMP/rec.log" | grep -v "^$" | tail -80; then
+              if grep -q "jadval " "$RUNNER_TEMP/rec.log"; then echo "✅ tiklandi"; exit 0; fi
+            fi
+          done
+          echo "::error::Telegram nusxadan tiklab bo'lmadi (yuqoridagi logga qarang)"; exit 1
       # SINOV: telefon -> worker -> Telegram yuklash tezligi (R2'siz). Faqat `ci/UPLOAD_SPEED` o'zgarganda (har safar 4 x 18 MiB x 2).
       - name: Yuklash tezligi
         run: |
