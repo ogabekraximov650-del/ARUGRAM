@@ -13,6 +13,7 @@ const GENRES: [&str; 37] = [
     "Mexa", "Musiqiy", "O'yinlar", "O'zga dunyo", "Psixologik", "Qo'rqinchli", "Romantika", "Sarguzasht", "Sehr", "Shafqatsizlik", "Sir", "Sport", "Super kuch", "Syodze", "Syonen", "Tarixiy", "Tragediya", "Triller",
 ];
 const QUALS: [&str; 4] = ["360p", "480p", "720p", "1080p"];
+const A_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
 const AC_EDIT: &str = "M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z";
 const AC_DEL: &str = "M6,19c0,1.1 0.9,2 2,2h8c1.1,0 2,-0.9 2,-2V7H6v12zM19,4h-3.5l-1,-1h-5l-1,1H5v2h14V4z";
 const AC_ADD: &str = "M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
@@ -107,14 +108,16 @@ fn mb(b: u64) -> String {
 #[derive(Clone)]
 pub enum Content {
     List(Rc<ListPg>),
+    Translator(Rc<TrForm>),
     Anime(Rc<AnimeForm>),
     Season(Rc<SeasonForm>),
     Episode(Rc<EpForm>),
 }
 
-/// level: 0 — animelar, 1 — bo'limlar, 2 — qismlar.
+/// level: 0 — tarjimonlar, 1 — tarjimonning animelari, 2 — bo'limlar, 3 — qismlar (Kotlin: Translators -> Anime -> Seasons -> Episodes).
 pub struct ListPg {
     level: u8,
+    tr: Value,
     anime: Value,
     season: Value,
     items: State<Rc<Vec<Value>>>,
@@ -126,8 +129,19 @@ pub struct ListPg {
     scroll: ScrollState,
 }
 
+pub struct TrForm {
+    initial: Value,
+    name: State<String>,
+    bio: State<String>,
+    photo: State<String>,
+    busy: State<bool>,
+    err: State<String>,
+    scroll: ScrollState,
+}
+
 pub struct AnimeForm {
     initial: Value,
+    tr: State<i64>,
     name: State<String>,
     davlat: State<String>,
     studiya: State<String>,
@@ -217,10 +231,6 @@ fn round_btn(path: &'static str, color: Color, f: impl Fn() + 'static) -> Elemen
     column(vec![icon(path, 20.0).color(color)]).center().width(40.0).height(40.0).on_click(f)
 }
 
-fn fab(f: impl Fn() + 'static) -> Element {
-    column(vec![spacer(), row(vec![spacer(), column(vec![icon(AC_ADD, 28.0).color(Color::WHITE)]).center().width(60.0).height(60.0).radius(30.0).gradient(ACCENT, ACCENT2).on_click(f)]).padding_each(0.0, 0.0, 20.0, 24.0)])
-}
-
 fn note(t: String, err: bool) -> Element {
     tx(t, 13.0, if err { ERROR } else { Color::hex(0x69F0AE) }).margin_each(0.0, 0.0, 0.0, 10.0)
 }
@@ -244,35 +254,43 @@ fn thumb(name: &str, size: f32) -> Element {
 impl Home {
     pub(super) fn open_admin_content(self: &Rc<Self>) {
         uzcoders::prelude::breadcrumb("open_admin_content");
-        self.open_list(0, Value::Null, Value::Null);
+        self.open_list(0, Value::Null, Value::Null, Value::Null);
     }
 
-    fn open_list(self: &Rc<Self>, level: u8, anime: Value, season: Value) {
+    /// Tarjimonning animelari (`translator_id` bo'yicha; id 0 — tarjimonsizlar).
+    fn tr_animes(all: Vec<Value>, tid: i64) -> Vec<Value> {
+        all.into_iter().filter(|a| iv(a, "translator_id") == tid).collect()
+    }
+
+    fn open_list(self: &Rc<Self>, level: u8, tr: Value, anime: Value, season: Value) {
         uzcoders::prelude::breadcrumb("open_list");
-        let cache_key = match level {
-            0 => "admin_anime".to_string(),
-            1 => format!("admin_seasons_{}", iv(&anime, "id")),
-            _ => format!("eps_{}_{}", iv(&anime, "id"), iv(&season, "season_id")),
+        let cached = match level {
+            0 => read_cache("admin_translators"),
+            1 => read_cache("admin_anime").map(|a| Self::tr_animes(a, iv(&tr, "id"))),
+            2 => read_cache(&format!("admin_seasons_{}", iv(&anime, "id"))),
+            _ => read_cache(&format!("eps_{}_{}", iv(&anime, "id"), iv(&season, "season_id"))),
         };
-        let cached = read_cache(&cache_key);
         let has = cached.is_some();
         let mut first = cached.unwrap_or_default();
-        if level == 2 {
-            first.reverse();
+        match level {
+            2 => first.sort_by_key(|s| std::cmp::Reverse(Some(iv(s, "bolim_id")).filter(|b| *b > 0).unwrap_or_else(|| iv(s, "season_id")))),
+            3 => first.reverse(),
+            _ => {}
         }
-        let p = Rc::new(ListPg { level, anime, season, items: State::new(Rc::new(first)), loaded: State::new(has), error: State::new(String::new()), del: State::new(None), post: State::new(None), msg: State::new(String::new()), scroll: ScrollState::new() });
+        let p = Rc::new(ListPg { level, tr, anime, season, items: State::new(Rc::new(first)), loaded: State::new(has), error: State::new(String::new()), del: State::new(None), post: State::new(None), msg: State::new(String::new()), scroll: ScrollState::new() });
         self.clist_load(&p);
         self.push(pages::Page::AdminContent(Content::List(p)));
     }
 
     fn clist_load(self: &Rc<Self>, p: &Rc<ListPg>) {
         let (p2, session) = (p.clone(), self.session.clone());
-        let (level, aid, sid) = (p.level, iv(&p.anime, "id"), iv(&p.season, "season_id"));
+        let (level, tid, aid, sid) = (p.level, iv(&p.tr, "id"), iv(&p.anime, "id"), iv(&p.season, "season_id"));
         spawn_bg(
             move || -> Result<Vec<Value>, String> {
                 let (path, key) = match level {
-                    0 => ("/api/anime".to_string(), "admin_anime".to_string()),
-                    1 => (format!("/api/seasons/anime/{aid}"), format!("admin_seasons_{aid}")),
+                    0 => ("/api/translators".to_string(), "admin_translators".to_string()),
+                    1 => ("/api/anime".to_string(), "admin_anime".to_string()),
+                    2 => (format!("/api/seasons/anime/{aid}"), format!("admin_seasons_{aid}")),
                     _ => (format!("/api/epizods/{aid}/{sid}?all=1"), format!("eps_{aid}_{sid}")),
                 };
                 let (pth, q) = match path.split_once('?') {
@@ -284,13 +302,16 @@ impl Home {
                     return Err(format!("Yuklab bo'lmadi ({code})"));
                 }
                 let _ = std::fs::write(cache_file(&key), &text);
-                serde_json::from_str::<Vec<Value>>(&text).map_err(|_| "Javob noto'g'ri".to_string())
+                let v = serde_json::from_str::<Vec<Value>>(&text).map_err(|_| "Javob noto'g'ri".to_string())?;
+                Ok(if level == 1 { Self::tr_animes(v, tid) } else { v })
             },
             move |r| {
                 match r {
                     Ok(mut v) => {
-                        if p2.level == 2 {
-                            v.reverse();
+                        match p2.level {
+                            2 => v.sort_by_key(|s| std::cmp::Reverse(Some(iv(s, "bolim_id")).filter(|b| *b > 0).unwrap_or_else(|| iv(s, "season_id")))),
+                            3 => v.reverse(),
+                            _ => {}
                         }
                         p2.items.set(Rc::new(v));
                         p2.error.set(String::new());
@@ -319,6 +340,7 @@ impl Home {
     pub(super) fn admin_content_page(self: &Rc<Self>, c: &Content) -> Element {
         match c {
             Content::List(p) => self.content_list_page(p),
+            Content::Translator(f) => self.tr_form_page(f),
             Content::Anime(f) => self.anime_form_page(f),
             Content::Season(f) => self.season_form_page(f),
             Content::Episode(f) => self.ep_form_page(f),
@@ -327,23 +349,115 @@ impl Home {
 
     // ── Ro'yxat ──
 
+    /// Kotlin `MgmtPhoto`: kvadrat rasm (markazdan kesiladi), burchaklari yumaloq; rasm yo'q bo'lsa — kino belgisi.
+    fn mg_photo(self: &Rc<Self>, url: &str, size: f32, radius: f32) -> Element {
+        const MOVIE: &str = "M18,4l2,4h-3l-2,-4h-2l2,4h-3l-2,-4H8l2,4H7L5,4H4c-1.1,0 -1.99,0.9 -1.99,2L2,18c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V4h-4z";
+        thread_local! {
+            static MG: RefCell<HashMap<String, Rc<Image>>> = RefCell::new(HashMap::new());
+            static ASKED: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+        }
+        let boxed = |inner: Element| column(vec![inner]).center().width(size).height(size).radius(radius).bg(Color::rgba(255, 255, 255, 26));
+        if url.is_empty() || url == "null" {
+            return boxed(icon(MOVIE, size / 3.0).color(Color::rgba(255, 255, 255, 138)));
+        }
+        let key = format!("{url}|{size}|{radius}");
+        if let Some(i) = MG.with(|m| m.borrow().get(&key).cloned()) {
+            return image(&i, size, size);
+        }
+        let img = self.posters.borrow().get(url).cloned();
+        match img {
+            Some(img) => {
+                let side = img.w.min(img.h);
+                let (x0, y0) = ((img.w - side) / 2, (img.h - side) / 2);
+                let mut buf = Vec::with_capacity((side * side * 4) as usize);
+                for y in 0..side {
+                    let st = (((y0 + y) * img.w + x0) * 4) as usize;
+                    buf.extend_from_slice(&img.rgba[st..st + (side * 4) as usize]);
+                }
+                let px = (size * 2.5) as u32;
+                let sq = Image { w: side, h: side, rgba: buf }.resized(px, px);
+                let rr = radius * sq.w as f32 / size;
+                let a = Rc::new(sq.round_corners(rr));
+                MG.with(|m| m.borrow_mut().insert(key, a.clone()));
+                image(&a, size, size)
+            }
+            None => {
+                if ASKED.with(|a| a.borrow_mut().insert(url.to_string())) {
+                    self.queue.borrow_mut().insert(0, url.to_string());
+                    self.next_posters();
+                }
+                boxed(icon(MOVIE, size / 3.0).color(Color::rgba(255, 255, 255, 138)))
+            }
+        }
+    }
+
+    /// Kotlin `MgmtScaffold`: tepada yumaloq sarlavha kartasi (orqaga + `header`), pastki o'ngda "+" tugmasi.
+    fn mg_scaffold(self: &Rc<Self>, header: Element, header_h: f32, body: Element, on_add: impl Fn() + 'static) -> Element {
+        let ins = safe_insets();
+        let me = self.clone();
+        let back = column(vec![icon(A_BACK, 24.0).color(Color::WHITE)]).padding(8.0).bg(CARD_ALT).border(1.0, BORDER).radius(14.0).on_click(move || {
+            me.pop();
+        });
+        let head = row(vec![back, gap_box(12.0, 0.0), header]).align(Align::Center).bg(CARD).border(1.0, BORDER).radius(20.0).padding_xy(14.0, 14.0);
+        let head_h = 12.0 + ins.top + header_h.max(40.0) + 28.0 + 8.0;
+        let fab = column(vec![spacer(), row(vec![spacer(), column(vec![icon(AC_ADD, 28.0).color(Color::WHITE)]).center().width(56.0).height(56.0).radius(18.0).bg(Color::rgba(255, 255, 255, 46)).border(1.0, BORDER).on_click(on_add)]).padding_each(0.0, 0.0, 16.0, 16.0 + ins.bottom)]);
+        stack(vec![
+            Self::glass_backdrop(),
+            column(vec![body.padding_add(0.0, head_h, 0.0, 0.0).grow(1.0)]),
+            column(vec![head.margin_each(16.0, 12.0 + ins.top, 16.0, 8.0)]),
+            fab,
+        ])
+    }
+
     fn content_list_page(self: &Rc<Self>, p: &Rc<ListPg>) -> Element {
-        let title = match p.level {
-            0 => "Animelarni boshqarish".to_string(),
-            1 => sv(&p.anime, "name"),
+        let (w, _) = window_dp();
+        let white50 = Color::rgba(255, 255, 255, 128);
+        let (header, header_h): (Element, f32) = match p.level {
+            0 => (tx("Animelarni boshqarish", 20.0, Color::WHITE).bold().weight(1.0), 26.0),
+            1 => {
+                let n = sv(&p.tr, "name");
+                (tx(if n.is_empty() { "Animelar".to_string() } else { Self::ellipsize(&n, 20.0, w - 32.0 - 28.0 - 40.0 - 12.0) }, 20.0, Color::WHITE).bold().weight(1.0), 26.0)
+            }
+            2 => (
+                row(vec![
+                    self.mg_photo(&sv(&p.anime, "photo_url"), 48.0, 12.0),
+                    gap_box(12.0, 0.0),
+                    column(vec![tx(Self::ellipsize(&sv(&p.anime, "name"), 17.0, w - 32.0 - 28.0 - 40.0 - 12.0 - 48.0 - 12.0), 17.0, Color::WHITE).bold(), tx("Bo'limni boshqarish", 12.0, white50)]).weight(1.0),
+                ])
+                .align(Align::Center)
+                .weight(1.0),
+                48.0,
+            ),
             _ => {
                 let b = Some(iv(&p.season, "bolim_id")).filter(|b| *b > 0).unwrap_or_else(|| iv(&p.season, "season_id"));
-                format!("{b}-bo'lim")
+                let nm = sv(&p.season, "nomi");
+                let t = format!("{b}-bo'lim{}", if nm.is_empty() { String::new() } else { format!(" \u{2014} {nm}") });
+                (
+                    row(vec![
+                        self.mg_photo(&sv(&p.season, "photo_url"), 48.0, 12.0),
+                        gap_box(12.0, 0.0),
+                        column(vec![tx(Self::ellipsize(&t, 16.0, w - 32.0 - 28.0 - 40.0 - 12.0 - 48.0 - 12.0), 16.0, Color::WHITE).bold(), tx("Epizodlarni boshqarish", 12.0, white50)]).weight(1.0),
+                    ])
+                    .align(Align::Center)
+                    .weight(1.0),
+                    48.0,
+                )
             }
         };
         let items = p.items.get();
         let body: Element = if !p.loaded.get() && items.is_empty() {
-            column(vec![spinner(32.0, 3.0, ACCENT2)]).center()
+            column(vec![spinner(32.0, 3.0, Color::rgba(255, 255, 255, 153))]).center()
         } else if !p.error.get().is_empty() && items.is_empty() {
             let (me, pp) = (self.clone(), p.clone());
-            column(vec![tx(p.error.get(), 14.0, ERROR), gap_box(0.0, 12.0), self.chip("Qayta urinish", true, move || me.clist_load(&pp))]).center()
+            column(vec![tx(p.error.get(), 14.0, Color::rgba(255, 255, 255, 179)), gap_box(0.0, 16.0), self.chip("Qayta urinish", true, move || me.clist_load(&pp))]).center()
         } else if items.is_empty() {
-            column(vec![tx(match p.level { 0 => "Hali anime qo'shilmagan", 1 => "Hali bo'lim qo'shilmagan", _ => "Hali qism qo'shilmagan" }, 15.0, Color::WHITE)]).center()
+            let (t, h) = match p.level {
+                0 => ("Hali tarjimon qo'shilmagan", "Pastdagi + tugmasi bilan qo'shing"),
+                1 => ("Bu tarjimonda hali anime yo'q", "Pastdagi + tugmasi bilan qo'shing"),
+                2 => ("Hali bo'lim qo'shilmagan", "Pastdagi + tugmasi orqali qo'sh"),
+                _ => ("Hali epizod qo'shilmagan", "Pastdagi + tugmasi orqali qo'sh"),
+            };
+            column(vec![tx(t, 14.0, Color::rgba(255, 255, 255, 115)), gap_box(0.0, 4.0), tx(h, 12.0, Color::rgba(255, 255, 255, 77))]).center()
         } else {
             let mut kids: Vec<Element> = Vec::new();
             for it in items.iter() {
@@ -352,25 +466,25 @@ impl Home {
             kids.push(gap_box(0.0, 120.0));
             scroll_column(&p.scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0)
         };
-        let mut layers = vec![self.scaffold(&title, body)];
         let (me, pp) = (self.clone(), p.clone());
-        layers.push(fab(move || me.list_add(&pp)));
+        let mut layers = vec![self.mg_scaffold(header, header_h, body, move || me.list_add(&pp))];
         let m = p.msg.get();
         if !m.is_empty() {
             let pm = p.clone();
-            layers.push(column(vec![spacer(), tx(m, 14.0, Color::WHITE).bold().bg(Color::rgba(30, 30, 36, 235)).radius(20.0).padding_xy(18.0, 10.0).margin_each(0.0, 0.0, 0.0, 100.0).on_click(move || pm.msg.set(String::new()))]).align(Align::Center));
+            layers.push(column(vec![spacer(), tx(m, 14.0, Color::WHITE).bg(CARD_ALT).radius(8.0).padding_xy(16.0, 12.0).margin_each(16.0, 0.0, 88.0, 16.0).on_click(move || pm.msg.set(String::new()))]));
         }
         if let Some(d) = p.del.get() {
             let (what, label) = match p.level {
-                0 => ("Animeni o'chirish?", sv(&d, "name")),
-                1 => ("Bo'limni o'chirish?", sv(&d, "nomi")),
+                0 => ("Tarjimonni o'chirish?", sv(&d, "name")),
+                1 => ("Animeni o'chirish?", sv(&d, "name")),
+                2 => ("Bo'limni o'chirish?", sv(&d, "nomi")),
                 _ => ("Qismni o'chirish?", format!("{}-qism {}", sv(&d, "epizod_number"), sv(&d, "epizod_name"))),
             };
             let (pc, pd, me) = (p.clone(), p.clone(), self.clone());
             layers.push(modal(
                 column(vec![
                     tx(what, 18.0, Color::WHITE).bold(),
-                    tx(format!("«{label}» rostanxam o'chirilsinmi? Bu qaytarilmaydi."), 14.0, Color::WHITE).padding_each(0.0, 8.0, 0.0, 16.0),
+                    tx(if p.level == 0 { format!("\"{label}\" o'chiriladi. Animelari o'chmaydi, \"Tarjimonsiz\" bo'lib qoladi.") } else { format!("«{label}» rostanxam o'chirilsinmi? Bu qaytarilmaydi.") }, 14.0, Color::WHITE).padding_each(0.0, 8.0, 0.0, 16.0),
                     row(vec![
                         { let pc = pc.clone(); self.chip("Bekor qilish", false, move || pc.del.set(None)) },
                         self.chip("Ha, o'chirish", true, move || me.list_delete(&pd)),
@@ -404,62 +518,80 @@ impl Home {
     }
 
     fn list_row(self: &Rc<Self>, p: &Rc<ListPg>, it: &Value) -> Element {
-        let (title, sub, tag) = match p.level {
-            0 => (sv(it, "name"), sv(it, "janri"), String::new()),
-            1 => {
-                let b = Some(iv(it, "bolim_id")).filter(|b| *b > 0).unwrap_or_else(|| iv(it, "season_id"));
-                (format!("{b}-bo'lim — {}", sv(it, "nomi")), "Qismlarni ko'rish >".to_string(), [sv(it, "turi"), sv(it, "holati")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · "))
-            }
-            _ => {
-                let n = if it.get("epizod_number").is_some() { sv(it, "epizod_number") } else { "?".into() };
-                let name = sv(it, "epizod_name");
-                (if name.is_empty() { format!("Qism {n}") } else { name }, ep_qualities_line(it), String::new())
-            }
-        };
-        let lead: Element = if p.level == 2 {
-            column(vec![tx(if it.get("epizod_number").is_some() { sv(it, "epizod_number") } else { "?".into() }, 15.0, ACCENT2).black()]).center().width(44.0).height(44.0).radius(12.0).bg(ACCENT.with_opacity(0.18))
-        } else {
-            thumb(&title, 48.0)
-        };
-        let mut info = vec![tx(title.clone(), 14.0, Color::WHITE).bold()];
-        if !tag.is_empty() {
-            info.push(tx(tag, 11.0, ACCENT2));
-        }
-        if !sub.is_empty() {
-            info.push(tx(sub, 12.0, Color::WHITE));
-        }
+        let (w, _) = window_dp();
+        let white50 = Color::rgba(255, 255, 255, 128);
         let (me, pp, item) = (self.clone(), p.clone(), it.clone());
         let open = move || match pp.level {
-            0 => me.open_list(1, item.clone(), Value::Null),
-            1 => me.open_list(2, pp.anime.clone(), item.clone()),
+            0 => me.open_list(1, item.clone(), Value::Null, Value::Null),
+            1 => me.open_list(2, pp.tr.clone(), item.clone(), Value::Null),
+            2 => me.open_list(3, pp.tr.clone(), pp.anime.clone(), item.clone()),
             _ => me.open_ep_form(iv(&pp.anime, "id"), iv(&pp.season, "season_id"), item.clone()),
         };
         let (me2, pp2, item2) = (self.clone(), p.clone(), it.clone());
-        let edit = round_btn(AC_EDIT, Color::WHITE, move || me2.list_edit(&pp2, item2.clone()));
+        let edit = round_btn(AC_EDIT, Color::rgba(255, 255, 255, 138), move || me2.list_edit(&pp2, item2.clone()));
         let (pp3, item3) = (p.clone(), it.clone());
         let del = round_btn(AC_DEL, Color::hex(0xFF5252), move || pp3.del.set(Some(item3.clone())));
-        let mut actions = vec![];
-        if p.level == 2 {
-            let (pp4, item4) = (p.clone(), it.clone());
-            actions.push(round_btn(AC_SEND, Color::WHITE, move || pp4.post.set(Some(item4.clone()))));
+        match p.level {
+            0 | 1 => {
+                let real = p.level == 1 || iv(it, "id") > 0;
+                let (photo, ps, pr) = if p.level == 0 { (sv(it, "photo_url"), 64.0, 32.0) } else { (sv(it, "photo_url"), 76.0, 14.0) };
+                let sub = if p.level == 0 { format!("{} ta anime", iv(it, "anime_count")) } else { sv(it, "janri") };
+                let mut kids = vec![self.mg_photo(&photo, ps, pr), gap_box(14.0, 0.0), column(vec![tx(sv(it, "name"), 15.0, Color::WHITE).bold(), tx(sub, 12.0, white50)]).weight(1.0)];
+                if real {
+                    kids.push(edit);
+                    kids.push(del);
+                }
+                row(kids).align(Align::Center).bg(CARD).border(1.0, BORDER).radius(18.0).padding_xy(12.0, 12.0).margin_each(0.0, 0.0, 0.0, 10.0).on_click(open)
+            }
+            2 => {
+                let b = Some(iv(it, "bolim_id")).filter(|b| *b > 0).unwrap_or_else(|| iv(it, "season_id"));
+                let nm = Some(sv(it, "nomi")).filter(|n| n != "null").unwrap_or_default();
+                let title = Self::ellipsize(&format!("{b}-bo'lim \u{2014} {nm}"), 14.0, w - 32.0 - 24.0 - 64.0 - 14.0 - 96.0);
+                let chips: Vec<Element> = [sv(it, "turi"), sv(it, "holati")]
+                    .into_iter()
+                    .filter(|t| !t.is_empty() && t != "null")
+                    .map(|t| tx(t, 10.0, ACCENT).bold().bg(ACCENT.with_opacity(0.18)).radius(6.0).padding_xy(6.0, 2.0))
+                    .collect();
+                let info = column(vec![tx(title, 14.0, Color::WHITE).bold(), gap_box(0.0, 3.0), row(chips).gap(6.0), gap_box(0.0, 2.0), tx("Epizodlarni ko'rish \u{2192}", 11.0, ACCENT.with_opacity(0.8))]).weight(1.0);
+                row(vec![self.mg_photo(&sv(it, "photo_url"), 64.0, 12.0), gap_box(14.0, 0.0), info, edit, del]).align(Align::Center).bg(CARD).border(1.0, BORDER).radius(18.0).padding_xy(12.0, 12.0).margin_each(0.0, 0.0, 0.0, 10.0).on_click(open)
+            }
+            _ => {
+                let num = if it.get("epizod_number").is_some() { iv(it, "epizod_number").to_string() } else { "?".into() };
+                let name = Some(sv(it, "epizod_name")).filter(|n| n != "null").unwrap_or_default();
+                let title = Self::ellipsize(&if name.is_empty() { format!("Epizod {num}") } else { name }, 14.0, w - 32.0 - 28.0 - 44.0 - 14.0 - 48.0 - 22.0 - 48.0);
+                let mut col = vec![tx(title, 14.0, Color::WHITE).bold(), gap_box(0.0, 3.0), tx(ep_qualities_line(it), 11.0, white50)];
+                let parts: Vec<String> = (0..5)
+                    .filter_map(|i| {
+                        let a = intro_text(&sv(it, &format!("intro_{}", i * 2 + 1)));
+                        let b = intro_text(&sv(it, &format!("intro_{}", i * 2 + 2)));
+                        if a.is_empty() && b.is_empty() { None } else { Some(format!("{}\u{2013}{}", if a.is_empty() { "?" } else { &a }, if b.is_empty() { "?" } else { &b })) }
+                    })
+                    .collect();
+                if !parts.is_empty() {
+                    col.push(tx(format!("\u{23ED} Intro: {}", parts.join(", ")), 11.0, white50));
+                }
+                let lead = column(vec![tx(num, 15.0, ACCENT).black()]).center().width(44.0).height(44.0).radius(12.0).bg(ACCENT.with_opacity(0.12)).border(1.0, ACCENT.with_opacity(0.25));
+                let (pp4, item4) = (p.clone(), it.clone());
+                let send = round_btn(AC_SEND, Color::rgba(255, 255, 255, 138), move || pp4.post.set(Some(item4.clone())));
+                row(vec![lead, gap_box(14.0, 0.0), column(col).weight(1.0), send, icon(AC_EDIT, 18.0).color(Color::rgba(255, 255, 255, 98)), gap_box(4.0, 0.0), del]).align(Align::Center).bg(CARD).border(1.0, BORDER).radius(16.0).padding_xy(14.0, 14.0).margin_each(0.0, 0.0, 0.0, 10.0).on_click(open)
+            }
         }
-        actions.push(edit);
-        actions.push(del);
-        Self::pglass(row(vec![lead, column(info).weight(1.0), row(actions)]).gap(12.0).align(Align::Center).padding_xy(12.0, 12.0)).radius(22.0).margin_each(0.0, 0.0, 0.0, 10.0).on_click(open)
     }
 
     fn list_add(self: &Rc<Self>, p: &Rc<ListPg>) {
         match p.level {
-            0 => self.open_anime_form(Value::Null),
-            1 => self.open_season_form(iv(&p.anime, "id"), Value::Null),
+            0 => self.open_tr_form(Value::Null),
+            1 => self.open_anime_form(Value::Null, iv(&p.tr, "id")),
+            2 => self.open_season_form(iv(&p.anime, "id"), Value::Null),
             _ => self.open_ep_form(iv(&p.anime, "id"), iv(&p.season, "season_id"), Value::Null),
         }
     }
 
     fn list_edit(self: &Rc<Self>, p: &Rc<ListPg>, it: Value) {
         match p.level {
-            0 => self.open_anime_form(it),
-            1 => self.open_season_form(iv(&p.anime, "id"), it),
+            0 => self.open_tr_form(it),
+            1 => self.open_anime_form(it.clone(), iv(&it, "translator_id")),
+            2 => self.open_season_form(iv(&p.anime, "id"), it),
             _ => self.open_ep_form(iv(&p.anime, "id"), iv(&p.season, "season_id"), it),
         }
     }
@@ -468,8 +600,9 @@ impl Home {
         let Some(it) = p.del.get() else { return };
         p.del.set(None);
         let path = match p.level {
-            0 => format!("/api/anime/{}", iv(&it, "id")),
-            1 => format!("/api/seasons/{}/{}", iv(&p.anime, "id"), iv(&it, "season_id")),
+            0 => format!("/api/translators/{}", iv(&it, "id")),
+            1 => format!("/api/anime/{}", iv(&it, "id")),
+            2 => format!("/api/seasons/{}/{}", iv(&p.anime, "id"), iv(&it, "season_id")),
             _ => format!("/api/epizods/{}/{}/{}", iv(&p.anime, "id"), iv(&p.season, "season_id"), iv(&it, "epizod_id")),
         };
         let (p2, me, session) = (p.clone(), self.clone(), self.session.clone());
@@ -526,12 +659,70 @@ impl Home {
         })
     }
 
+    // ── Tarjimon formasi (Kotlin `AdminTranslatorEditScreen`) ──
+
+    fn open_tr_form(self: &Rc<Self>, initial: Value) {
+        uzcoders::prelude::breadcrumb("open_tr_form");
+        let f = Rc::new(TrForm {
+            name: State::new(sv(&initial, "name")),
+            bio: State::new(sv(&initial, "bio")),
+            photo: State::new(file_of_url(&sv(&initial, "photo_url"))),
+            busy: State::new(false),
+            err: State::new(String::new()),
+            scroll: ScrollState::new(),
+            initial,
+        });
+        self.push(pages::Page::AdminContent(Content::Translator(f)));
+    }
+
+    fn tr_form_page(self: &Rc<Self>, f: &Rc<TrForm>) -> Element {
+        let new = f.initial.is_null();
+        let mut kids = vec![self.photo_box(&f.photo, &f.busy, 180.0, "translator", &f.err)];
+        if !f.err.get().is_empty() {
+            kids.push(note(f.err.get(), true));
+        }
+        for (st, l) in [(&f.name, "Tarjimon nomi"), (&f.bio, "Tarjimon haqida")] {
+            kids.push(gfield(field(st), l));
+            kids.push(gap_box(0.0, 12.0));
+        }
+        let (fc, me) = (f.clone(), self.clone());
+        let save = pill_btn("Saqlash", true, f.busy.get(), move || {
+            if fc.busy.get() {
+                return;
+            }
+            if fc.name.get().trim().is_empty() {
+                fc.err.set("Tarjimon nomini kiriting".into());
+                return;
+            }
+            fc.busy.set(true);
+            fc.err.set(String::new());
+            let body = json!({"photo_url": fc.photo.get(), "name": fc.name.get().trim(), "bio": fc.bio.get().trim()});
+            let (path, method) = if fc.initial.is_null() { ("/api/translators".to_string(), "POST") } else { (format!("/api/translators/{}", iv(&fc.initial, "id")), "PUT") };
+            let (f2, me2, session) = (fc.clone(), me.clone(), me.session.clone());
+            spawn_bg(move || call(method, &path, Some(body), &session), move |r| {
+                f2.busy.set(false);
+                match r {
+                    Ok(_) => {
+                        me2.pop();
+                        me2.content_reload_top();
+                    }
+                    Err(e) => f2.err.set(format!("Xato: {e}")),
+                }
+            });
+        });
+        let me3 = self.clone();
+        kids.push(row(vec![pill_btn("Bekor", false, false, move || { me3.pop(); }), save]).gap(12.0));
+        kids.push(gap_box(0.0, 40.0));
+        self.scaffold(if new { "Tarjimon qo'shish" } else { "Tarjimonni tahrirlash" }, scroll_column(&f.scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0))
+    }
+
     // ── Anime formasi ──
 
-    fn open_anime_form(self: &Rc<Self>, initial: Value) {
+    fn open_anime_form(self: &Rc<Self>, initial: Value, tr_id: i64) {
         uzcoders::prelude::breadcrumb("open_anime_form");
         let st = |k: &str| State::new(sv(&initial, k));
         let f = Rc::new(AnimeForm {
+            tr: State::new(tr_id),
             name: st("name"),
             davlat: st("davlat"),
             studiya: st("studiya"),
@@ -552,6 +743,20 @@ impl Home {
         if !f.err.get().is_empty() {
             kids.push(note(f.err.get(), true));
         }
+        // Kotlin: "Tarjimon" bo'limi — "Tarjimonsiz" va har bir tarjimon uchun chip.
+        let trs: Vec<Value> = read_cache("admin_translators").unwrap_or_default().into_iter().filter(|t| iv(t, "id") > 0).collect();
+        kids.push(tx("Tarjimon", 12.0, ACCENT2).bold().letter_spacing(1.0).padding_each(0.0, 4.0, 0.0, 8.0));
+        let mut names: Vec<String> = vec!["Tarjimonsiz".to_string()];
+        names.extend(trs.iter().map(|t| sv(t, "name")));
+        let name_refs: Vec<&str> = names.iter().map(|x| x.as_str()).collect();
+        let cur_tr = f.tr.get();
+        let (trs_a, trs_b, ftr) = (trs.clone(), trs.clone(), f.tr.clone());
+        kids.push(self.chip_flow(
+            &name_refs,
+            move |n| if n == "Tarjimonsiz" { cur_tr == 0 } else { trs_a.iter().any(|t| sv(t, "name") == n && iv(t, "id") == cur_tr) },
+            move |n| ftr.set(if n == "Tarjimonsiz" { 0 } else { trs_b.iter().find(|t| sv(t, "name") == n).map(|t| iv(t, "id")).unwrap_or(0) }),
+        ));
+        kids.push(gap_box(0.0, 8.0));
         for (st, l) in [(&f.name, "Anime nomi"), (&f.davlat, "Davlat"), (&f.studiya, "Studiya"), (&f.janri, "Janri"), (&f.tavsif, "Tavsif")] {
             kids.push(gfield(field(st), l));
             kids.push(gap_box(0.0, 12.0));
@@ -563,7 +768,7 @@ impl Home {
             }
             fc.busy.set(true);
             fc.err.set(String::new());
-            let body = json!({"photo_url": fc.photo.get(), "name": fc.name.get(), "davlat": fc.davlat.get(), "studiya": fc.studiya.get(), "janri": fc.janri.get(), "tavsif": fc.tavsif.get()});
+            let body = json!({"photo_url": fc.photo.get(), "name": fc.name.get(), "davlat": fc.davlat.get(), "studiya": fc.studiya.get(), "janri": fc.janri.get(), "tavsif": fc.tavsif.get(), "translator_id": fc.tr.get()});
             let path = if fc.initial.is_null() { "/api/anime".to_string() } else { format!("/api/anime/{}", iv(&fc.initial, "id")) };
             let method = if fc.initial.is_null() { "POST" } else { "PUT" };
             let (f2, me2, session) = (fc.clone(), me.clone(), me.session.clone());

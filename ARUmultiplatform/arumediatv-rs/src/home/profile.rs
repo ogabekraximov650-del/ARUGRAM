@@ -68,7 +68,7 @@ impl Home {
     }
 
     /// Matnni `max_w` (dp) ichiga sig'maganda oxiriga "…" qo'yib qisqartiradi (Kotlin `maxLines = 1, overflow = Ellipsis`).
-    fn ellipsize(s: &str, size: f32, max_w: f32) -> String {
+    pub(super) fn ellipsize(s: &str, size: f32, max_w: f32) -> String {
         thread_local! {
             static BOLD: Font = Font::parse(include_bytes!("../../assets/fonts/Roboto-Bold.ttf")).expect("Roboto Bold");
         }

@@ -165,28 +165,63 @@ fn handle(mut s: TcpStream) -> std::io::Result<()> {
     if method == "HEAD" {
         return s.write_all(head.as_bytes());
     }
-    for w in (start / CHUNK)..=(end / CHUNK) {
-        if !warm(name, w) {
-            return reply(&mut s, 503, "Service Unavailable");
-        }
-    }
-    let resp = match ureq::get(&play_url(name)).set("Range", &format!("bytes={start}-{end}")).timeout(Duration::from_secs(120)).call() {
-        Ok(r) if r.status() == 206 || (r.status() == 200 && start == 0 && end + 1 == total) => r,
-        _ => return reply(&mut s, 502, "Bad Gateway"),
-    };
+    // Sarlavha DARHOL yuboriladi (oyna isitilishini kutmasdan): pleyer ulanishni ochiq deb biladi va o'qish muddati bilan kutadi.
+    // Oynalar ketma-ket isitiladi va uzatiladi: birinchi oyna tayyor bo'lishi bilan bayt ketadi (avval hamma oyna isitilguncha kutilardi),
+    // keyingi oyna esa fonda oldindan isitiladi (Kotlin `VdAhead`).
     s.write_all(head.as_bytes())?;
-    let mut r = resp.into_reader();
     let mut buf = vec![0u8; 64 * 1024];
     let mut off = start;
     while off <= end {
-        let want = ((end - off + 1) as usize).min(buf.len());
-        let n = r.read(&mut buf[..want])?;
-        if n == 0 {
-            break;
+        let w = off / CHUNK;
+        let seg_end = end.min((w + 1) * CHUNK - 1);
+        if !warm(name, w) {
+            return Ok(());
         }
-        crate::vd::apply(&key, off, &mut buf[..n]);
-        s.write_all(&buf[..n])?;
-        off += n as u64;
+        if (w + 1) * CHUNK < total {
+            prefetch(name, w + 1);
+        }
+        let resp = match agent().get(&play_url(name)).set("Range", &format!("bytes={off}-{seg_end}")).timeout(Duration::from_secs(120)).call() {
+            Ok(r) if r.status() == 206 || (r.status() == 200 && off == 0 && seg_end + 1 == total) => r,
+            _ => return Ok(()),
+        };
+        let mut r = resp.into_reader();
+        while off <= seg_end {
+            let want = ((seg_end - off + 1) as usize).min(buf.len());
+            let n = r.read(&mut buf[..want])?;
+            if n == 0 {
+                return Ok(());
+            }
+            crate::vd::apply(&key, off, &mut buf[..n]);
+            s.write_all(&buf[..n])?;
+            off += n as u64;
+        }
     }
     Ok(())
+}
+
+/// Umumiy HTTP mijoz (ulanishlar qayta ishlatiladi: har bo'lak uchun yangi TLS qo'l siqish kerak emas).
+fn agent() -> &'static ureq::Agent {
+    static A: OnceLock<ureq::Agent> = OnceLock::new();
+    A.get_or_init(|| ureq::AgentBuilder::new().max_idle_connections_per_host(8).build())
+}
+
+/// Keyingi oynani fonda isitadi (bir oyna uchun bitta oqim).
+fn prefetch(name: &str, w: u64) {
+    static BUSY: Mutex<Option<HashSet<(String, u64)>>> = Mutex::new(None);
+    let key = (name.to_string(), w);
+    {
+        let Ok(mut g) = BUSY.lock() else { return };
+        if !g.get_or_insert_with(HashSet::new).insert(key.clone()) {
+            return;
+        }
+    }
+    let n = name.to_string();
+    std::thread::spawn(move || {
+        let _ = warm(&n, w);
+        if let Ok(mut g) = BUSY.lock() {
+            if let Some(set) = g.as_mut() {
+                set.remove(&key);
+            }
+        }
+    });
 }
