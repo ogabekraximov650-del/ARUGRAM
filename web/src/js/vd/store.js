@@ -6,7 +6,7 @@
 // Telegram hisobi KERAK EMAS.
 
 import { api, apiPost } from '../api.js';
-import { cacheGet, cachePut } from '../tg/chunk-cache.js';
+import { cacheGet, cachePut, cacheKeySet } from '../tg/chunk-cache.js';
 import { ctrApply } from '../tg/ctr.js';
 
 /** Tashxis izi: pleyer ekranida (yuklanayotganda) ko'rinadi — qaysi bosqichda to'xtagani aniq bo'lsin. */
@@ -163,6 +163,9 @@ export function openVdFile(info) {
   let bytesGot = 0; let t0 = 0; let lastKbps = 0;
   const blockLen = (i) => Math.min(BLOCK, size - i * BLOCK);
   const ckey = (i) => `vd:${name}#${i}`;
+  const known = new Set(); // diskda (keshda) bor bo'laklar raqami
+  cacheKeySet(`vd:${name}#`).then((ks) => ks.forEach((k) => known.add(+k.slice(k.lastIndexOf('#') + 1)))).catch(() => {});
+  const has = (i) => mem.has(i) || known.has(i) || inflight.has(i);
 
   function remember(i, u8) {
     mem.delete(i); mem.set(i, u8);
@@ -196,7 +199,7 @@ export function openVdFile(info) {
           const enc = await whole;
           const part = enc.subarray(n * BLOCK, n * BLOCK + blockLen(i));
           const plain = await ctrApply(key, i * BLOCK, part);
-          cachePut(ckey(i), part);
+          cachePut(ckey(i), part).then(() => known.add(i));
           remember(i, plain);
           return plain;
         } finally { inflight.delete(i); }
@@ -221,7 +224,7 @@ export function openVdFile(info) {
     });
     for (let k = 0; k < miss.length;) {
       let e = k;
-      while (e + 1 < miss.length && miss[e + 1] === miss[e] + 1 && e - k < 7 && Math.floor(miss[e + 1] / perWin) === Math.floor(miss[k] / perWin)) e++;
+      while (e + 1 < miss.length && miss[e + 1] === miss[e] + 1 && e - k < perWin - 1 && Math.floor(miss[e + 1] / perWin) === Math.floor(miss[k] / perWin)) e++;
       if (!t0) t0 = performance.now();
       startRun(miss[k], e - k + 1);
       for (let j = k; j <= e; j++) res[miss[j] - first] = inflight.get(miss[j]);
@@ -247,6 +250,25 @@ export function openVdFile(info) {
         out.set(b.subarray(s, e), o); o += e - s;
       });
       return out;
+    },
+    /**
+     * Sirpanuvchi oyna (Android `AheadPlan`): ijro joyidan oldinda ketma-ket tayyor bo'laklar 10 MiB dan kamaysa — birinchi yetishmayotgan
+     * bo'lakdan 18 MiB oyna oxirigacha BITTA so'rovda olinadi; oynaning 15-MiB'ida keyingi oyna serverda isitiladi.
+     */
+    ahead(pos) {
+      if (pos < 0 || pos >= size) return;
+      const last = nBlocks - 1;
+      const from = Math.min(last, Math.floor(pos / BLOCK));
+      let m = from;
+      while (m <= last && m - from < 10 && has(m)) m++;
+      const w = Math.floor(from / perWin);
+      if (from - w * perWin >= 15 && (w + 1) * perWin < nBlocks) warm(name, w + 1).catch(() => {});
+      if (m > last || m - from >= 10) return;
+      const winEnd = Math.min((Math.floor(m / perWin) + 1) * perWin - 1, last);
+      let e = m;
+      while (e + 1 <= winEnd && !has(e + 1)) e++;
+      if (!t0) t0 = performance.now();
+      startRun(m, e - m + 1);
     },
     /** Oldindan so'rab qo'yish (natija kutilmaydi). */
     prefetch(pos, len) {

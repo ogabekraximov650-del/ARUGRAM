@@ -292,7 +292,19 @@ export function createEngine(video, { info, ahead: aheadOpt = 60, behind = 10, s
     pump();
   }
 
-  const onTime = () => { if (!pumping) pump(); };
+  let aheadAt = 0;
+  /** Ijro joyidagi bo'lakning fayldagi boshlanishi -> `file.ahead` (10 MiB zaxira qoidasi). */
+  function aheadTick() {
+    if (!file?.ahead || !segs.length || destroyed) return;
+    const now = Date.now();
+    if (now - aheadAt < 700) return;
+    aheadAt = now;
+    try {
+      const sp = segSpans(layout, segs[segIndexAt(focus ?? video.currentTime)]);
+      if (sp.length) file.ahead(Math.min(...sp.map((x) => x[0])));
+    } catch (_) { /* */ }
+  }
+  const onTime = () => { aheadTick(); if (!pumping) pump(); };
   // Qotdi: video pauzada ushlab turiladi, bufer maqsadga yetgach davom etadi
   // (aks holda brauzer har 0.3 s ma'lumotda yurib, yana to'xtaydi).
   const onWaiting = () => {
