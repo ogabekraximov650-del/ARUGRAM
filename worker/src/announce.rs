@@ -45,8 +45,15 @@ fn channel(env: &Env) -> i64 {
         .unwrap_or(0)
 }
 
+/// Avtomatik kanal e'loni yoqilganmi (foydalanuvchi talabi bilan o'chirilgan).
+const AUTO_POST: bool = false;
+
 /// Qism endi ko'rinadi (birinchi sifat joylandi) — kanalga e'lon. Xato bo'lsa admin'ga xabar.
 pub(crate) async fn episode_ready(env: &Env, a: i64, s: i64, e: i64) {
+    // Foydalanuvchi talabi (2026-11-22): avtomatik e'lon O'CHIRILGAN — postni admin qo'lda (ilova/veb) joylaydi (`repost`).
+    if !AUTO_POST {
+        return;
+    }
     let ch = channel(env);
     if ch == 0 {
         return;
@@ -194,6 +201,9 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8
     // Shifrlangan nusxa avval saqlash kanaliga; xato bo'lsa e'lon baribir chiqadi (keyingi safar afisha bilan).
     if let Err(why) = store_collage(env, a, s, e, sealed, key_hex.trim()).await {
         console_log!("kadrlar saqlanmadi ({a}/{s}/{e}): {why}");
+    }
+    if !AUTO_POST {
+        return Ok(false); // kadrlar saqlandi; post qo'lda (`repost`) joylanadi
     }
     let claim = turso_exec(env,
         "INSERT INTO announced (anime_id, season_id, epizod_id, at) VALUES (?,?,?,?)

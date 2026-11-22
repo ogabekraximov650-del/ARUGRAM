@@ -7739,3 +7739,7 @@ Foydalanuvchi talabi. 47 tadan 17 ta keraksiz workflow o'chirildi: bir martalik 
 - Yuborish: kadrlar bitta oqimga (4 bayt uzunlik + JPEG) o'raladi, bir marta AES-128-CTR bilan shifrlanadi, `POST /api/encode/collage` (kalit `X-Collage-Key`). Worker (`announce.rs`: `split_frames`, `collage_post`, `upload_album`) saqlash kanaliga bitta shifrlangan hujjat qiladi (`epizod_db.collage_*` ustunlari o'zgarmadi) va kanalga `sendMediaGroup` albomi + uning tagida matn va «Tomosha qilish» tugmali alohida xabar (Telegram albomga inline tugma qo'ymaydi) joylaydi.
 - Eski (bitta JPEG kollaj) nusxalar ham ishlaydi: bitta kadr deb olinib, avvalgidek matn+tugmali bitta rasm bo'ladi.
 - Sinov: `tool/encode/test_collage.py` (10 kadr, 1920x1080, 20–80% oralig'i), `announce::frames_tests`.
+
+## Kanal posti: avtomatik joylash O'CHIRILDI (2026-11-22)
+
+Foydalanuvchi talabi: post qo'lda (ilova/veb admin tugmasi, `announce::repost`) joylanadi. `announce.rs` dagi `AUTO_POST = false` — `episode_ready` va `collage_post` post chiqarmaydi (kollaj kadrlari baribir saqlanadi, qo'lda joylashda ishlatiladi). Qayta yoqish: `AUTO_POST = true`.
