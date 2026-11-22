@@ -2,7 +2,7 @@
 //! EN: Scroll state: offset, fling (inertia) velocity and the last computed bounds.
 //! RU: Состояние прокрутки: смещение, скорость инерции и последние вычисленные границы.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use uzcoders_core::invalidate;
 
@@ -11,6 +11,9 @@ struct Inner {
     velocity: Cell<f32>,
     max: Cell<f32>,
     viewport: Cell<f32>,
+    /// UZ: Tepada pastga tortish (piksel, >= 0) — "tortib yangilash" uchun. EN: pull distance past the top (pixels) for pull-to-refresh.
+    pull: Cell<f32>,
+    on_refresh: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 /// UZ: `scroll_column` / `.scroll(&state)` bilan ishlatiladigan scroll holati. Arzon nusxalanadi (Rc).
@@ -35,6 +38,8 @@ impl ScrollState {
                 velocity: Cell::new(0.0),
                 max: Cell::new(0.0),
                 viewport: Cell::new(0.0),
+                pull: Cell::new(0.0),
+                on_refresh: RefCell::new(None),
             }),
         }
     }
@@ -51,6 +56,34 @@ impl ScrollState {
             .offset
             .set(v.clamp(0.0, self.inner.max.get().max(0.0)));
         invalidate();
+    }
+
+    /// UZ: "Tortib yangilash": ro'yxat eng tepada turganda pastga tortilib qo'yib yuborilsa `f` chaqiriladi. Tortilgan masofa `pull()` da (piksel).
+    /// EN: Pull-to-refresh: when the list is at the top and pulled down far enough then released, `f` runs. The pull distance is in `pull()` (pixels).
+    /// RU: «Потяни, чтобы обновить»: если список вверху и его потянули вниз достаточно далеко, при отпускании вызывается `f`; расстояние — в `pull()`.
+    pub fn on_refresh(&self, f: impl Fn() + 'static) {
+        *self.inner.on_refresh.borrow_mut() = Some(Rc::new(f));
+    }
+
+    /// UZ: Hozirgi tortish masofasi (piksel).
+    pub fn pull(&self) -> f32 {
+        self.inner.pull.get()
+    }
+
+    pub(crate) fn has_refresh(&self) -> bool {
+        self.inner.on_refresh.borrow().is_some()
+    }
+
+    pub(crate) fn set_pull(&self, v: f32) {
+        self.inner.pull.set(v.max(0.0));
+        invalidate();
+    }
+
+    pub(crate) fn fire_refresh(&self) {
+        let cb = self.inner.on_refresh.borrow().clone();
+        if let Some(cb) = cb {
+            cb();
+        }
     }
 
     pub fn scroll_to_top(&self) {

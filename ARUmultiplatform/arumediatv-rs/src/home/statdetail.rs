@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::api;
-use crate::data::{fmt_date, parse_seasons, Season};
+use crate::data::{fmt_date, parse_seasons, HistoryItem, Season};
 use serde_json::Value;
 
 pub struct StatPage {
@@ -110,7 +110,7 @@ impl Home {
         } else {
             let mut kids: Vec<Element> = Vec::new();
             for o in p.items.get().iter() {
-                kids.push(if p.key == "comments" { Self::stat_comment(o) } else { Self::stat_episode(o) });
+                kids.push(if p.key == "comments" { Self::stat_comment(o) } else { self.stat_episode(o) });
             }
             kids.push(footer);
             kids.push(gap_box(0.0, 24.0 + ins.bottom));
@@ -119,27 +119,59 @@ impl Home {
         self.scaffold(&p.title, body)
     }
 
-    fn stat_episode(o: &Value) -> Element {
-        let title = o["season_name"].as_str().filter(|s| !s.is_empty()).or(o["anime_name"].as_str()).unwrap_or("");
-        let (pos, dur) = (num(&o["position_ms"]), num(&o["duration_ms"]));
-        let pct = if dur > 0 { (pos * 100 / dur).clamp(0, 100) } else { 0 };
-        let mut sub = format!("{}-qism · {}-bo'lim", num(&o["epizod_number"]), num(&o["bolim_id"]));
-        if num(&o["view_count"]) > 1 {
-            sub.push_str(&format!(" · {} marta", num(&o["view_count"])));
+    /// Kotlin `EpisodeRow`: 16:9 kadr (to'xtagan joy), pastida nom / "N-bo'lim M-qism" / sana va o'ngda foiz | vaqt, eng pastda progress chizig'i.
+    fn stat_episode(self: &Rc<Self>, o: &Value) -> Element {
+        let pick = |a: &str, b: &str| {
+            let v = o[a].as_str().unwrap_or("");
+            if v.is_empty() { o[b].as_str().unwrap_or("") } else { v }.to_string()
+        };
+        let h = HistoryItem {
+            anime_id: num(&o["anime_id"]),
+            season_id: num(&o["season_id"]),
+            episode_no: num(&o["epizod_number"]),
+            section_no: num(&o["bolim_id"]),
+            title: pick("season_name", "anime_name"),
+            photo_url: pick("season_photo", "anime_photo"),
+            updated_at: num(&o["updated_at"]),
+            position_ms: num(&o["position_ms"]),
+            video_url: o["video_url"].as_str().unwrap_or("").to_string(),
+            thumb_url: o["thumb_url"].as_str().unwrap_or("").to_string(),
+        };
+        let (pos, dur) = (h.position_ms, num(&o["duration_ms"]));
+        let frac = if dur > 0 { (pos as f32 / dur as f32).clamp(0.0, 1.0) } else { 0.0 };
+        let clock = |ms: i64| {
+            let s = (ms / 1000).max(0);
+            format!("{:02}:{:02}", s / 60, s % 60)
+        };
+        let percent = format!("{:.2}%", frac * 100.0).replace('.', ",");
+        let (w, _) = window_dp();
+        let ch = (w - 32.0) * 9.0 / 16.0;
+        let pic = match self.history_frame_img(&h).or_else(|| self.frame(&h.photo_url)) {
+            Some(f) => image_fill(&f).radius(16.0),
+            None => column(vec![]).bg(CARD_ALT).radius(16.0),
+        };
+        let shadowed = |t: String, size: f32, alpha: u8, bold: bool| {
+            let e = tx(t, size, Color::rgba(255, 255, 255, alpha));
+            if bold { e.bold() } else { e }
+        };
+        let mut texts = vec![shadowed(h.title.clone(), 11.5, 255, true), shadowed(format!("{}-bo'lim {}-qism", h.section_no, h.episode_no), 10.5, 255, false)];
+        if h.updated_at > 0 {
+            texts.push(shadowed(format!("sana: {}", fmt_date(h.updated_at)), 10.0, 217, false));
         }
-        let mut kids = vec![
-            tx(title, 15.0, Color::WHITE).bold(),
-            tx(sub, 12.5, Color::WHITE),
-            gap_box(0.0, 8.0),
-            column(vec![]).height(5.0).radius(3.0).bg(Color::rgba(255, 255, 255, 40)).weight(1.0),
-        ];
-        let when = num(&o["updated_at"]);
-        kids.push(gap_box(0.0, 6.0));
-        kids.push(tx(format!("{pct}% · {}", if when > 0 { fmt_date(when) } else { String::new() }), 11.5, Color::WHITE));
+        let info = row(vec![column(texts).weight(1.0), gap_box(8.0, 0.0), shadowed(format!("{percent} | {}/{}", clock(pos), clock(dur)), 10.5, 255, true)])
+            .align(Align::End)
+            .gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 150))
+            .padding_each(8.0, 18.0, 8.0, 10.0)
+            .radius(16.0);
+        let bar = row(vec![
+            column(vec![]).height(3.5).gradient(ACCENT, ACCENT2).weight(frac.max(0.001)),
+            column(vec![]).height(3.5).bg(Color::rgba(255, 255, 255, 61)).weight((1.0 - frac).max(0.001)),
+        ]);
+        let mut layers = vec![pic, column(vec![spacer(), info]), column(vec![spacer(), bar])];
         if num(&o["deleted_at"]) != 0 {
-            kids.push(tx("Tarixdan tozalangan", 11.5, TEXT_DIM));
+            layers.push(column(vec![row(vec![spacer(), tx("Tarixdan tozalangan", 11.0, Color::WHITE).bold().bg(Color::rgba(0, 0, 0, 153)).radius(8.0).padding_xy(8.0, 4.0)])]).padding(8.0));
         }
-        Self::pglass(column(kids).padding(14.0)).radius(18.0).margin_each(0.0, 0.0, 0.0, 12.0)
+        stack(layers).bg(CARD_ALT).radius(16.0).height(ch).margin_each(0.0, 0.0, 0.0, 12.0)
     }
 
     fn stat_comment(o: &Value) -> Element {

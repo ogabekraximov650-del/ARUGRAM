@@ -1147,7 +1147,14 @@ impl Ui {
                         }
                         if t.dragging {
                             let st = &self.regions[ri].state;
-                            st.raw_set(st.offset() - dy);
+                            // UZ: Tortib yangilash: eng tepada pastga surilsa ro'yxat siljimaydi, "tortish" masofasi ortadi (qarshilik bilan).
+                            // EN: Pull-to-refresh: dragging down at the very top grows the pull distance (with resistance) instead of scrolling.
+                            if !hz && st.has_refresh() && (dy > 0.0 && st.offset() <= 0.5 || (dy < 0.0 && st.pull() > 0.0)) {
+                                let cap = 120.0 * self.scale;
+                                st.set_pull(if dy > 0.0 { (st.pull() + dy * 0.5).min(cap) } else { st.pull() + dy });
+                            } else {
+                                st.raw_set(st.offset() - dy);
+                            }
                             let tm = if e.time_ms > 0 { e.time_ms } else { self.now };
                             t.samples.push((tm, cur));
                             if t.samples.len() > 24 {
@@ -1193,6 +1200,15 @@ impl Ui {
                 }
                 if t.dragging {
                     if let Some(ri) = t.region {
+                        let st = &self.regions[ri].state;
+                        if st.pull() > 0.0 {
+                            let go = st.pull() >= 56.0 * self.scale;
+                            st.set_pull(0.0);
+                            if go {
+                                st.fire_refresh();
+                            }
+                            return;
+                        }
                         // UZ: Tezlik: oxirgi 100 ms dagi namunalar bo'yicha hisoblanadi (VelocityTracker kabi).
                         //     Barmoq to'xtab turib qo'yib yuborilsa — inersiya bo'lmaydi.
                         // EN: Velocity: computed from samples of the last 100 ms (like VelocityTracker).

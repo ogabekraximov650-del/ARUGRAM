@@ -9,6 +9,7 @@ mod comments;
 mod dl;
 mod edit;
 mod mediaview;
+mod translator;
 mod tgcache;
 mod tgpanel;
 mod pages;
@@ -31,13 +32,41 @@ const BELL: &str = "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.89,2 2,2zM18,16v-5c0,-3.
 const REFRESH: &str = "M17.65,6.35C16.2,4.9 14.21,4 12,4c-4.42,0 -7.99,3.58 -7.99,8s3.57,8 7.99,8c3.73,0 6.84,-2.55 7.73,-6h-2.08c-0.82,2.33 -3.04,4 -5.65,4 -3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6c1.66,0 3.14,0.69 4.22,1.78L13,11h7V4l-2.35,2.35z";
 const CLOSE: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
 const MENU: &str = "M3,18h18v-2L3,16v2zM3,13h18v-2L3,11v2zM3,6v2h18L21,6L3,6z";
-const CAT_TABS: [&str; 7] = ["Barchasi", "Reytingi baland", "Eng ko'p ko'rilgan", "Ongoing", "Tugallangan", "Filmlar", "OVA qismlar"];
+const CAT_TABS: [&str; 8] = ["Barchasi", "Tarjimonlar", "Reytingi baland", "Eng ko'p ko'rilgan", "Ongoing", "Tugallangan", "Filmlar", "OVA qismlar"];
 const LIB_TABS: [&str; 3] = ["Tarix", "Yuklanmalar", "Sevimlilar"];
 const PLAY: &str = "M8,5v14l11,-7z";
 const HEART: &str = "M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z";
 const STAR: &str = "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z";
 /// Bosh sahifa sarlavhasi balandligi (dp): PageHeader 66 + oraliq 14 + "Ommabop anime" 34 + oraliq 14.
 const HOME_HEADER_H: f32 = 128.0;
+
+/// Tarjimonlar ro'yxati (bir marta serverdan; kartadagi logotip va katalog "Tarjimonlar" yorlig'i uchun).
+static TRANS: std::sync::Mutex<Vec<crate::data::Translator>> = std::sync::Mutex::new(Vec::new());
+static TRANS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+thread_local! {
+    /// Tayyor dumaloq tarjimon logotiplari (url -> rasm).
+    static LOGOS: RefCell<HashMap<String, Rc<Image>>> = RefCell::new(HashMap::new());
+    static LOGO_ASKED: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
+}
+
+fn trans_list() -> Vec<crate::data::Translator> {
+    TRANS.lock().map(|t| t.clone()).unwrap_or_default()
+}
+
+fn latest_anime(seasons: &[Season], tr_id: i64) -> Vec<Season> {
+    let mut seen = HashSet::new();
+    seasons.iter().filter(|s| s.tr_id == tr_id && seen.insert(s.anime_id)).take(2).cloned().collect()
+}
+
+thread_local! {
+    /// Tortib yangilash indikatori shu vaqtgacha (ms) ko'rinadi.
+    static REFRESH_UNTIL: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn now_ms_ui() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0)
+}
 const WORKSPACE_PREMIUM: &str = "M9.68 13.69L12 11.93l2.31 1.76-.88-2.85L15.75 9h-2.84L12 6.19 11.09 9H8.25l2.31 1.84-.88 2.85zM20 10c0-4.42-3.58-8-8-8s-8 3.58-8 8c0 2.03.76 3.87 2 5.28V23l6-2 6 2v-7.72c1.24-1.41 2-3.25 2-5.28zm-8-6c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6 2.69-6 6-6z";
 const EYE: &str = "M12,4.5C7,4.5 2.73,7.61 1,12c1.73,4.39 6,7.5 11,7.5s9.27,-3.11 11,-7.5c-1.73,-4.39 -6,-7.5 -11,-7.5zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5zM12,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3 -1.34,-3 -3,-3z";
 const NAV: [(&str, &str); 5] = [
@@ -166,7 +195,7 @@ fn badge(children: Vec<Element>) -> Element {
         .align(Align::Center)
         .bg(Color::rgba(0, 0, 0, 140))
         .radius(10.0)
-        .padding_xy(8.0, 4.0)
+        .padding_xy(8.0, 9.2)
 }
 
 /// Kotlin `PaidBadge`: qora 62% fon, tilla chegara, tojli belgi va "Pullik".
@@ -176,7 +205,7 @@ fn paid_badge() -> Element {
         .bg(Color::rgba(0, 0, 0, 158))
         .radius(7.0)
         .border(1.0, GOLD.with_opacity(0.7))
-        .padding_xy(7.0, 2.5)
+        .padding_xy(7.0, 7.7)
 }
 
 impl Home {
@@ -242,10 +271,132 @@ impl Home {
             filter_scroll: ScrollState::new(),
             poster_diag: State::new(String::new()),
         });
+        // Kotlin `PullToRefreshBox`: ro'yxatni pastga tortib qo'yib yuborilsa yangilanadi (Bosh sahifa, Katalog, Tarix, Sevimlilar).
+        for sc in [&h.scroll, &h.cat_scroll, &h.hist_scroll, &h.fav_scroll] {
+            let w = Rc::downgrade(&h);
+            sc.on_refresh(move || {
+                if let Some(me) = w.upgrade() {
+                    me.pull_refresh();
+                }
+            });
+        }
         h.reload();
         h.load_library();
         h.load_profile();
+        h.load_translators();
         h
+    }
+
+    /// Tarjimonlar ro'yxatini bir marta oladi (fonda); tayyor bo'lgach ekran yangilanadi.
+    fn load_translators(self: &Rc<Self>) {
+        if TRANS_LOADED.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        let me = self.clone();
+        spawn_bg(crate::data::fetch_translators, move |r| {
+            if let Ok(l) = r {
+                if let Ok(mut t) = TRANS.lock() {
+                    *t = l;
+                }
+                TRANS_LOADED.store(true, std::sync::atomic::Ordering::SeqCst);
+                me.gate_rev.set(me.gate_rev.get().wrapping_add(1));
+            }
+        });
+    }
+
+    /// Dumaloq logotip rasmi (poster yuklagichidan; kvadrat rasm 480x720 ga cho'zilgan — qaytarib kvadratga keltiriladi). Hali yo'q bo'lsa navbatga qo'yiladi.
+    fn logo_img(self: &Rc<Self>, url: &str) -> Option<Rc<Image>> {
+        if url.is_empty() {
+            return None;
+        }
+        if let Some(i) = LOGOS.with(|l| l.borrow().get(url).cloned()) {
+            return Some(i);
+        }
+        let img = self.posters.borrow().get(url).cloned();
+        match img {
+            Some(img) => {
+                let a = Rc::new(Image { w: img.w, h: img.h, rgba: img.rgba.clone() }.resized(192, 192).round_corners(96.0));
+                LOGOS.with(|l| l.borrow_mut().insert(url.to_string(), a.clone()));
+                Some(a)
+            }
+            None => {
+                if LOGO_ASKED.with(|a| a.borrow_mut().insert(url.to_string())) {
+                    self.queue.borrow_mut().insert(0, url.to_string());
+                    self.next_posters();
+                }
+                None
+            }
+        }
+    }
+
+    /// Kotlin `TranslatorLogo`: dumaloq; rasm yo'q bo'lsa nomning bosh harflari.
+    fn tr_logo(self: &Rc<Self>, t: &crate::data::Translator, size: f32) -> Element {
+        if let Some(img) = self.logo_img(&t.photo_url) {
+            return image(&img, size, size);
+        }
+        let initials: String = t.name.split(|c: char| c == ' ' || c == '.' || c == '-').filter(|x| !x.trim().is_empty()).take(2).filter_map(|x| x.chars().next()).flat_map(|c| c.to_uppercase()).collect();
+        let initials = if initials.is_empty() { "?".to_string() } else { initials };
+        column(vec![tx(initials, size / 2.4, ACCENT2).bold()]).center().width(size).height(size).radius(size / 2.0).bg(ACCENT_TINT).border(1.0, BORDER_BRIGHT)
+    }
+
+    /// Katalog "Tarjimonlar" yorlig'i: har tarjimon uchun qator (logotip, nom, strelka) va ostida oxirgi 2 ta anime.
+    fn translators_view(self: &Rc<Self>, card_h: f32, top: f32, bottom: f32) -> Element {
+        let seasons = self.seasons.get();
+        let shown: Vec<crate::data::Translator> = trans_list().into_iter().filter(|t| t.anime_count > 0 || seasons.iter().any(|s| s.tr_id == t.id)).collect();
+        if shown.is_empty() {
+            return if TRANS_LOADED.load(std::sync::atomic::Ordering::SeqCst) { Self::empty(MENU, "Hozircha tarjimonlar yo'q") } else { column(vec![spinner(32.0, 3.0, ACCENT2)]).center() };
+        }
+        let row_h = 52.0 + 8.0 + card_h + 20.0;
+        let me = self.clone();
+        lazy_column(&self.cat_scroll, shown.len(), row_h, move |i| {
+            let t = shown[i].clone();
+            let (m2, t2) = (me.clone(), t.clone());
+            let head = row(vec![
+                me.tr_logo(&t, 40.0),
+                gap_box(10.0, 0.0),
+                tx(t.name.clone(), 16.0, Color::WHITE).bold().weight(1.0),
+                icon("M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z", 22.0).color(Color::WHITE),
+                gap_box(6.0, 0.0),
+            ])
+            .align(Align::Center)
+            .padding_xy(0.0, 6.0)
+            .on_click(move || m2.open_translator(t2.clone()));
+            let latest = latest_anime(&seasons, t.id);
+            let a = latest.first().map(|s| me.card(s, card_h)).unwrap_or_else(|| spacer().weight(1.0));
+            let b = latest.get(1).map(|s| me.card(s, card_h)).unwrap_or_else(|| spacer().weight(1.0));
+            column(vec![head, gap_box(0.0, 8.0), row(vec![a, b]).gap(14.0), gap_box(0.0, 20.0)])
+        })
+        .padding_each(16.0, top, 16.0, bottom)
+    }
+
+    /// Tortib yangilash: ro'yxat va kutubxona qayta yuklanadi; indikator kamida ~1,2 soniya turadi.
+    fn pull_refresh(self: &Rc<Self>) {
+        REFRESH_UNTIL.with(|c| c.set(now_ms_ui() + 1200));
+        self.reload();
+        if self.tab.get() == 3 {
+            self.load_library();
+        }
+        let me = self.clone();
+        spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(1250)), move |_| me.gate_rev.set(me.gate_rev.get().wrapping_add(1)));
+    }
+
+    /// Tortilayotgan yoki yangilanayotgan ro'yxat uchun indikator (Material `PullToRefresh` kabi dumaloq karta + aylanuvchi yoy).
+    fn pull_indicator(&self, top: f32) -> Option<Element> {
+        let sc = match (self.tab.get(), self.lib_tab.get()) {
+            (0, _) => &self.scroll,
+            (2, _) => &self.cat_scroll,
+            (3, 0) => &self.hist_scroll,
+            (3, 2) => &self.fav_scroll,
+            _ => return None,
+        };
+        let pull = sc.pull() / density();
+        let refreshing = now_ms_ui() < REFRESH_UNTIL.with(|c| c.get());
+        if pull < 12.0 && !refreshing {
+            return None;
+        }
+        let y = top + if refreshing { 16.0 } else { pull * 0.8 - 10.0 };
+        let dot = column(vec![spinner(22.0, 2.5, ACCENT2)]).center().width(40.0).height(40.0).radius(20.0).bg(SURFACE).border(1.0, BORDER);
+        Some(column(vec![row(vec![spacer(), dot, spacer()]), spacer()]).padding_each(0.0, y, 0.0, 0.0))
     }
 
     pub fn back(&self) -> bool {
@@ -417,8 +568,17 @@ impl Home {
                 column(vec![tx(letter, 84.0, Color::WHITE).black()]).gradient(a, b).radius(20.0).center()
             }
         };
+        let base = base.radius(20.0);
         // Kotlin `SeasonCard`: chap ustunda yosh belgisi, o'ng ustunda (tepadan pastga) baho, ko'rishlar, "Pullik" — 6 dp oraliq bilan.
         let mut left = vec![];
+        // Tarjimon logotipi (yosh belgisi tepasida): 34 dp dumaloq, oq chegara.
+        if s.tr_id > 0 {
+            if let Some(t) = trans_list().into_iter().find(|t| t.id == s.tr_id) {
+                if let Some(img) = self.logo_img(&t.photo_url) {
+                    left.push(column(vec![image(&img, 34.0, 34.0)]).width(34.0).height(34.0).radius(17.0).bg(Color::rgba(0, 0, 0, 89)).border(1.5, Color::rgba(255, 255, 255, 153)));
+                }
+            }
+        }
         if s.age > 0 {
             let c = if s.age >= 18 { Color::hex(0xEF4444) } else if s.age >= 16 { ACCENT2 } else { GOLD };
             left.push(tx(format!("{}+", s.age), 10.5, Color::WHITE)
@@ -426,7 +586,8 @@ impl Home {
                 .bg(c.with_opacity(0.92))
                 .radius(7.0)
                 .border(1.0, Color::rgba(255, 255, 255, 71))
-                .padding_xy(7.0, 2.5));
+                // Kotlin matni 24 sp qator qutisiga ega (Material `bodyLarge`): shuning uchun belgi balandroq.
+                .padding_xy(7.0, 7.7));
         }
         let mut right = vec![];
         if s.rating_count > 0 {
@@ -454,7 +615,7 @@ impl Home {
         };
         let mut txt = vec![];
         if !tag.is_empty() {
-            txt.push(tx(tag, 11.0, Color::WHITE).bold());
+            txt.push(tx(tag, 11.0, Color::WHITE).bold().padding_each(0.0, 4.85, 0.0, 4.85));
         }
         txt.push(text(name).size(14.0).color(Color::WHITE).line_height(17.0).bold());
         let bottom = column(vec![
@@ -462,10 +623,10 @@ impl Home {
             column(txt)
                 .padding_each(10.0, 28.0, 10.0, 10.0)
                 .gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 224))
-                .radius(20.0),
+                .radius(19.0),
         ]);
         let (me, s2) = (self.clone(), s.clone());
-        stack(vec![base, column(top).padding(8.0), bottom]).bg(CARD).border(1.0, BORDER).radius(20.0).weight(1.0).height(h).on_click(move || me.open_season(s2.clone()))
+        stack(vec![stack(vec![base.radius(19.0), column(top).padding(8.0), bottom]).margin(1.0)]).bg(CARD).border(1.0, BORDER).radius(20.0).weight(1.0).height(h).on_click(move || me.open_season(s2.clone()))
     }
 
     /// Bosh sahifa sarlavhasi (Kotlin `PageHeader` + "Ommabop anime"): ro'yxat bilan birga suriladi (u ro'yxat tepasida joy qoldiradi, `header_h`).
@@ -481,34 +642,19 @@ impl Home {
             .bg(CARD)
             .border(1.0, BORDER)
             .radius(14.0);
-        let me_r = self.clone();
-        let refresh = column(vec![icon(REFRESH, 22.0).color(Color::rgba(255, 255, 255, 179))])
-            .width(42.0)
-            .height(42.0)
-            .center()
-            .bg(CARD)
-            .border(1.0, BORDER)
-            .radius(14.0)
-            .on_click(move || {
-                uzcoders::android::toast("Yangilanmoqda...");
-                me_r.reload();
-                if me_r.tab.get() == 3 {
-                    me_r.load_library();
-                }
-            });
         let bell = bell.on_click(|| uzcoders::android::toast("Bildirishnomalar tez orada"));
         let titles = column(vec![
             row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
             gap_box(0.0, 2.0),
             tx("Anime dunyosi", 13.0, Color::rgba(255, 255, 255, 115)),
         ]);
-        let head = row(vec![titles.weight(1.0), refresh, gap_box(8.0, 0.0), bell]).align(Align::Center).padding_each(0.0, 16.0, 0.0, 4.0);
+        let head = row(vec![titles.weight(1.0), bell]).align(Align::Center).padding_each(0.0, 16.0, 0.0, 4.0);
         let diag = if self.poster_diag.with(|d| d.is_empty()) || !self.posters.borrow().is_empty() {
             gap_box(0.0, 0.0)
         } else {
             tx(self.poster_diag.get(), 11.0, ERROR)
         };
-        let y = top_inset - off;
+        let y = top_inset - off + self.scroll.pull() / density();
         column(vec![
             head,
             gap_box(0.0, 14.0),
@@ -587,18 +733,18 @@ impl Home {
                 .cloned()
                 .collect();
             match tab {
-                1 => {
+                2 => {
                     v.retain(|s| s.rating_count > 0);
                     v.sort_by(|a, b| b.rating_avg.partial_cmp(&a.rating_avg).unwrap_or(std::cmp::Ordering::Equal));
                 }
-                2 => {
+                3 => {
                     v.retain(|s| s.views > 0);
                     v.sort_by(|a, b| b.views.cmp(&a.views));
                 }
-                3 => v.retain(|s| s.status == "Davom etmoqda"),
-                4 => v.retain(|s| s.status == "Tugallangan"),
-                5 => v.retain(|s| s.kind == "FILM"),
-                6 => v.retain(|s| s.kind == "OVA"),
+                4 => v.retain(|s| s.status == "Davom etmoqda"),
+                5 => v.retain(|s| s.status == "Tugallangan"),
+                6 => v.retain(|s| s.kind == "FILM"),
+                7 => v.retain(|s| s.kind == "OVA"),
                 _ => {}
             }
             v
@@ -916,7 +1062,8 @@ impl Home {
         })
     }
 
-    /// Kotlin `SearchCard`: tepada rasm ("Pullik" belgisi bilan), pastda nom va janrlar; nisbat 0,68.
+    #[allow(dead_code)]
+    /// Kotlin `SearchCard` (hozir ishlatilmaydi: qidiruv ham boshqa sahifalardagi karta bilan): tepada rasm ("Pullik" belgisi bilan), pastda nom va janrlar; nisbat 0,68.
     fn search_card(self: &Rc<Self>, s: &Season, h: f32) -> Element {
         let base = match self.posters.borrow().get(&s.photo_url) {
             Some(img) => image_fill(img),
@@ -941,6 +1088,7 @@ impl Home {
             .on_click(move || me.open_season(s2.clone()))
     }
 
+    #[allow(dead_code)]
     /// Qidiruv natijalari to'ri (Kotlin `SeasonGrid` + `SearchCard`).
     fn search_grid(self: &Rc<Self>, items: Rc<Vec<Season>>, scroll: &ScrollState, card_h: f32, top: f32, bottom: f32) -> Element {
         let rows = items.len().div_ceil(2);
@@ -1034,8 +1182,10 @@ impl Home {
                 column(vec![tx(msg, 15.0, TEXT_FAINT)]).center()
             } else {
                 // PageHeader 66 + oraliq 8 + maydon 52 + oraliq 16 (Kotlin `SearchScreen`).
-                self.search_grid(items, &self.search_scroll, card_w / 0.68, 142.0 + ins.top, 24.0 + 66.0 + ins.bottom)
+                self.poster_grid(items, &self.search_scroll, card_h, 142.0 + ins.top, 24.0 + 66.0 + ins.bottom)
             }
+        } else if tab == 2 && self.cat_tab.get() == 1 {
+            self.translators_view(card_h, 66.0 + 50.0 + 12.0 + ins.top, 90.0 + ins.bottom)
         } else if tab == 2 {
             let items = self.catalog_items();
             let body = if items.is_empty() {
@@ -1100,7 +1250,7 @@ impl Home {
                         };
                         row(vec![a, b]).gap(14.0).padding_each(0.0, 0.0, 0.0, 14.0)
                     })
-                    .padding_each(16.0, header_h + ins.top, 16.0, 90.0 + ins.bottom)
+                    .padding_each(16.0, header_h + ins.top + self.scroll.pull() / density(), 16.0, 90.0 + ins.bottom)
                 }
             }
         };
@@ -1132,6 +1282,9 @@ impl Home {
             layers.push(self.catalog_bar(ins.top));
         } else if tab == 3 {
             layers.push(self.library_bar(ins.top));
+        }
+        if let Some(ind) = self.pull_indicator(ins.top) {
+            layers.push(ind);
         }
         if tab == 2 && self.filter_open.get() {
             layers.push(self.filter_panel(ins.top, ins.bottom));
@@ -1183,6 +1336,7 @@ mod tests {
                 status: if i % 2 == 0 { "Davom etmoqda".into() } else { "Tugallangan".into() },
                 kind: "TV".into(),
                 free: Some(true),
+                tr_id: 0,
             })
             .collect();
         let home = Rc::new(Home {
@@ -1268,6 +1422,19 @@ mod tests {
             c.clear(Color::BLACK);
             c.execute(&cmds);
             std::fs::write(format!("{dir}/7_search.png"), c.to_png()).unwrap();
+            // Tarjimon sahifasi.
+            {
+                let tr = crate::data::Translator { id: 1, name: "Anime Uz".into(), photo_url: String::new(), bio: "Eng yaxshi tarjimalar bir joyda.".into(), anime_count: 2 };
+                let tp = crate::data::TranslatorPage { translator: tr.clone(), anime: 2, episodes: 40, views: 12400, rating: 9.2, seasons: home.seasons.get().iter().take(3).cloned().collect() };
+                let page = Rc::new(translator::TrPage { tr, data: State::new(Some(Rc::new(tp))), failed: State::new(false), scroll: ScrollState::new() });
+                home.push(pages::Page::Translator(page));
+                let cmds = ui.frame(size);
+                let mut c = ui.canvas(360, 640);
+                c.clear(Color::BLACK);
+                c.execute(&cmds);
+                std::fs::write(format!("{dir}/17_translator.png"), c.to_png()).unwrap();
+                home.pop();
+            }
             home.tab.set(2);
             home.push(pages::Page::Sessions);
             home.open_support(None);

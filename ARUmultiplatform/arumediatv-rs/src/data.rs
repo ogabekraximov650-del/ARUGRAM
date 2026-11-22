@@ -21,6 +21,61 @@ pub struct Season {
     pub status: String,
     pub kind: String,
     pub free: Option<bool>,
+    /// Tarjimon identifikatori (0 — biriktirilmagan).
+    pub tr_id: i64,
+}
+
+/// Tarjimon (Kotlin `Translator`).
+#[derive(Clone, Debug, Default)]
+pub struct Translator {
+    pub id: i64,
+    pub name: String,
+    pub photo_url: String,
+    pub bio: String,
+    pub anime_count: i64,
+}
+
+/// Tarjimon sahifasidagi 4 raqam va animelari.
+#[derive(Clone, Debug, Default)]
+pub struct TranslatorPage {
+    pub translator: Translator,
+    pub anime: i64,
+    pub episodes: i64,
+    pub views: i64,
+    pub rating: f64,
+    pub seasons: Vec<Season>,
+}
+
+fn parse_translator(o: &Value) -> Option<Translator> {
+    let t = Translator {
+        id: num(&o["id"]),
+        name: o["name"].as_str().unwrap_or("").trim().to_string(),
+        photo_url: o["photo_url"].as_str().unwrap_or("").to_string(),
+        bio: o["bio"].as_str().unwrap_or("").trim().to_string(),
+        anime_count: num(&o["anime_count"]),
+    };
+    if t.id > 0 && !t.name.is_empty() { Some(t) } else { None }
+}
+
+/// `GET /api/translators`.
+pub fn fetch_translators() -> Result<Vec<Translator>, String> {
+    let j = crate::api::get_json("/api/translators", "", None)?;
+    Ok(j.as_array().map(|a| a.iter().filter_map(parse_translator).collect()).unwrap_or_default())
+}
+
+/// `GET /api/translators/<id>/page`.
+pub fn fetch_translator_page(id: i64) -> Result<TranslatorPage, String> {
+    let j = crate::api::get_json(&format!("/api/translators/{id}/page"), "", None)?;
+    let translator = parse_translator(&j["translator"]).ok_or_else(|| "Tarjimon topilmadi".to_string())?;
+    let st = &j["stats"];
+    Ok(TranslatorPage {
+        translator,
+        anime: num(&st["anime"]),
+        episodes: num(&st["episodes"]),
+        views: num(&st["views"]),
+        rating: st["rating"].as_f64().unwrap_or(0.0),
+        seasons: parse_seasons(&j["seasons"].to_string()),
+    })
 }
 
 fn num(v: &Value) -> i64 {
@@ -56,6 +111,7 @@ pub fn parse_seasons(body: &str) -> Vec<Season> {
                 status: o["holati"].as_str().unwrap_or("").trim().to_string(),
                 kind: o["turi"].as_str().unwrap_or("").trim().to_uppercase(),
                 free: o["free"].as_bool(),
+                tr_id: num(&o["tr_id"]),
             })
         })
         .collect()
@@ -122,7 +178,7 @@ fn poster_dir() -> String {
 
 fn finish_image(bytes: &[u8]) -> Option<Image> {
     // Karta uchun yetarli o'lcham; burchaklar yumaloq (karta radiusiga mos).
-    crate::webp::decode_any(bytes).map(|i| i.resized(480, 720).round_corners(48.0))
+    crate::webp::decode_any(bytes).map(|i| i.resized(480, 720))
 }
 
 /// Posterlarni oladi: avval diskdagi nusxa (tarmoqsiz), yo'qlari Telegram orqali — worker `deliver` bot chatiga nusxalaydi,
