@@ -47,6 +47,8 @@ static TRANS_LOADED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 thread_local! {
     /// Tayyor dumaloq tarjimon logotiplari (url -> rasm).
     static LOGOS: RefCell<HashMap<String, Rc<Image>>> = RefCell::new(HashMap::new());
+    /// Burchaklari yumaloqlangan karta rasmlari (url -> rasm): uzcoders rasmni o'zi yumaloqlamaydi, shuning uchun piksellar niqoblanadi.
+    static CARD_IMGS: RefCell<HashMap<String, Rc<Image>>> = RefCell::new(HashMap::new());
     static LOGO_ASKED: RefCell<HashSet<String>> = RefCell::new(HashSet::new());
 }
 
@@ -562,7 +564,20 @@ impl Home {
 
     fn card(self: &Rc<Self>, s: &Season, h: f32) -> Element {
         let base = match self.posters.borrow().get(&s.photo_url) {
-            Some(img) => image_fill(img),
+            Some(img) => {
+                let r = CARD_IMGS.with(|c| {
+                    if let Some(i) = c.borrow().get(&s.photo_url) {
+                        return i.clone();
+                    }
+                    // Karta kengligi ~156 dp, burchak 19 dp: rasm pikselida shunga mos radius.
+                    let small = Image { w: img.w, h: img.h, rgba: img.rgba.clone() }.resized(360, 1200);
+                    let rr = 19.0 * small.w as f32 / 156.0;
+                    let a = Rc::new(small.round_corners(rr));
+                    c.borrow_mut().insert(s.photo_url.clone(), a.clone());
+                    a
+                });
+                image_fill(&r)
+            }
             None => {
                 let (a, b) = name_colors(&s.name);
                 let letter: String = s.name.trim().chars().take(1).flat_map(|c| c.to_uppercase()).collect();
@@ -582,8 +597,7 @@ impl Home {
         }
         if s.age > 0 {
             let c = if s.age >= 18 { Color::hex(0xEF4444) } else if s.age >= 16 { ACCENT2 } else { GOLD };
-            left.push(tx(format!("{}+", s.age), 10.5, Color::WHITE)
-                .black()
+            left.push(row(vec![tx(format!("{}+", s.age), 10.5, Color::WHITE).black()]).center()
                 .bg(c.with_opacity(0.92))
                 .radius(7.0)
                 .border(1.0, Color::rgba(255, 255, 255, 71))
@@ -600,7 +614,7 @@ impl Home {
         if s.free == Some(false) {
             right.push(paid_badge());
         }
-        let top = vec![row(vec![column(left).gap(6.0), spacer(), column(right).gap(6.0).align(Align::End)]).align(Align::Start)];
+        let top = vec![row(vec![column(left).gap(6.0).align(Align::Start), spacer(), column(right).gap(6.0).align(Align::End)]).align(Align::Start)];
         let mut tag_parts = vec![];
         if s.section_no > 0 {
             tag_parts.push(format!("{}-bo'lim", s.section_no));
