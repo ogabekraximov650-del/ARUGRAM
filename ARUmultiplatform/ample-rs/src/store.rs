@@ -57,6 +57,11 @@ pub struct Store {
     pub dirty: BTreeSet<u64>,
     pub snap: Option<Snap>,
     pub manifest_msg: Option<i64>,
+    /// UZ: ro'yxat xabari yuborilgan vaqt (ms). Telegram eski xabarni tahrirlashga/o'chirishga ruxsat bermasligi mumkin — shu sabab 24 soatdan keyin yangisi yuborilib eskisi hali o'chadigan paytda o'chiriladi. EN: manifest message creation time; rotated before it gets too old to edit/delete.
+    pub manifest_at: u64,
+    /// UZ: o'chib bo'lmagan xabarlar (id, birinchi xato vaqti) va oxirgi o'chirish xatosi — keyingi aylanishda qayta uriniladi, holatda ko'rinadi. EN: undeletable messages and the last delete error.
+    pub orphans: Vec<(i64, u64)>,
+    pub del_err: String,
     pub gap: bool,
     /// Yuklanmagan MUHIM yozuv paydo bo'lgan vaqt (ms) va oxirgi muvaffaqiyatli yuklash vaqti. EN: first unflushed important write; last flush.
     pub crit_since: Option<u64>,
@@ -138,12 +143,15 @@ impl Store {
         let conn = db.connect()?;
         let _ = conn.query("pragma journal_mode=wal", ()).await?; // qator qaytaradi. EN/RU: returns a row
         conn.execute_batch("pragma synchronous=full; pragma foreign_keys=off; create table if not exists jr_state(k text primary key, v integer); insert or ignore into jr_state values('seq',0); create table if not exists kv_marks(k text primary key, v integer not null default 0);").await?;
-        let mut st = Store { cfg, db, conn, seq: 0, chunks: vec![], cur: 0, dirty: BTreeSet::new(), snap: None, manifest_msg: None, gap: false, crit_since: None, last_flush: now_ms() };
+        let mut st = Store { cfg, db, conn, seq: 0, chunks: vec![], cur: 0, dirty: BTreeSet::new(), snap: None, manifest_msg: None, manifest_at: 0, orphans: vec![], del_err: String::new(), gap: false, crit_since: None, last_flush: now_ms() };
         st.seq = st.scalar_i64("select v from jr_state where k='seq'").await?.max(0) as u64;
         if let Ok(b) = std::fs::read(st.cfg.dir.join("jr_snap.json")) {
             if let Ok(j) = serde_json::from_slice::<J>(&b) {
                 st.snap = serde_json::from_value(j["snap"].clone()).ok();
                 st.manifest_msg = j["manifest_msg"].as_i64();
+                st.manifest_at = j["manifest_at"].as_u64().unwrap_or(0);
+                st.orphans = j["orphans"].as_array().map(|a| a.iter().filter_map(|x| Some((x[0].as_i64()?, x[1].as_u64().unwrap_or(0)))).collect()).unwrap_or_default();
+                st.del_err = j["del_err"].as_str().unwrap_or("").to_string();
             }
         }
         st.scan()?;
@@ -314,11 +322,11 @@ impl Store {
     pub fn usage(&self) -> J {
         let used = Self::dir_bytes(&self.cfg.dir);
         let limit = self.cfg.limit_mb * MB;
-        json!({"used_bytes": used, "limit_bytes": limit, "percent": if limit > 0 { used as f64 / limit as f64 * 100.0 } else { 0.0 }, "top": [], "seq": self.seq, "chunks": self.chunks.len()})
+        json!({"used_bytes": used, "limit_bytes": limit, "percent": if limit > 0 { used as f64 / limit as f64 * 100.0 } else { 0.0 }, "top": [], "seq": self.seq, "chunks": self.chunks.len(), "tg_orphans": self.orphans.len(), "tg_orphan_oldest_ms": self.orphans.iter().map(|o| o.1).min().unwrap_or(0), "tg_del_error": self.del_err})
     }
 
     pub fn save_snap_meta(&self) {
-        let _ = std::fs::write(self.cfg.dir.join("jr_snap.json"), json!({"snap": self.snap, "manifest_msg": self.manifest_msg}).to_string());
+        let _ = std::fs::write(self.cfg.dir.join("jr_snap.json"), json!({"snap": self.snap, "manifest_msg": self.manifest_msg, "manifest_at": self.manifest_at, "orphans": self.orphans, "del_err": self.del_err}).to_string());
     }
 
     /// UZ: yangi snapshot: yo'q bo'lsa yoki zaxirada bo'shliq bo'lsa; aks holda FAQAT o'zgarish bo'lgan bo'lsa va (6 soatdan keyin jurnal hajmi snapshot hajmiga yetgan bo'lsa, yoki 7 kun o'tgan bo'lsa).
@@ -408,7 +416,8 @@ pub async fn replicate(st: &Shared, tg: &Tg, key: &[u8; 32], force: bool) -> Res
         Err(e) => { let mut s = st.lock().await; if s.crit_since.is_none() { s.crit_since = Some(prev_crit.unwrap_or(now)); } Err(e) }
         Ok((n, old_msgs)) => {
             if n > 0 || need_manifest { write_manifest(st, tg, key).await?; }
-            if !old_msgs.is_empty() { tg.del_many(&old_msgs).await; }
+            if !old_msgs.is_empty() { del_tracked(st, tg, &old_msgs).await; }
+            retry_orphans(st, tg).await;
             if n > 0 { st.lock().await.last_flush = now_ms(); }
             Ok(json!({"uploaded": n, "pending": false}))
         }
@@ -422,17 +431,54 @@ async fn write_manifest(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<()> {
         (json!({"v": 2, "at": now_ms(), "seq": s.seq, "snapshot": s.snap, "chunks": chunks}), s.manifest_msg)
     };
     let data = crypto::seal(key, m.to_string().as_bytes());
-    // UZ: ro'yxat bir marta pin qilinadi, keyin joyida almashtiriladi (kanalda "pin qildi" xabarlari to'planmaydi). EN/RU: pin once, then edit in place.
-    if let Some(o) = old {
+    // UZ: ro'yxat joyida almashtiriladi (pin saqlanadi), LEKIN Telegram eski xabarni tahrirlashga/o'chirishga ruxsat bermasligi mumkin (48 soat):
+    //     shu sabab xabar 24 soatdan eskirsa yangisi yuboriladi va eskisi hali o'chadigan paytda o'chiriladi — "yetim" nusxa qolmaydi.
+    // EN/RU: edit in place, but rotate the message after 24 h so the old copy can still be deleted (Telegram limits edit/delete of old messages).
+    let fresh = { let s = st.lock().await; s.manifest_at > 0 && now_ms().saturating_sub(s.manifest_at) < MANIFEST_ROTATE_MS };
+    if let (Some(o), true) = (old, fresh) {
         if tg.edit(o, "manifest.bin", data.clone()).await.is_ok() { st.lock().await.save_snap_meta(); return Ok(()); }
     }
     let (_, msg) = tg.send("manifest.bin", data).await?;
     tg.pin(msg).await;
-    if let Some(o) = old { tg.del(o).await; }
-    let mut s = st.lock().await;
-    s.manifest_msg = Some(msg);
-    s.save_snap_meta();
+    {
+        let mut s = st.lock().await;
+        s.manifest_msg = Some(msg);
+        s.manifest_at = now_ms();
+        s.save_snap_meta();
+    }
+    if let Some(o) = old { del_tracked(st, tg, &[o]).await; }
     Ok(())
+}
+
+const MANIFEST_ROTATE_MS: u64 = 24 * 3600_000;
+
+/// UZ: xabarlarni o'chiradi; o'chmaganlari "yetim" ro'yxatiga (id, vaqt) yoziladi, sababi eslab qolinadi (jim yutilmaydi). EN: delete; failures are recorded.
+pub async fn del_tracked(st: &Shared, tg: &Tg, ids: &[i64]) {
+    if ids.is_empty() { return; }
+    let failed = tg.del_report(ids).await;
+    let mut s = st.lock().await;
+    let now = now_ms();
+    for (id, why) in failed {
+        if !s.orphans.iter().any(|o| o.0 == id) { s.orphans.push((id, now)); }
+        s.del_err = format!("{} (xabar {})", why, id);
+    }
+    s.save_snap_meta();
+}
+
+/// UZ: oldin o'chmagan xabarlarni qayta urinadi (vaqtinchalik xato, huquq tuzatilgan bo'lishi mumkin); o'chganlari ro'yxatdan chiqadi. Har ~30 daqiqada bir marta. EN: retry previously failed deletes.
+pub async fn retry_orphans(st: &Shared, tg: &Tg) {
+    static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now = now_ms();
+    if now.saturating_sub(LAST.load(std::sync::atomic::Ordering::Relaxed)) < 30 * 60_000 { return; }
+    let ids: Vec<i64> = { let s = st.lock().await; s.orphans.iter().map(|o| o.0).collect() };
+    if ids.is_empty() { return; }
+    LAST.store(now, std::sync::atomic::Ordering::Relaxed);
+    let failed = tg.del_report(&ids).await;
+    let mut s = st.lock().await;
+    let still: std::collections::HashSet<i64> = failed.iter().map(|f| f.0).collect();
+    s.orphans.retain(|o| still.contains(&o.0));
+    if let Some((id, why)) = failed.last() { s.del_err = format!("{} (xabar {})", why, id); } else { s.del_err.clear(); }
+    s.save_snap_meta();
 }
 
 /// To'liq surat: baza fayli 18 MiB bo'laklarda (har biri siqiladi va shifrlanadi) yuklanadi; suratga to'liq kirgan jurnal bo'laklari (ochiq bo'lak ham) o'chiriladi va raqamlash qaytadan `db_1_v1` dan boshlanadi.
@@ -481,8 +527,8 @@ pub async fn snapshot(st: &Shared, tg: &Tg, key: &[u8; 32]) -> Result<J> {
         (old, del)
     };
     write_manifest(st, tg, key).await?;
-    if !del_msgs.is_empty() { tg.del_many(&del_msgs).await; }
-    if let Some(o) = old_parts { let ids: Vec<i64> = o.iter().map(|p| p.msg_id).collect(); tg.del_many(&ids).await; }
+    if !del_msgs.is_empty() { del_tracked(st, tg, &del_msgs).await; }
+    if let Some(o) = old_parts { let ids: Vec<i64> = o.iter().map(|p| p.msg_id).collect(); del_tracked(st, tg, &ids).await; }
     Ok(json!({"seq": seq, "parts": parts.len(), "bytes": raw_total}))
 }
 

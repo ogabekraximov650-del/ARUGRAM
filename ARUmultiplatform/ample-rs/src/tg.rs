@@ -83,14 +83,23 @@ impl Tg {
 
     pub async fn del(&self, msg_id: i64) -> bool { self.call("deleteMessage", json!({"chat_id": self.channel, "message_id": msg_id})).await.is_ok() }
 
-    /// Ko'p xabarni bitta so'rovda o'chiradi (Bot API: 100 tagacha). Xato bo'lsa birma-bir. EN: batch delete, 100 per call.
-    pub async fn del_many(&self, ids: &[i64]) {
+    /// UZ: o'chirish natijasi xato matni bilan (xabar allaqachon yo'q bo'lsa — muvaffaqiyat). EN: delete with the error text; an already-missing message counts as success.
+    pub async fn del_try(&self, msg_id: i64) -> std::result::Result<(), String> {
+        match self.call("deleteMessage", json!({"chat_id": self.channel, "message_id": msg_id})).await {
+            Ok(_) => Ok(()),
+            Err(e) => { let t = e.to_string(); if gone(&t) { Ok(()) } else { Err(t) } }
+        }
+    }
+
+    /// UZ: ko'p xabarni o'chiradi va o'chmaganlarini (id, sabab) qaytaradi (jim yutilmaydi). EN: batch delete returning the failures.
+    pub async fn del_report(&self, ids: &[i64]) -> Vec<(i64, String)> {
+        let mut failed = vec![];
         for chunk in ids.chunks(100) {
             if chunk.is_empty() { continue; }
-            if self.call("deleteMessages", json!({"chat_id": self.channel, "message_ids": chunk})).await.is_err() {
-                for m in chunk { let _ = self.del(*m).await; }
-            }
+            if self.call("deleteMessages", json!({"chat_id": self.channel, "message_ids": chunk})).await.is_ok() { continue; }
+            for m in chunk { if let Err(e) = self.del_try(*m).await { failed.push((*m, e)); } }
         }
+        failed
     }
 
     pub async fn pin(&self, msg_id: i64) -> bool { self.call("pinChatMessage", json!({"chat_id": self.channel, "message_id": msg_id, "disable_notification": true})).await.is_ok() }
@@ -99,5 +108,22 @@ impl Tg {
         let c = self.call("getChat", json!({"chat_id": self.channel})).await?;
         let m = &c["pinned_message"];
         Ok(m["document"]["file_id"].as_str().map(|f| (m["message_id"].as_i64().unwrap_or(0), f.to_string())))
+    }
+}
+
+/// Xabar allaqachon o'chirilgan/yo'q (qayta urinish kerak emas). EN: the message is already gone.
+fn gone(err: &str) -> bool {
+    let e = err.to_lowercase();
+    e.contains("message to delete not found") || e.contains("message_id_invalid")
+}
+
+#[cfg(test)]
+mod gone_tests {
+    use super::gone;
+    #[test]
+    fn already_missing_is_success() {
+        assert!(gone("telegram deleteMessage: Bad Request: message to delete not found"));
+        assert!(!gone("telegram deleteMessage: Bad Request: message can't be deleted"));
+        assert!(!gone("telegram deleteMessage: Forbidden: bot is not a member"));
     }
 }

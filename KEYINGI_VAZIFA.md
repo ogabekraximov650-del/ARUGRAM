@@ -7757,3 +7757,10 @@ Foydalanuvchi talabi: post qo'lda (ilova/veb admin tugmasi, `announce::repost`) 
 ## Yarim aylana qism boshqaruvi (dial) olib tashlandi (2026-11-22)
 
 Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashlandi: `ui/season/EpisodeDial.kt` (`DialPrefs`, `EpisodeDialTab`) o'chirildi, `SeasonScreen` doim oddiy `EpisodesTab` + pastdagi oldingi/keyingi tugmalarini ko'rsatadi, Sozlamalardagi "QISMLAR BOSHQARUVI" bo'limi olib tashlandi. Vebda u hech qachon bo'lmagan.
+
+## tgstore (ample-rs): Telegram'da "yetim" nusxalar qolmasin (2026-11-22)
+
+- **Belgi:** "ARUmediaTV Database" kanalida `manifest.bin`, `snap_*`, `db_1_v1_*` eskilari ikkitadan qolgan, eskilari yangilanmagan va o'chmagan.
+- **Sabab (taxmin, jurnalni ko'rib bo'lmadi):** Telegram eski xabarni tahrirlash/o'chirishga ruxsat bermagan (48 soat); `del`/`del_many` natijasi jim yutilgan.
+- **Tuzatish:** (1) ro'yxat xabari 24 soatdan eskirsa tahrirlanmaydi — yangisi yuborilib pin qilinadi va eskisi hali o'chadigan paytda o'chiriladi (`manifest_at`); (2) o'chish natijasi endi tekshiriladi (`Tg::del_report`): o'chmaganlar `orphans` ro'yxatiga (id, vaqt) yoziladi, sababi `del_err` da, har ~30 daqiqada qayta uriniladi (`retry_orphans`); (3) `usage` javobida `tg_orphans`, `tg_orphan_oldest_ms`, `tg_del_error` ko'rinadi. Hammasi `jr_snap.json` da saqlanadi.
+- **Joylash:** Ample'dagi servis qo'lda qayta joylanmaguncha eski xulq saqlanadi. Kanaldagi allaqachon qolgan eski nusxalarni qo'lda o'chirish kerak (bot ularni o'chira olmasa).
