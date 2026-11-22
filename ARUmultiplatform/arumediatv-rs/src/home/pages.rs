@@ -603,7 +603,13 @@ impl Home {
                         72.0 + if resumable { 13.0 } else { 0.0 } + 8.0 + if exp_id == e.id { e.qualities.len() as f32 * 51.0 + 10.0 } else { 0.0 }
                     })
                     .sum();
-                p.scroll[1].set_offset(hsum * density());
+                // Ro'yxat o'lchami birinchi kadrlarda hali noma'lum (siljish chegarasi 0): bir necha marta kechikib qo'llanadi.
+                let off = hsum * density();
+                p.scroll[1].set_offset(off);
+                for ms in [120u64, 350, 800] {
+                    let pc = p.clone();
+                    spawn_bg(move || std::thread::sleep(std::time::Duration::from_millis(ms)), move |_| pc.scroll[1].set_offset(off));
+                }
                 p.chunk.set(cur_id.unwrap_or(0) as usize);
             }
         }

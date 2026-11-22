@@ -63,73 +63,38 @@ pub fn ensure_cache() -> bool {
 
 pub fn stats(urls: &[String]) -> HashMap<String, VStat> {
     let mut out = HashMap::new();
-    if urls.is_empty() || !ensure_cache() {
-        return out;
-    }
-    let j = CString::new(serde_json::to_string(urls).unwrap_or_default()).unwrap_or_default();
-    let p = unsafe { rust_video_cache_stats(j.as_ptr()) };
-    if p.is_null() {
-        return out;
-    }
-    let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
-    rust_core::ffi_utils::rust_free_string(p);
-    if let Ok(Value::Object(m)) = serde_json::from_str::<Value>(&s) {
-        for (u, o) in m {
-            out.insert(
-                u,
-                VStat {
-                    total: o["total"].as_i64().unwrap_or(0),
-                    downloaded: o["downloaded"].as_i64().unwrap_or(0),
-                    downloading: o["downloading"].as_bool().unwrap_or(false),
-                    queued: o["queued"].as_bool().unwrap_or(false),
-                    retrying: o["retrying"].as_bool().unwrap_or(false),
-                    speed: o["speed"].as_i64().unwrap_or(0),
-                },
-            );
+    for u in urls {
+        let name = file_name_of(u);
+        if name.is_empty() {
+            continue;
         }
+        let (total, have, downloading, retrying, speed) = crate::vdsrv::dl_stats(&name);
+        out.insert(u.clone(), VStat { total: total as i64, downloaded: have as i64, downloading, queued: false, retrying, speed });
     }
     out
 }
 
-/// Yuklashni boshlaydi: fayl avval Telegram bot chatiga nusxalanadi, so'ng yadro bo'laklarni tortadi. Bloklaydi — fon oqimida.
+/// Yuklashni boshlaydi (worker `vd` tizimi: 18 MiB oynalar, bo'laklar telefonga shifrlab yoziladi). Fonda ishlaydi, darhol qaytadi.
 pub fn start(session: &str, url: &str) -> Result<(), String> {
-    if !ensure_cache() {
-        return Err("Video kesh ishga tushmadi".into());
-    }
     let name = file_name_of(url);
-    if !name.is_empty() {
-        HOLDS.fetch_add(1, Ordering::SeqCst);
-        let r = tg_deliver(session, &[name.clone()]);
-        // Nusxa bot chatida kamida 10 soniya turadi (Kotlin'dagi `delivering` kabi), keyin ushlab turish bo'shatiladi.
-        std::thread::spawn(|| {
-            std::thread::sleep(std::time::Duration::from_secs(10));
-            HOLDS.fetch_sub(1, Ordering::SeqCst);
-        });
-        let ok = r?;
-        if !ok.contains(&name) {
-            return Err("Fayl Telegram'da topilmadi".into());
-        }
+    if name.is_empty() {
+        return Err("Video manzili noto'g'ri".into());
     }
-    let c = CString::new(url).unwrap_or_default();
-    if unsafe { rust_video_cache_download(c.as_ptr()) } == 1 { Ok(()) } else { Err("Yuklash boshlanmadi".into()) }
+    crate::vdsrv::start(session);
+    crate::vdsrv::dl_start(session, &name);
+    Ok(())
 }
 
 pub fn pause(url: &str) {
-    if let Ok(c) = CString::new(url) {
-        unsafe { rust_video_cache_pause(c.as_ptr()) };
-    }
+    crate::vdsrv::dl_pause(&file_name_of(url));
 }
 
 pub fn delete(url: &str) {
-    if let Ok(c) = CString::new(url) {
-        unsafe { rust_video_cache_delete(c.as_ptr()) };
-    }
+    crate::vdsrv::dl_delete(&file_name_of(url));
 }
 
 pub fn wipe_all() {
-    if ensure_cache() {
-        unsafe { rust_video_cache_wipe() };
-    }
+    crate::vdsrv::dl_wipe();
 }
 
 /// Yuklanmalar ro'yxatidagi bitta (qism + sifat) qatori.
@@ -184,7 +149,7 @@ pub fn collect(seasons: &[Season]) -> Vec<DlItem> {
             }
         }
     }
-    if drafts.is_empty() || !ensure_cache() {
+    if drafts.is_empty() {
         return Vec::new();
     }
     let mut raw = stats(&urls);
@@ -216,13 +181,6 @@ pub fn resolve(session: &str, url: &str) -> Result<(crate::player::Source, bool)
     let name = file_name_of(url);
     if name.is_empty() {
         return if url.starts_with("http") { Ok((Source::Http(url.to_string()), false)) } else { Err("Video manzili noto'g'ri".into()) };
-    }
-    if !ensure_cache() {
-        return Err("Video kesh ishga tushmadi".into());
-    }
-    let complete = stats(&[url.to_string()]).get(url).map(|s| s.complete()).unwrap_or(false);
-    if complete {
-        return Ok((Source::Aru(name), false));
     }
     // Internetdan: worker `vd` videosi mahalliy ochuvchi server (`vdsrv`) orqali shifrdan ochilib HTTP manba sifatida beriladi.
     let _ = session;
