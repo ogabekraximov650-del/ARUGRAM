@@ -10,7 +10,7 @@
             <data android:scheme="tg" />
         </intent>
     </queries>
-    <application android:label="ARUMEDIATV (Rust)" android:hasCode="true">
+    <application android:label="ARUMEDIATV (Rust)" android:hasCode="true" android:usesCleartextTraffic="true">
         <activity
             android:name="uz.arumediatv.rs.AruActivity"
             android:exported="true"
