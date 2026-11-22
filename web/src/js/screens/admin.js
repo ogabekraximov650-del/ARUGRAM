@@ -11,6 +11,7 @@ import { icon, appBar, bindAppBar, bindTap, ripple, toast, confirmDialog, spinne
 import { fileOf, toJpeg, uploadImage } from './admin-util.js';
 import { openAdminSeasons } from './admin-seasons.js';
 import { openAdminUsers } from './admin-users.js';
+import { openAdminTranslators } from './admin-translators.js';
 import { openAdminReports, openAdminChannels, openAdminStats, openAdminEncode, openAdminDb, openAdminApp } from './admin-more.js';
 
 const SECTIONS = [
@@ -38,7 +39,7 @@ export function openAdmin() {
     el.innerHTML = `${appBar({ title: 'Admin paneli', actions: icon('admin_panel_settings', { size: 24, color: 'rgba(255,255,255,0.54)' }) })}
       <div class="scroll"><div class="ss ad-hub">${SECTIONS.map((x) => adminTile(...x)).join('')}</div></div>`;
     bindAppBar(el);
-    const go = { anime: openAdminAnimes, users: () => openAdminUsers('new'), chats: () => openAdminUsers('chats'), reports: openAdminReports,
+    const go = { anime: openAdminTranslators, users: () => openAdminUsers('new'), chats: () => openAdminUsers('chats'), reports: openAdminReports,
       channels: openAdminChannels, stats: openAdminStats, encode: openAdminEncode, db: openAdminDb, app: openAdminApp };
     el.querySelectorAll('.ad-tile').forEach((t) => ripple(t, () => go[t.dataset.t]?.()));
     return {};
@@ -46,11 +47,12 @@ export function openAdmin() {
 }
 
 // ── Animelar ro'yxati ─────────────────────────────────────────────
-function openAdminAnimes() {
+export function openAdminAnimes(translator = { id: 0, name: 'Animelar' }) {
+  const trId = Number(translator.id) || 0;
   push((el) => {
     let list = [];
     let closed = false;
-    el.innerHTML = `${appBar({ title: 'Animelarni boshqarish', actions: `<button class="icon-btn ad-add" aria-label="Qo'shish">${icon('add', { size: 26 })}</button>` })}
+    el.innerHTML = `${appBar({ title: translator.name || 'Animelar', actions: `<button class="icon-btn ad-add" aria-label="Qo'shish">${icon('add', { size: 26 })}</button>` })}
       <div class="scroll"><div class="ss ad-list"></div></div>`;
     bindAppBar(el);
     const host = el.querySelector('.ad-list');
@@ -69,7 +71,7 @@ function openAdminAnimes() {
       </div>`).join('');
       host.querySelectorAll('.ad-row').forEach((r) => {
         const a = list[+r.dataset.i];
-        r.querySelector('.ad-edit').addEventListener('click', (e) => { e.stopPropagation(); openAnimeForm(a, load); });
+        r.querySelector('.ad-edit').addEventListener('click', (e) => { e.stopPropagation(); openAnimeForm(a, load, trId); });
         r.querySelector('.ad-del').addEventListener('click', (e) => { e.stopPropagation(); remove(a); });
         r.addEventListener('click', () => openAdminSeasons(a));
       });
@@ -80,7 +82,7 @@ function openAdminAnimes() {
       try {
         const rows = await api('/api/anime');
         if (closed) return;
-        list = Array.isArray(rows) ? rows : [];
+        list = (Array.isArray(rows) ? rows : []).filter((a) => (Number(a.translator_id) || 0) === trId);
         paint();
       } catch (e) {
         if (closed) return;
@@ -99,26 +101,29 @@ function openAdminAnimes() {
       } catch (e) { toast(`Xato: ${e?.body?.error || e?.message || e}`); }
     }
 
-    el.querySelector('.ad-add').addEventListener('click', () => openAnimeForm(null, load));
+    el.querySelector('.ad-add').addEventListener('click', () => openAnimeForm(null, load, trId));
     load();
     return { dispose() { closed = true; } };
   });
 }
 
 // ── Anime qo'shish / tahrirlash ───────────────────────────────────
-function openAnimeForm(anime, onSaved) {
+function openAnimeForm(anime, onSaved, translatorId = 0) {
   push((el) => {
     const edit = !!anime;
     let photoName = fileOf(anime?.photo_url);
     let picked = null; // Blob
     let preview = '';
     let busy = false;
+    let trId = anime ? (Number(anime.translator_id) || 0) : translatorId;
+    let trs = [];
     const f = (k) => esc(anime?.[k] ?? '');
     el.innerHTML = `${appBar({ title: edit ? 'Animeni tahrirlash' : "Anime qo'shish" })}
       <div class="scroll"><div class="ss">
         <div class="ad-pick glass"><div class="ad-pv"></div><div class="ss-note" style="margin:8px 0 0">Rasm tanlash uchun bosing</div></div>
         <input type="file" accept="image/*" hidden class="ad-file">
         <div class="ad-err ss-note" style="color:#ff6b6b;display:none"></div>
+        <div class="ad-lbl" style="margin-top:14px">Tarjimon</div><div class="ad-seg ad-trs"></div>
         <input class="field ad-n" placeholder="Anime nomi (ixtiyoriy)" value="${f('name')}" style="margin-top:12px">
         <input class="field ad-d" placeholder="Davlat (ixtiyoriy)" value="${f('davlat')}" style="margin-top:12px">
         <input class="field ad-s" placeholder="Studiya (ixtiyoriy)" value="${f('studiya')}" style="margin-top:12px">
@@ -148,6 +153,12 @@ function openAnimeForm(anime, onSaved) {
       } catch (_) { err("Rasmni ochib bo'lmadi"); }
     });
 
+    const paintTrs = () => {
+      $('.ad-trs').innerHTML = [{ id: 0, name: 'Tarjimonsiz' }, ...trs].map((t) => `<button class="ad-chip${Number(t.id) === trId ? ' on' : ''}" data-id="${t.id}">${esc(t.name)}</button>`).join('');
+      $('.ad-trs').querySelectorAll('.ad-chip').forEach((b) => b.addEventListener('click', () => { trId = Number(b.dataset.id); paintTrs(); }));
+    };
+    paintTrs();
+    api('/api/translators').then((r) => { trs = (Array.isArray(r) ? r : []).filter((t) => Number(t.id) > 0); paintTrs(); }).catch(() => {});
     const save = $('.ad-save');
     save.addEventListener('click', async () => {
       if (busy) return;
@@ -161,7 +172,7 @@ function openAnimeForm(anime, onSaved) {
         const body = {
           photo_url: photoName || '',
           name: $('.ad-n').value, davlat: $('.ad-d').value, studiya: $('.ad-s').value,
-          janri: $('.ad-j').value, tavsif: $('.ad-t').value,
+          janri: $('.ad-j').value, tavsif: $('.ad-t').value, translator_id: trId,
         };
         if (edit) await api(`/api/anime/${anime.id}`, { method: 'PUT', body });
         else await api('/api/anime', { method: 'POST', body });

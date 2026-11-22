@@ -13,10 +13,11 @@ import { formatMoment } from '../player/util.js';
 import { openSupport } from './support.js';
 import { openPublicProfile } from './public-profile.js';
 
-const TABS = [
+// Ilovadagidek ikki alohida ekran: "Suhbatlar" (faqat ro'yxat) va "Foydalanuvchilar" (qidiruv + tartib).
+const ALL_TABS = [
   { id: 'chats', label: 'Suhbatlar' },
-  { id: 'new', label: 'Yangi' },
-  { id: 'online', label: 'Onlayn' },
+  { id: 'new', label: "Yangi qo'shilgan" },
+  { id: 'online', label: 'Oxirgi onlayn' },
 ];
 
 const nameOf = (u) => {
@@ -50,6 +51,8 @@ const errText = (e) => `${e?.body?.error || e?.message || e}`;
 export function openAdminUsers(initialTab = 'chats') {
   push((el) => {
     let tab = initialTab;
+    const chatsOnly = initialTab === 'chats';
+    const TABS = chatsOnly ? [ALL_TABS[0]] : ALL_TABS.slice(1);
     let closed = false;
     let picked = false;
     let query = '';
@@ -59,11 +62,11 @@ export function openAdminUsers(initialTab = 'chats') {
     const users = { new: null, online: null };
     let threads = { items: [], loading: true, error: null };
 
-    el.innerHTML = `${appBar({ title: 'Foydalanuvchilar' })}
-      <div class="ad-ut">
+    el.innerHTML = `${appBar({ title: chatsOnly ? 'Suhbatlar' : 'Foydalanuvchilar' })}
+      <div class="ad-ut${chatsOnly ? ' chats' : ''}">
         <div class="ad-search"><span>${icon('search', { size: 19, color: 'rgba(255,255,255,0.5)' })}</span>
           <input class="ad-q" placeholder="ID raqam yoki username" autocomplete="off"><button class="ad-qx" hidden aria-label="Tozalash">${icon('close', { size: 17, color: 'rgba(255,255,255,0.54)' })}</button></div>
-        <div class="ad-tabs">${TABS.map((t) => `<button class="ad-tab" data-t="${t.id}">${t.label}<i class="ad-badge" hidden></i></button>`).join('')}</div>
+        <div class="ad-tabs">${TABS.map((t) => `<button class="ad-tab" data-t="${t.id}">${t.label}<i class="ad-badge" hidden></i></button>`).join('')}<span class="ad-total"></span></div>
       </div>
       <div class="scroll ad-pg"><div class="ss ad-body"></div></div>`;
     bindAppBar(el);
@@ -73,16 +76,21 @@ export function openAdminUsers(initialTab = 'chats') {
 
     // ── Foydalanuvchilar varag'i ──
     function userRow(u, sort) {
-      const when = sort === 'new' ? u.created_at : u.last_login_at;
-      return `<div class="glass ad-ur" data-id="${u.id}">
-        ${avatarHtml(u.photo_url, nameOf(u), 46)}
-        <div class="ss-main"><div class="ad-u1"><span class="ss-t" style="${u.banned ? 'text-decoration:line-through;opacity:.6' : ''}">${esc(nameOf(u))}</span><span class="ad-id">ID ${u.id}</span></div>
-          <div class="ad-u2"><span class="ss-h">${esc(formatMoment(Number(when) || 0))}</span>${Number(u.balance) > 0 ? `<b class="ad-bal">${esc(formatSum(u.balance))}</b>` : ''}</div></div>
+      const left = subDaysLeft(u);
+      const last = Number(u.last_login_at) || 0;
+      const meta = [`Balans ${formatSum(u.balance)}`, left > 0 ? `Obuna ${left} kun` : '', last > 0 ? `onlayn ${esc(formatMoment(last))}` : ''].filter(Boolean).join(' · ');
+      return `<div class="ad-ur" data-id="${u.id}">
+        ${avatarHtml(u.photo_url, nameOf(u), 44)}
+        <div class="ss-main"><div class="ss-t" style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(nameOf(u))}</div>
+          <div class="ss-h" style="font-size:12px">ID ${u.id}${u.username ? ` · @${esc(u.username)}` : ''}</div>
+          <div class="ad-meta">${meta}</div></div>
+        ${u.banned ? '<span class="ad-ban">BLOK</span>' : ''}
       </div>`;
     }
 
     function paintUsers() {
       const st = users[tab];
+      const tot = $('.ad-total'); if (tot) tot.textContent = st && st.total ? `${st.total} ta` : '';
       if (!st || (st.loading && !st.items.length)) {
         body.innerHTML = `<div style="display:flex;justify-content:center;margin-top:48px">${spinner(30, 2, 'rgba(255,255,255,0.54)')}</div>`;
         return;
@@ -131,6 +139,7 @@ export function openAdminUsers(initialTab = 'chats') {
     function paintBadge() {
       const n = threads.items.reduce((s, t) => s + (Number(t.unread) || 0), 0);
       const b = $('.ad-tab[data-t="chats"] .ad-badge');
+      if (!b) return;
       b.hidden = n <= 0;
       b.textContent = `${n}`;
     }
