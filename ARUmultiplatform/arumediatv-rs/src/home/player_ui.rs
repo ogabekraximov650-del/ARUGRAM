@@ -18,6 +18,7 @@ const V_FULL_EXIT: &str = "M5,16h3v3h2v-5H5v2zM8,8H5v2h5V5H8v3zM14,19h2v-3h3v-2h
 const V_GEAR: &str = "M19.14,12.94c0.04,-0.3 0.06,-0.61 0.06,-0.94 0,-0.32 -0.02,-0.64 -0.07,-0.94l2.03,-1.58c0.18,-0.14 0.23,-0.41 0.12,-0.61l-1.92,-3.32c-0.12,-0.22 -0.37,-0.29 -0.59,-0.22l-2.39,0.96c-0.5,-0.38 -1.03,-0.7 -1.62,-0.94L14.4,2.81c-0.04,-0.24 -0.24,-0.41 -0.48,-0.41h-3.84c-0.24,0 -0.43,0.17 -0.47,0.41L9.25,5.35C8.66,5.59 8.12,5.92 7.63,6.29L5.24,5.33c-0.22,-0.08 -0.47,0 -0.59,0.22L2.74,8.87C2.62,9.08 2.66,9.34 2.86,9.48l2.03,1.58C4.84,11.36 4.8,11.69 4.8,12s0.02,0.64 0.07,0.94l-2.03,1.58c-0.18,0.14 -0.23,0.41 -0.12,0.61l1.92,3.32c0.12,0.22 0.37,0.29 0.59,0.22l2.39,-0.96c0.5,0.38 1.03,0.7 1.62,0.94l0.36,2.54c0.05,0.24 0.24,0.41 0.48,0.41h3.84c0.24,0 0.44,-0.17 0.47,-0.41l0.36,-2.54c0.59,-0.24 1.13,-0.56 1.62,-0.94l2.39,0.96c0.22,0.08 0.47,0 0.59,-0.22l1.92,-3.32c0.12,-0.22 0.07,-0.47 -0.12,-0.61l-2.01,-1.58zM12,15.6c-1.98,0 -3.6,-1.62 -3.6,-3.6s1.62,-3.6 3.6,-3.6 3.6,1.62 3.6,3.6 -1.62,3.6 -3.6,3.6z";
 const V_LIST: &str = "M3,10h11v2H3V10zM3,6h11v2H3V6zM3,14h7v2H3V14zM16,6v8.18C15.69,14.07 15.35,14 15,14c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3V8h3V6H16z";
 const V_UNLOCK: &str = "M12,17c1.1,0 2,-0.9 2,-2s-0.9,-2 -2,-2 -2,0.9 -2,2 0.9,2 2,2zM18,8h-1V6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6h1.9c0,-1.71 1.39,-3.1 3.1,-3.1 1.71,0 3.1,1.39 3.1,3.1v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM18,20H6V10h12v10z";
+const V_REFRESH: &str = "M17.65,6.35C16.2,4.9 14.21,4 12,4c-4.42,0 -7.99,3.58 -7.99,8s3.57,8 7.99,8c3.73,0 6.84,-2.55 7.73,-6h-2.08c-0.82,2.33 -3.04,4 -5.65,4 -3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6c1.66,0 3.14,0.69 4.22,1.78L13,11h7V4l-2.35,2.35z";
 const V_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
 const V_LOCK: &str = "M18,8h-1L17,6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM15.1,8H8.9V6c0,-1.71 1.39,-3.1 3.1,-3.1 1.71,0 3.1,1.39 3.1,3.1v2z";
 
@@ -95,9 +96,9 @@ impl PlayerState {
 }
 
 fn mmss(ms: i64) -> String {
+    // Kotlin `formatClock`: soat ajratilmaydi, daqiqa 60 dan oshaveradi (`0:50`, `23:10`, `120:00`).
     let t = (ms / 1000).max(0);
-    let (h, m, s) = (t / 3600, (t % 3600) / 60, t % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+    format!("{}:{:02}", t / 60, t % 60)
 }
 
 impl Home {
@@ -378,8 +379,9 @@ impl Home {
         uzcoders::android::set_fullscreen(on);
     }
 
+    /// Kotlin pleyerdagi markaziy tugma: qora 42% dumaloq, ichida belgi.
     fn pl_round(icon_path: &'static str, size: f32, boxsz: f32, f: Box<dyn Fn()>) -> Element {
-        column(vec![icon(icon_path, size).color(Color::WHITE)]).center().width(boxsz).height(boxsz).radius(boxsz / 2.0).flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(boxsz / 2.0).on_click(f)
+        column(vec![icon(icon_path, size).color(Color::WHITE)]).center().width(boxsz).height(boxsz).radius(boxsz / 2.0).bg(Color::rgba(0, 0, 0, 107)).on_click(f)
     }
 
     /// Video maydoni (cover o'rnida): video, yuklanish/xato holati va shisha boshqaruv paneli.
@@ -412,11 +414,12 @@ impl Home {
         if !err.is_empty() || st.state == PState::Error {
             let msg = if !err.is_empty() { err } else { st.error.clone() };
             let (me, pc) = (self.clone(), p.clone());
+            // Kotlin: matn 14 sp, ostida "Qayta urinish" (ACCENT, 12 dp burchak, yangilash belgisi), fon yo'q.
             layers.push(
                 column(vec![
-                    tx(msg, 13.5, Color::WHITE).bold(),
-                    gap_box(0.0, 12.0),
-                    column(vec![tx("Qayta urinish", 13.0, Color::WHITE).bold()]).center().padding_xy(18.0, 10.0).radius(20.0).gradient(ACCENT, ACCENT2).on_click(move || {
+                    tx(msg, 14.0, Color::WHITE),
+                    gap_box(0.0, 10.0),
+                    row(vec![icon(V_REFRESH, 18.0).color(Color::WHITE), gap_box(6.0, 0.0), tx("Qayta urinish", 13.0, Color::WHITE).bold()]).align(Align::Center).bg(ACCENT).radius(12.0).padding_xy(18.0, 10.0).on_click(move || {
                         if let Some((id, q, _)) = pc.pl.cur.get() {
                             if let Some(e) = pc.eps.get().iter().find(|e| e.id == id) {
                                 me.play_episode(&pc, &e.clone(), Some(q), None, true);
@@ -430,14 +433,13 @@ impl Home {
                     }),
                 ])
                 .center()
-                .padding(20.0)
-                .bg(Color::rgba(0, 0, 0, 150)),
+                .padding(24.0),
             );
         } else if busy {
-            layers.push(column(vec![spinner(72.0, 3.0, ACCENT2)]).center());
+            layers.push(column(vec![spinner(76.0, 2.6, ACCENT)]).center());
         }
         if started && err_is_empty(&p.pl.perr) {
-            layers.push(self.player_controls(p, &st, fullscreen, w));
+            layers.push(self.player_controls(p, &st, fullscreen, h));
         } else if !started && err_is_empty(&p.pl.perr) {
             // Hali ijro boshlanmagan: katta play tugmasi.
             let (me, pc) = (self.clone(), p.clone());
@@ -465,26 +467,32 @@ impl Home {
         stack(layers).height(h)
     }
 
-    /// Shisha doira tugma (belgi).
-    fn gbtn(icon_path: &'static str, size: f32, boxsz: f32, f: impl Fn() + 'static) -> Element {
-        Self::pl_round(icon_path, size, boxsz, Box::new(f))
+    /// Kotlin `FsButton`: dumaloq; asosiy (play) — `ACCENT` 90%, qolganlari — qora 45%; yupqa oq chegara; o'chiq bo'lsa xira.
+    fn fs_button(icon_path: &'static str, enabled: bool, primary: bool, f: impl Fn() + 'static) -> Element {
+        let size = if primary { 52.0 } else { 42.0 };
+        let bg = if primary { ACCENT.with_opacity(if enabled { 0.9 } else { 0.3 }) } else { Color::rgba(0, 0, 0, if enabled { 115 } else { 64 }) };
+        let e = column(vec![icon(icon_path, if primary { 30.0 } else { 24.0 }).color(Color::rgba(255, 255, 255, if enabled { 255 } else { 77 }))])
+            .center()
+            .width(size)
+            .height(size)
+            .radius(size / 2.0)
+            .bg(bg)
+            .border(1.0, Color::rgba(255, 255, 255, if enabled { 46 } else { 15 }));
+        if enabled { e.on_click(f) } else { e }
     }
 
-    /// Shisha "tabletka" ichidagi matn (vaqt, sarlavha).
-    fn gpill(e: Element) -> Element {
-        e.flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM).radius(16.0).padding_xy(14.0, 8.0)
+    /// Yuqori qatordagi oddiy belgi tugmasi (fon yo'q): `pad` — belgi atrofidagi bo'sh joy.
+    fn pl_icon(icon_path: &'static str, size: f32, pad: f32, f: impl Fn() + 'static) -> Element {
+        column(vec![icon(icon_path, size).color(Color::WHITE)]).padding(pad).radius((size + pad * 2.0) / 2.0).on_click(f)
     }
 
-    /// Ikki marta bosib sek: ko'rsatkich (shisha doira, o'q va soniya).
+    /// Ikki marta bosib sek: ko'rsatkich (Kotlin `SeekBadge`): qora 55% doira, uchta uchburchak va "10s".
     fn pl_seek_badge(acc: i32) -> Element {
         let left = acc < 0;
         let secs = acc.abs();
-        column(vec![icon(if left { V_PREV } else { V_NEXT }, 22.0).color(Color::WHITE), tx(format!("{secs}s"), 12.0, Color::WHITE).bold()])
-            .center()
-            .width(76.0)
-            .height(76.0)
-            .flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
-            .radius(38.0)
+        let tri = if left { "M13.5,0L0,12L13.5,24z" } else { "M0,0L13.5,12L0,24z" };
+        let tris = row(vec![icon(tri, 16.0).color(Color::WHITE), icon(tri, 16.0).color(Color::WHITE), icon(tri, 16.0).color(Color::WHITE)]).align(Align::Center);
+        column(vec![tris, gap_box(0.0, 5.0), tx(format!("{secs}s"), 12.0, Color::WHITE).bold()]).center().width(76.0).height(76.0).radius(38.0).bg(Color::rgba(0, 0, 0, 140))
     }
 
     pub(super) fn pl_tap(self: &Rc<Self>, p: &Rc<SeasonPage>, left: bool) {
@@ -510,8 +518,8 @@ impl Home {
         let same = (acc < 0) == left || acc == 0;
         let base = if same { acc } else { 0 };
         let eff = pos + base as i64 * 1000;
-        let room = if left { (eff / 1000).max(0) } else if dur > 0 { ((dur - eff) / 1000).max(0) } else { 5 };
-        let add = room.min(5) as i32;
+        let room = if left { (eff / 1000).max(0) } else if dur > 0 { ((dur - eff) / 1000).max(0) } else { 10 };
+        let add = room.min(10) as i32;
         if add == 0 {
             return;
         }
@@ -536,17 +544,15 @@ impl Home {
         });
     }
 
-    /// Vaqt chizig'i (hammasi shisha): yuklangan qism xira, ko'rilgani urg'u gradienti, doira. Bosish/surish bilan o'tkaziladi.
+    /// Vaqt chizig'i (Kotlin `VideoProgressBar`): iz (oq 22%), yuklangan qism (oq 35%), ko'rilgan qism (`ACCENT`), `ACCENT2` doira. Bosish va surish bilan o'tkaziladi.
     fn pl_bar(p: &Rc<SeasonPage>, frac: f32, buffered: f32, th: f32, thumb: f32) -> Element {
         let w = |x: f32| (x.clamp(0.0, 1.0) * 1000.0).max(0.001);
         let layer = |a: f32, b: Element| row(vec![b.weight(w(a)), column(vec![]).weight((1000.0 - w(a)).max(0.001))]);
         let mid = |e: Element| column(vec![e]).justify(Justify::Center);
-        // Chiziq — xira sutdek shisha, ozgina lupa.
-        let track = column(vec![]).height(th).radius(th / 2.0).flat_lens(Color::rgba(255, 255, 255, 38), 1.25).radius(th / 2.0);
-        let buf = layer(buffered, column(vec![]).height(th).radius(th / 2.0).bg(Color::rgba(255, 255, 255, 46)));
-        let played = layer(frac, column(vec![]).height(th).radius(th / 2.0).flat_lens(Color::rgba(255, 255, 255, 90), 1.35).radius(th / 2.0));
-        // Dumaloq — shisha, kuchliroq lupa.
-        let knob = row(vec![column(vec![]).weight(w(frac)).height(1.0), column(vec![]).width(thumb * 2.0).height(thumb * 2.0).radius(thumb).flat_lens(Color::rgba(255, 255, 255, 60), 1.9).radius(thumb).border(1.5, Color::rgba(255, 255, 255, 170)), column(vec![]).weight((1000.0 - w(frac)).max(0.001)).height(1.0)]).align(Align::Center);
+        let track = column(vec![]).height(th).radius(th / 2.0).bg(Color::rgba(255, 255, 255, 56));
+        let buf = layer(buffered, column(vec![]).height(th).radius(th / 2.0).bg(Color::rgba(255, 255, 255, 89)));
+        let played = layer(frac, column(vec![]).height(th).radius(th / 2.0).bg(ACCENT));
+        let knob = row(vec![column(vec![]).weight(w(frac)).height(1.0), column(vec![]).width(thumb * 2.0).height(thumb * 2.0).radius(thumb).bg(ACCENT2), column(vec![]).weight((1000.0 - w(frac)).max(0.001)).height(1.0)]).align(Align::Center);
         let pd = p.clone();
         stack(vec![mid(track), mid(buf), mid(played), knob])
             .height(thumb * 2.0 + 14.0)
@@ -564,50 +570,51 @@ impl Home {
             })
     }
 
-    /// Boshqaruv paneli (Kotlin `PlayerControls`): kichik rejim — markazda play/pauza, pastda chiziq + vaqt + sozlama + to'liq ekran;
-    /// to'liq ekran — tepada orqaga/sarlavha/qulf/sozlama/qismlar/chiqish, pastda oldingi-pauza-keyingi va chiziq. Hammasi shisha.
-    fn player_controls(self: &Rc<Self>, p: &Rc<SeasonPage>, st: &Status, fullscreen: bool, _w: f32) -> Element {
+    /// Boshqaruv paneli (Kotlin `PlayerControls`): kichik rejim — markazda play/pauza (qora 42% doira), pastda chiziq + vaqt + sozlama + to'liq ekran;
+    /// to'liq ekran — tepada orqaga/sarlavha/qulf/sozlama/qismlar/chiqish, pastda oldingi-pauza-keyingi va chiziq.
+    fn player_controls(self: &Rc<Self>, p: &Rc<SeasonPage>, st: &Status, fullscreen: bool, h: f32) -> Element {
         let dur = st.dur_ms.max(1);
         let locked = p.pl.locked.get();
         let show_all = (p.pl.ctl.get() || !st.playing) && !locked;
         let frac = p.pl.seeking.get().unwrap_or((st.pos_ms as f32 / dur as f32).clamp(0.0, 1.0));
         let pos = if let Some(f) = p.pl.seeking.get() { (f * dur as f32) as i64 } else { st.pos_ms };
         let buffered = (st.buffered_ms as f32 / dur as f32).clamp(0.0, 1.0);
-        let edge = if fullscreen { 36.0 } else { 0.0 };
+        let edge = if fullscreen { 56.0 } else { 0.0 };
+        let ins = safe_insets();
         let mut layers: Vec<Element> = Vec::new();
 
-        // Qulflangan: faqat qulf tugmasi (yuqori o'ng).
+        // Qulflangan: faqat qulf tugmasi (yuqori o'ng burchak).
         if locked {
             let (pc, me) = (p.clone(), self.clone());
-            layers.push(column(vec![row(vec![spacer(), Self::gbtn(V_LOCK, 20.0, 42.0, move || {
+            layers.push(column(vec![row(vec![spacer(), Self::pl_icon(V_LOCK, 22.0, 9.0, move || {
                 pc.pl.locked.set(false);
                 me.pl_touch(&pc);
             })])
-            .padding_each(12.0 + edge, 8.0, 12.0 + edge, 0.0)]));
+            .padding_each(12.0 + edge, 6.0 + if fullscreen { ins.top } else { 0.0 }, 12.0 + edge, 0.0)]));
             return stack(layers);
         }
 
-        // Boshqaruv yashirin: pastda ingichka doimiy chiziq.
+        // Boshqaruv yashirin: pastda ingichka doimiy chiziq (2 dp, oq 20% + `ACCENT`).
         if !show_all {
             let w = |x: f32| (x.clamp(0.0, 1.0) * 1000.0).max(0.001);
             layers.push(column(vec![
                 spacer(),
                 stack(vec![
-                    column(vec![]).height(3.0).bg(Color::rgba(255, 255, 255, 50)),
-                    row(vec![column(vec![]).weight(w(frac)).height(3.0).gradient(ACCENT, ACCENT2), column(vec![]).weight((1000.0 - w(frac)).max(0.001))]),
+                    column(vec![]).height(2.0).bg(Color::rgba(255, 255, 255, 51)),
+                    row(vec![column(vec![]).weight(w(frac)).height(2.0).bg(ACCENT), column(vec![]).weight((1000.0 - w(frac)).max(0.001))]),
                 ])
-                .height(3.0),
+                .height(2.0),
             ]));
         } else {
-            // Qorayish (tepa va past) — yozuvlar o'qilishi uchun.
+            // Qorayish: tepa 60% -> shaffof (30% gacha), 68% dan pastga 85% gacha (Kotlin gradient to'xtash nuqtalari).
             layers.push(column(vec![
-                column(vec![]).height(90.0).gradient(Color::rgba(0, 0, 0, 150), Color::rgba(0, 0, 0, 0)),
+                column(vec![]).height(h * 0.30).gradient(Color::rgba(0, 0, 0, 153), Color::rgba(0, 0, 0, 0)),
                 spacer(),
-                column(vec![]).height(if fullscreen { 130.0 } else { 80.0 }).gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 200)),
+                column(vec![]).height(h * 0.32).gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 217)),
             ]));
         }
 
-        // Ikki marta bosib sek ko'rsatkichi.
+        // Ikki marta bosib sek ko'rsatkichi (chap/o'ng yarmining markazida).
         let acc = p.pl.seek_acc.get();
         if acc != 0 {
             layers.push(row(vec![
@@ -616,16 +623,22 @@ impl Home {
             ]));
         }
 
-        // Intro o'tkazish.
+        // Intro o'tkazish: chap yuqori chetda, `ACCENT` rangda (to'liq ekranda tepa qator ko'ringanda uning ostida).
         let intro = p.pl.cur.get().and_then(|c| p.eps.get().iter().find(|e| e.id == c.0).cloned()).and_then(|ep| ep.intro.iter().find(|(a, b)| st.pos_ms >= *a && st.pos_ms < *b).map(|(_, b)| *b));
         if let Some(b) = intro {
             let pc = p.clone();
-            let btn = Self::gpill(tx("Introni o'tkazish >", 13.0, Color::WHITE).bold()).on_click(move || {
-                if let Some(pl) = pc.pl.player.borrow().as_ref() {
-                    pl.seek_ms(b);
-                }
-            });
-            layers.push(column(vec![spacer(), row(vec![spacer(), btn]).padding_each(0.0, 0.0, 14.0 + edge, if show_all { if fullscreen { 120.0 } else { 46.0 } } else { 16.0 })]));
+            let btn = row(vec![tx("Introni o'tkazish", 13.0, Color::WHITE).bold(), icon("M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z", 18.0).color(Color::WHITE)])
+                .align(Align::Center)
+                .bg(ACCENT)
+                .radius(12.0)
+                .padding_xy(14.0, 9.0)
+                .on_click(move || {
+                    if let Some(pl) = pc.pl.player.borrow().as_ref() {
+                        pl.seek_ms(b);
+                    }
+                });
+            let top = if fullscreen && show_all { 64.0 + ins.top } else if fullscreen { 12.0 + ins.top } else { 12.0 };
+            layers.push(column(vec![row(vec![btn, spacer()]).padding_each(14.0 + edge, top, 0.0, 0.0), spacer()]));
         }
         if !show_all {
             return stack(layers);
@@ -638,55 +651,49 @@ impl Home {
             (p.season.name.clone(), ep.map(|e| format!("{bolim}-bo'lim · {}-qism", e.number)).unwrap_or_default())
         };
         let (me, pc) = (self.clone(), p.clone());
-        let back = Self::gbtn(V_BACK, 22.0, 42.0, move || {
-            if pc.pl.fullscreen.get() {
-                me.pl_set_fullscreen(&pc, false);
-            } else {
-                me.pop();
-            }
-        });
-        let (me, pc) = (self.clone(), p.clone());
-        let full = Self::gbtn(if fullscreen { V_FULL_EXIT } else { V_FULL }, 20.0, if fullscreen { 42.0 } else { 36.0 }, move || {
+        let full = Self::pl_icon(if fullscreen { V_FULL_EXIT } else { V_FULL }, 22.0, if fullscreen { 9.0 } else { 4.0 }, move || {
             let on = !pc.pl.fullscreen.get();
             me.pl_set_fullscreen(&pc, on);
         });
         let pc = p.clone();
-        let gear = Self::gbtn(V_GEAR, 20.0, if fullscreen { 42.0 } else { 36.0 }, move || pc.pl.settings.set(true));
-        let time = |a: i64, b: i64, sep: &str| {
-            let (txt, size) = (format!("{}{sep}{}", mmss(a), mmss(b)), if fullscreen { 13.0 } else { 11.5 });
-            let w = txt.chars().count() as f32 * size * 0.62 + 28.0;
-            column(vec![tx(txt, size, Color::WHITE).bold()]).center().width(w).height(if fullscreen { 38.0 } else { 34.0 }).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(19.0)
-        };
+        let gear = Self::pl_icon(V_GEAR, 22.0, if fullscreen { 9.0 } else { 4.0 }, move || pc.pl.settings.set(true));
 
         if fullscreen {
+            let (me, pc) = (self.clone(), p.clone());
+            let back = Self::pl_icon(V_BACK, 24.0, 8.0, move || me.pl_set_fullscreen(&pc, false));
             let (pc, me) = (p.clone(), self.clone());
-            let lock = Self::gbtn(V_UNLOCK, 20.0, 42.0, move || {
+            let lock = Self::pl_icon(V_UNLOCK, 22.0, 5.0, move || {
                 pc.pl.locked.set(true);
                 me.pl_touch(&pc);
-            });
+            })
+            .margin(4.0);
             let pc = p.clone();
-            let list = Self::gbtn(V_LIST, 20.0, 42.0, move || pc.pl.ep_list.set(true));
-            let mut head = vec![Self::gpill(column(if subtitle.is_empty() { vec![tx(title, 14.0, Color::WHITE).bold()] } else { vec![tx(title, 14.0, Color::WHITE).bold(), tx(subtitle, 11.5, Color::WHITE)] })).weight(1.0)];
-            head.splice(0..0, [back]);
-            head.extend([lock, gear, list, full]);
-            layers.push(column(vec![row(head).gap(8.0).align(Align::Center).padding_each(12.0 + edge, 6.0, 12.0 + edge, 0.0), spacer()]));
+            let list = Self::pl_icon(V_LIST, 22.0, 9.0, move || pc.pl.ep_list.set(true));
+            let titles = column(if subtitle.is_empty() { vec![tx(title, 14.0, Color::WHITE).bold()] } else { vec![tx(title, 14.0, Color::WHITE).bold(), tx(subtitle, 11.5, Color::rgba(255, 255, 255, 179))] }).weight(1.0);
+            let head = row(vec![back, gap_box(4.0, 0.0), titles, lock, gear, list, full]).align(Align::Center);
+            layers.push(column(vec![head.padding_each(12.0 + edge, 6.0 + ins.top, 12.0 + edge, 0.0), spacer()]));
             let (m1, p1, m2, p2, m3, p3) = (self.clone(), p.clone(), self.clone(), p.clone(), self.clone(), p.clone());
+            let idx = p.pl.cur.get().and_then(|c| p.eps.get().iter().position(|e| e.id == c.0));
+            let has_prev = idx.map(|i| i > 0).unwrap_or(false);
+            let has_next = idx.map(|i| i + 1 < p.eps.get().len()).unwrap_or(false);
             let ctl = row(vec![
                 spacer(),
-                Self::gbtn(V_PREV, 24.0, 44.0, move || m1.pl_step(&p1, -1)),
-                Self::gbtn(if st.playing { V_PAUSE } else { V_PLAY }, 30.0, 54.0, move || m2.pl_toggle_play(&p2)),
-                Self::gbtn(V_NEXT, 24.0, 44.0, move || m3.pl_step(&p3, 1)),
+                Self::fs_button(V_PREV, has_prev, false, move || m1.pl_step(&p1, -1)),
+                gap_box(10.0, 0.0),
+                Self::fs_button(if st.playing { V_PAUSE } else { V_PLAY }, true, true, move || m2.pl_toggle_play(&p2)),
+                gap_box(10.0, 0.0),
+                Self::fs_button(V_NEXT, has_next, false, move || m3.pl_step(&p3, 1)),
             ])
-            .gap(10.0)
             .align(Align::Center);
-            let bar_row = row(vec![Self::pl_bar(p, frac, buffered, 6.0, 8.0), time(pos, st.dur_ms, " / ")]).gap(10.0).align(Align::Center);
-            layers.push(column(vec![spacer(), column(vec![ctl, gap_box(0.0, 6.0), bar_row]).padding_each(12.0 + edge, 0.0, 12.0 + edge, 6.0)]));
+            let time = tx(format!("{} / {}", mmss(pos), mmss(st.dur_ms)), 13.0 * 1.15, Color::WHITE).bold();
+            let bar_row = row(vec![Self::pl_bar(p, frac, buffered, 5.0, 8.0), gap_box(10.0, 0.0), time]).align(Align::Center);
+            layers.push(column(vec![spacer(), column(vec![ctl, gap_box(0.0, 6.0), bar_row]).padding_each(12.0 + edge, 0.0, 12.0 + edge, 6.0 + ins.bottom)]));
         } else {
-            layers.push(column(vec![row(vec![back, spacer()]).padding_each(8.0, 8.0, 8.0, 0.0), spacer()]));
             let (me, pc) = (self.clone(), p.clone());
-            layers.push(column(vec![column(vec![Self::gbtn(if st.playing { V_PAUSE } else { V_PLAY }, 36.0, 64.0, move || me.pl_toggle_play(&pc))]).center().grow(1.0)]).center());
-            let bar_row = row(vec![Self::pl_bar(p, frac, buffered, 4.0, 6.0), time(pos, st.dur_ms, "/"), gear, full]).gap(6.0).align(Align::Center);
-            layers.push(column(vec![spacer(), bar_row.padding_each(10.0, 0.0, 6.0, 4.0)]));
+            layers.push(column(vec![column(vec![Self::pl_round(if st.playing { V_PAUSE } else { V_PLAY }, 40.0, 64.0, Box::new(move || me.pl_toggle_play(&pc)))]).center().grow(1.0)]).center());
+            let time = tx(format!("{}/{}", mmss(pos), mmss(st.dur_ms)), 11.5, Color::WHITE).bold();
+            let bar_row = row(vec![Self::pl_bar(p, frac, buffered, 3.5, 6.0), gap_box(6.0, 0.0), time, gap_box(6.0, 0.0), gear, gap_box(3.0, 0.0), full]).align(Align::Center);
+            layers.push(column(vec![spacer(), bar_row.padding_each(0.0, 0.0, 4.0, 4.0)]));
         }
         stack(layers)
     }
