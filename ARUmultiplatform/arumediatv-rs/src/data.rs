@@ -228,7 +228,7 @@ pub fn load_posters(session: &str, urls: &[String]) -> (Vec<(String, Option<Imag
     }
     // Yo'qlari worker `vd` tizimidan (shifrlangan baytlar, kalitni worker beradi): Telegram'ga ulanish kerak emas.
     let want: Vec<String> = missing.iter().map(|&i| names[i].clone()).collect();
-    let got = crate::vd::fetch_images(&want);
+    let got = crate::vd::fetch_images(&want, session);
     for &i in &missing {
         let n = &names[i];
         match got.get(n) {

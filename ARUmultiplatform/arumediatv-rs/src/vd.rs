@@ -31,15 +31,27 @@ pub fn apply(key_hex: &str, offset: u64, data: &mut [u8]) -> bool {
 use ctr::cipher::StreamCipherSeek;
 
 /// Rasm nomlari uchun ochilgan baytlar. Tayyor bo'lmagan / topilmagan nomlar natijada yo'q. Bloklaydi.
-pub fn fetch_images(names: &[String]) -> HashMap<String, Vec<u8>> {
+/// UZ: ommaviy rasmlar sessiyasiz (`imginfo`), yozishma va to'plam fayllari (`chat_`, `pki_`) — sessiya bilan (`info`), Kotlin `VdImages` kabi.
+pub fn fetch_images(names: &[String], session: &str) -> HashMap<String, Vec<u8>> {
     let mut out = HashMap::new();
     if names.is_empty() {
         return out;
     }
-    let body = serde_json::json!({ "names": names });
-    let Ok((200, text)) = crate::api::request("POST", "/api/vd/imginfo", "", Some(&body), None) else { return out };
-    let Ok(j) = serde_json::from_str::<Value>(&text) else { return out };
-    let Some(files) = j["files"].as_object() else { return out };
+    let (private, public): (Vec<&String>, Vec<&String>) = names.iter().partition(|n| n.starts_with("chat_") || n.starts_with("pki_"));
+    let mut files = serde_json::Map::new();
+    let mut ask = |path: &str, list: &[&String], bearer: Option<&str>| {
+        if list.is_empty() {
+            return;
+        }
+        let body = serde_json::json!({ "names": list });
+        if let Ok((200, text)) = crate::api::request("POST", path, "", Some(&body), bearer) {
+            if let Some(f) = serde_json::from_str::<Value>(&text).ok().and_then(|j| j["files"].as_object().cloned()) {
+                files.extend(f);
+            }
+        }
+    };
+    ask("/api/vd/imginfo", &public, None);
+    ask("/api/vd/info", &private, Some(session));
     for n in names {
         let Some(f) = files.get(n) else { continue };
         let (size, key, state) = (f["size"].as_u64().unwrap_or(0), f["key"].as_str().unwrap_or(""), f["state"].as_str().unwrap_or(""));
