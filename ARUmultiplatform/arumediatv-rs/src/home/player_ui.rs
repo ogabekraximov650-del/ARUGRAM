@@ -469,6 +469,15 @@ impl Home {
         if fullscreen && p.pl.ep_list.get() {
             layers.push(self.pl_episode_list(p));
         }
+        if !fullscreen {
+            // Video tekstura burchaklari yumaloqlanmaydi: 16 dp burchaklar fon rangida "teskari burchak" shakllari bilan yopiladi (Kotlin `clip(RoundedCornerShape(16.dp))`).
+            const TL: &str = "M0,0H24C10.75,0 0,10.75 0,24Z";
+            const TR: &str = "M24,0V24C24,10.75 13.25,0 0,0Z";
+            const BL: &str = "M0,24H24C10.75,24 0,13.25 0,0Z";
+            const BR: &str = "M24,24H0C13.25,24 24,13.25 24,0Z";
+            let m = |d: &'static str| icon(d, 16.0).color(BG);
+            layers.push(column(vec![row(vec![m(TL), spacer(), m(TR)]), spacer(), row(vec![m(BL), spacer(), m(BR)])]));
+        }
         stack(layers).height(h)
     }
 

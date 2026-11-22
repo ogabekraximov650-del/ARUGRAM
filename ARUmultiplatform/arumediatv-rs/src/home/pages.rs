@@ -392,9 +392,12 @@ impl Home {
         let top_h = 12.0 + ins.top + 40.0 + 8.0 + cover_h + 6.0 + 34.0 + 8.0 + 38.0 + 6.0;
         let mut layers = vec![
             Self::glass_backdrop(),
-            column(vec![body.padding_add(0.0, top_h, 0.0, ins.bottom).grow(1.0)]),
+            column(vec![body.padding_add(0.0, top_h, 0.0, ins.bottom + if tab == 1 && !p.eps.get().is_empty() { 92.0 } else { 0.0 }).grow(1.0)]),
             column(vec![column(vec![head_row, cover, self.now_chip(p), tab_bar]).bg(BG), spacer()]),
         ];
+        if tab == 1 && !p.eps.get().is_empty() {
+            layers.push(self.nav_bar(p));
+        }
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));
         }
@@ -407,6 +410,44 @@ impl Home {
         stack(layers)
     }
 
+    /// Kotlin `NavBtn` paneli: pastda [⏮ oldingi qism] [keyingi qism ⏭] (bosh barmoq zonasida).
+    fn nav_bar(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
+        const PREV: &str = "M6,6h2v12H6zM9.5,12l8.5,6V6z";
+        const NEXT: &str = "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z";
+        let eps = p.eps.get();
+        let idx = p.pl.cur.get().and_then(|c| eps.iter().position(|e| e.id == c.0));
+        let prev = idx.filter(|&i| i > 0).map(|i| eps[i - 1].clone());
+        let next = idx.filter(|&i| i + 1 < eps.len()).map(|i| eps[i + 1].clone());
+        let btn = |ic: &'static str, label: String, icon_first: bool, primary: bool, target: Option<Episode>| {
+            let en = target.is_some();
+            let tint = Color::rgba(255, 255, 255, if en { 247 } else { 64 });
+            let (bg, br) = if primary && en { (ACCENT, ACCENT) } else { (Color::rgba(255, 255, 255, if en { 26 } else { 9 }), Color::rgba(255, 255, 255, if en { 51 } else { 15 })) };
+            let (i, t) = (icon(ic, 26.0).color(tint), tx(label, 15.0, tint).bold());
+            let mut kids = if icon_first { vec![i, gap_box(6.0, 0.0), t] } else { vec![t, gap_box(6.0, 0.0), i] };
+            kids.insert(0, gap_box(0.0, 0.0));
+            let e = row(kids).center().height(56.0).radius(14.0).bg(bg).border(1.0, br).weight(1.0);
+            match target {
+                Some(t) => {
+                    let (me, pc) = (self.clone(), p.clone());
+                    let playing = p.pl.player.borrow().as_ref().map(|x| x.status().playing).unwrap_or(false);
+                    e.on_click(move || me.play_episode(&pc, &t, None, None, playing))
+                }
+                None => e,
+            }
+        };
+        let bar = row(vec![
+            btn(PREV, prev.as_ref().map(|e| format!("{}-qism", e.number)).unwrap_or_else(|| "Oldingi".into()), true, false, prev.clone()),
+            btn(NEXT, next.as_ref().map(|e| format!("{}-qism", e.number)).unwrap_or_else(|| "Keyingi".into()), false, true, next.clone()),
+        ])
+        .gap(8.0)
+        .padding(8.0)
+        .bg(CARD)
+        .border(1.0, BORDER)
+        .radius(20.0)
+        .margin_each(12.0, 6.0, 12.0, 10.0 + safe_insets().bottom);
+        column(vec![spacer(), bar])
+    }
+
     /// Kotlin "Hozir ijro": "N-qism  👁 ko'rish  ⏱ vaqt  📅 sana" — pleyer tagidagi kichik karta.
     fn now_chip(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
         const CLOCK: &str = "M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zM12.5,7H11v6l5.25,3.15 0.75,-1.23 -4.5,-2.67z";
@@ -414,9 +455,9 @@ impl Home {
         let Some(cur) = p.pl.cur.get() else { return gap_box(0.0, 8.0) };
         let eps = p.eps.get();
         let Some(ep) = eps.iter().find(|e| e.id == cur.0) else { return gap_box(0.0, 8.0) };
-        let dim = Color::rgba(255, 255, 255, 179);
-        let stat = |ic: &'static str, t: String| row(vec![icon(ic, 14.0).color(dim), gap_box(4.0, 0.0), tx(t, 11.5, dim).bold()]).align(Align::Center);
-        let mut kids = vec![tx(format!("{}-qism", ep.number), 11.5, Color::WHITE).bold(), stat(EYE, crate::data::format_count(ep.views)), stat(CLOCK, crate::data::format_hours(ep.watch_ms))];
+        // Kotlin `NowStat`: belgi 11.5 dp (oq 45%), matn 10.5 sp (oq 62%); matn qutisi 24 sp qator balandligiga ega.
+        let stat = |ic: &'static str, t: String| row(vec![icon(ic, 11.5).color(Color::rgba(255, 255, 255, 115)), gap_box(3.0, 0.0), tx(t, 10.5, Color::rgba(255, 255, 255, 158))]).align(Align::Center).height(24.0);
+        let mut kids = vec![column(vec![tx(format!("{}-qism", ep.number), 11.5, Color::WHITE).bold()]).center().height(24.0), stat(EYE, crate::data::format_count(ep.views)), stat(CLOCK, crate::data::format_hours(ep.watch_ms))];
         if ep.added_at > 0 {
             kids.push(stat(CAL, crate::data::fmt_moment(ep.added_at)));
         }
@@ -549,11 +590,21 @@ impl Home {
         // Kotlin `EpisodesTab`: HAMMA qismlar bitta ro'yxatda (guruhlar va tartib tugmasi yo'q), oxirgi qism tepada, 1-qism pastda.
         let shown: Vec<Episode> = eps.iter().rev().cloned().collect();
         let cur_id = p.pl.cur.get().map(|c| c.0);
-        // Ochilganda joriy qism ko'rinadigan joyga suriladi (bir marta).
-        if p.chunk.get() == usize::MAX {
+        // Kotlin `animateScrollToItem(i - 1)`: joriy qism o'zgarganda (yoki ro'yxat birinchi chiqqanda) u ko'rinadigan joyga suriladi.
+        if cur_id.map(|c| c as usize) != Some(p.chunk.get()) {
             if let Some(i) = cur_id.and_then(|id| shown.iter().position(|e| e.id == id)) {
-                p.scroll[1].set_offset((i.saturating_sub(1)) as f32 * 80.0 * density());
-                p.chunk.set(0);
+                let exp_id = p.exp.get();
+                let hsum: f32 = shown
+                    .iter()
+                    .take(i.saturating_sub(1))
+                    .map(|e| {
+                        let (pos, dur) = crate::data::ep_progress(e.id);
+                        let resumable = dur > 0 && pos >= 3000 && pos <= dur - 5000;
+                        72.0 + if resumable { 13.0 } else { 0.0 } + 8.0 + if exp_id == e.id { e.qualities.len() as f32 * 51.0 + 10.0 } else { 0.0 }
+                    })
+                    .sum();
+                p.scroll[1].set_offset(hsum * density());
+                p.chunk.set(cur_id.unwrap_or(0) as usize);
             }
         }
         let mut kids: Vec<Element> = Vec::new();
