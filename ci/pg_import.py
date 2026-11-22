@@ -57,6 +57,7 @@ def conv_type(t):
     return "TEXT"  # NUMERIC va boshqalar — xavfsiz tomon
 
 def convert(name, sql):
+    sql = re.sub(r"--[^\n]*", "", sql)  # SQLite izohlari
     m = re.search(r"\((.*)\)\s*(WITHOUT ROWID)?\s*;?\s*$", sql, re.S | re.I)
     body = m.group(1)
     cols, items, pk_cols = [], [], []
