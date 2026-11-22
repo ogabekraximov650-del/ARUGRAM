@@ -7772,3 +7772,12 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 - **Mijozlar:** `web/src/js/vd/upload.js`, `ARUmultiplatform/android/.../vd/VdUpload.kt` — R2 yo'li olib tashlandi. Eski `/api/vd/up/init|complete` (R2) worker'da qoldi, lekin ishlatilmaydi.
 - **Cheklov:** bo'laklar ketma-ket (parallel emas) — tezlik bitta oqimga teng; tugallanmagan `cup` qatorlari avtomatik tozalanmaydi (Telegram'dagi bo'laklari qoladi).
 - **Muhim:** `ep_*`/`orig_*` fayllari endi `vdstore.yml` (R2 -> Telegram) navbatidan o'tmaydi — to'g'ridan-to'g'ri `ready` bo'ladi.
+
+## Baza Supabase'da (2026-11): Turso/Ample o'rniga
+
+**Nima:** asosiy baza Supabase Postgres'ga ko'chirildi (loyiha `ARUMEDIATV`, ref `rlakikrsudbfveajyggv`, sxema `arumediatv`). Ma'lumot Telegram zaxirasidan tiklandi (`ci/DB_RECOVER`) va `ci/pg_import.py` bilan yuklandi.
+**Nega:** Ample serveri o'ldi; Turso yozuvlari pullik; Supabase'da so'rovlar soni hisoblanmaydi (faqat hajm/trafik).
+**Qanday ishlaydi:** worker SQLite lahjasidagi so'rovlarni o'zgartirmay `public.aru_pipeline(k, req)` RPC'ga (HTTP, PostgREST) yuboradi (`worker/src/lib.rs` `pipeline_post`, `supabase_cfg`). SQL funksiya (`worker/supabase/aru_pipeline.sql`) so'rovni Postgres'ga tarjima qiladi (`tr`, `tr_ddl`, `rewrite_fn`, `qualify_set`; `INSERT OR IGNORE/REPLACE`, `group_concat`, scalar `max/min`, `strftime`, `pragma_table_info`, `sqlite_master`) va natijani Hrana shaklida qaytaradi. Sxema PostgREST'ga ochilmagan; funksiyaga faqat `SUPABASE_DBK` kaliti (sha256 `arumediatv.aru_auth` da) bilan kiriladi.
+**Kalitlar:** `tool/migrate/supabase_rpc.enc` ({url, anon, k}) — `deploy-worker.yml` ochib `SUPABASE_URL/ANON/DBK` qiladi; `tool/migrate/supabase_pg.enc` — CI'dan to'g'ridan-to'g'ri Postgres (`migrator`).
+**Turlar:** import matn qilib yuklagan raqamli ustunlar BIGINT'ga o'tkazildi (`done`, `progress` matn bo'lib qoldi); yetishmagan jadval/ustunlar (`translator_db`, `vd_queue`, `*_vd_*`, `collage_*` ...) qo'shildi.
+**Tekshiruv:** `ci/DB_VALIDATE` (`ci/pg_validate.py`) — worker'dagi statik SQL'larni tarjima + EXPLAIN qiladi. "permission denied" xatolari migrator roli uchun, gateway (definer) uchun emas.

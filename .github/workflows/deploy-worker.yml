@@ -18,6 +18,7 @@ on:
       - 'tool/bot/encode_bot.enc'
       - 'tool/migrate/new_turso.enc'
       - 'tool/migrate/ample.enc'
+      - 'tool/migrate/supabase_rpc.enc'
       - 'tool/r2/r2_keys.enc'
       - '.github/workflows/deploy-worker.yml'
   workflow_dispatch:
@@ -135,6 +136,23 @@ jobs:
               echo "✅ TURSO_URL/TURSO_TOKEN yangi bazadan (shifrlangan fayl) o'rnatildi"
             else
               echo "⚠️  new_turso.enc ochilmadi — eski TURSO qiymatlari saqlanadi"
+            fi
+          fi
+          # Supabase (Postgres) bazasi: `tool/migrate/supabase_rpc.enc` (JSON {"url","anon","k"}, AES-256-CBC/PBKDF2, kalit — ENCODE_TOKEN).
+          # Berilsa worker bazaga Turso/Ample O'RNIGA Supabase RPC (`public.aru_pipeline`) orqali murojaat qiladi. Ochilmasa — avvalgi qiymatlar saqlanadi.
+          if [ -f ../tool/migrate/supabase_rpc.enc ]; then
+            K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+            ST=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../tool/migrate/supabase_rpc.enc 2>/dev/null || true)
+            SU=$(printf '%s' "$ST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["url"])' 2>/dev/null || true)
+            SA=$(printf '%s' "$ST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["anon"])' 2>/dev/null || true)
+            SK=$(printf '%s' "$ST" | python3 -c 'import json,sys; print(json.load(sys.stdin)["k"])' 2>/dev/null || true)
+            if [ -n "$SU" ] && [ -n "$SA" ] && [ -n "$SK" ]; then
+              put SUPABASE_URL "$SU"
+              put SUPABASE_ANON "$SA"
+              put SUPABASE_DBK "$SK"
+              echo "✅ SUPABASE_URL/ANON/DBK shifrlangan fayldan o'rnatildi"
+            else
+              echo "⚠️  supabase_rpc.enc ochilmadi — Supabase qiymatlari o'zgarmadi"
             fi
           fi
           put B2_KEY_ID "${{ secrets.B2_KEY_ID }}"
