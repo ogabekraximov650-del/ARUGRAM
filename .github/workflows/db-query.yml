@@ -4,7 +4,7 @@ name: Baza so'rovi (faqat o'qish)
 on:
   push:
     branches: [main]
-    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED', 'ci/REPOST', 'ci/DB_RECOVER']
+    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED', 'ci/REPOST', 'ci/DB_RECOVER', 'ci/DB_IMPORT']
 
 permissions:
   contents: read
@@ -85,10 +85,20 @@ jobs:
               TG_BOT_TOKEN="$BOT" TG_CHANNEL_ID="$DB" JR_KEY="$KK" JR_DIR="$RUNNER_TEMP/jr" RECOVER_OUT="$RUNNER_TEMP/dump" \
                 ./ARUmultiplatform/ample-rs/target/release/tgstore-jr > "$RUNNER_TEMP/rec.log" 2>&1 && rc=0 || rc=$?
               tail -40 "$RUNNER_TEMP/rec.log"
-              if [ $rc -eq 0 ] && grep -q "jadval " "$RUNNER_TEMP/rec.log"; then echo "✅ tiklandi (urinish $i)"; exit 0; fi
+              if [ $rc -eq 0 ] && grep -q "jadval " "$RUNNER_TEMP/rec.log"; then echo "✅ tiklandi (urinish $i)"; echo "DUMP_DIR=$RUNNER_TEMP/dump" >> "$GITHUB_ENV"; exit 0; fi
             done
           done
           echo "::error::Telegram nusxadan tiklab bo'lmadi (yuqoridagi logga qarang)"; exit 1
+      # IMPORT: tiklangan baza -> Supabase Postgres (sxema `aru`, PostgREST'ga ochiq emas). Faqat `ci/DB_IMPORT` o'zgarganda; tiklash qadami (DB_RECOVER) ham o'zgargan bo'lishi kerak.
+      - name: Supabase'ga import
+        run: |
+          if ! git diff --name-only HEAD~1 HEAD | grep -q '^ci/DB_IMPORT$'; then echo "ci/DB_IMPORT o'zgarmagan — o'tkazildi"; exit 0; fi
+          if [ -z "${DUMP_DIR:-}" ] || [ ! -d "$DUMP_DIR" ]; then echo "::error::tiklangan nusxa yo'q (DB_RECOVER ham o'zgarishi kerak)"; exit 1; fi
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          PG=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/migrate/supabase_pg.enc)
+          echo "::add-mask::$(printf '%s' "$PG" | python3 -c 'import json,sys;print(json.load(sys.stdin)["password"])')"
+          pip install --quiet psycopg2-binary
+          PG_JSON="$PG" python3 ci/pg_import.py
       # SINOV: telefon -> worker -> Telegram yuklash tezligi (R2'siz). Faqat `ci/UPLOAD_SPEED` o'zgarganda (har safar 4 x 18 MiB x 2).
       - name: Yuklash tezligi
         run: |
