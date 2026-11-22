@@ -106,11 +106,11 @@ impl Home {
                 .line_height(24.0)
                 .padding_each(16.0, 26.0, 16.0, 10.0)
                 .label_inside()
-                .flat_glass(Color::rgba(255, 255, 255, 22))
                 .hint_color(Color::rgba(255, 255, 255, 150))
                 .accent(ACCENT2)
-                .border(1.0, Color::TRANSPARENT)
-                .radius(16.0)
+                // Kotlin `OutlinedTextField`: shaffof fon, `BORDER_BRIGHT` chegara, 14 dp burchak.
+                .border(1.0, BORDER_BRIGHT)
+                .radius(14.0)
                 .label(label)
         };
         let can_save = np.is_none() && up.is_none() && avail != 2 && !checking && !p.saving.get();
@@ -118,8 +118,8 @@ impl Home {
         let save = column(vec![if p.saving.get() { spinner(22.0, 2.0, Color::WHITE) } else { tx("Saqlash", 16.0, Color::WHITE).bold() }])
             .center()
             .padding_xy(0.0, 16.0)
-            .radius(28.0)
-            .gradient(if can_save { ACCENT } else { ACCENT.with_opacity(0.4) }, if can_save { ACCENT2 } else { ACCENT2.with_opacity(0.4) })
+            .radius(16.0)
+            .bg(if can_save { ACCENT } else { ACCENT.with_opacity(0.4) })
             .on_click(move || {
                 if !can_save {
                     return;

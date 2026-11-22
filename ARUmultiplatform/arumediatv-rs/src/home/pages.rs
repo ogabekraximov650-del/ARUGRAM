@@ -242,13 +242,17 @@ impl Home {
     pub(super) fn scaffold(self: &Rc<Self>, title: &str, body: Element) -> Element {
         let ins = safe_insets();
         let me = self.clone();
-        let back = column(vec![icon(A_BACK, 24.0).color(Color::WHITE)]).center().width(44.0).height(44.0).radius(22.0).bg(Color::rgba(255, 255, 255, 22)).on_click(move || {
+        // Kotlin `OverlayScaffold`: karta (20 dp burchak) ichida orqaga tugmasi (`CARD_ALT`, 14 dp burchak, 8 dp ichki joy) va 22 sp nom.
+        let back = column(vec![icon(A_BACK, 24.0).color(Color::WHITE)]).padding(8.0).bg(CARD_ALT).border(1.0, BORDER).radius(14.0).on_click(move || {
             me.pop();
         });
-        let head = Self::pglass(row(vec![back, tx(title, 22.0, Color::WHITE).bold().weight(1.0)]).gap(12.0).align(Align::Center).padding_each(10.0, 8.0, 18.0, 8.0)).radius(32.0);
-        // Kontent to'liq ekranga yoyiladi (status paneli ostidan tizim tugmalari ostigacha); sarlavha ustida shisha qatlam —
-        // kontent uning ostidan o'tadi va lupa orqali ko'rinadi. Scroll paddingi kontent bilan suriladi (`padding_add`).
-        let head_h = 12.0 + ins.top + 60.0 + 8.0;
+        let head = row(vec![back, gap_box(14.0, 0.0), tx(title, 22.0, Color::WHITE).bold().weight(1.0)])
+            .align(Align::Center)
+            .bg(CARD)
+            .border(1.0, BORDER)
+            .radius(20.0)
+            .padding_each(18.0, 16.0, 18.0, 16.0);
+        let head_h = 12.0 + ins.top + 74.0 + 8.0;
         stack(vec![
             Self::glass_backdrop(),
             column(vec![body.padding_add(0.0, head_h, 0.0, ins.bottom).grow(1.0)]),
@@ -327,19 +331,19 @@ impl Home {
             Some(f) => image_fill(&f),
             None => {
                 let (a, b) = name_colors(&s.name);
-                column(vec![]).gradient(a, b).radius(18.0)
+                column(vec![]).gradient(a, b).radius(16.0)
             }
         };
         let me = self.clone();
-        let back = column(vec![icon(A_BACK, 24.0).color(Color::WHITE)]).center().width(44.0).height(44.0).radius(22.0).bg(Color::rgba(0, 0, 0, 120)).on_click(move || {
+        // Kotlin `SeasonScreen`: tepada orqaga tugmasi (karta, 14 dp) + "N-bo'lim  nom" (17 sp), pastda qora 16:9 pleyer (16 dp burchak).
+        let back = column(vec![icon(A_BACK, 24.0).color(Color::WHITE)]).padding(8.0).bg(CARD).border(1.0, BORDER).radius(14.0).on_click(move || {
             me.pop();
         });
         let bolim = if s.section_no > 0 { s.section_no } else { 1 };
-        let cover = stack(vec![
-            cover_img,
-            column(vec![spacer(), column(vec![tx(s.name.clone(), 17.0, Color::WHITE).bold(), tx(format!("{bolim}-bo'lim · {} qism", format_count(s.episodes)), 12.5, Color::WHITE)]).padding_each(14.0, 26.0, 14.0, 12.0).gradient(Color::rgba(0, 0, 0, 0), Color::rgba(0, 0, 0, 200)).radius(18.0)]),
-            column(vec![row(vec![back, spacer()])]).padding(8.0),
-        ]);
+        let head_row = row(vec![back, gap_box(12.0, 0.0), tx(format!("{bolim}-bo'lim  {}", s.name), 17.0, Color::WHITE).bold().weight(1.0)])
+            .align(Align::Center)
+            .padding_each(16.0, 12.0 + ins.top, 16.0, 8.0);
+        let cover = stack(vec![cover_img.radius(16.0)]).bg(Color::BLACK).radius(16.0);
         if p.pl.fullscreen.get() {
             let (fw, fh) = window_dp();
             let v = self.player_view(p, column(vec![]), fw, fh, true);
@@ -349,7 +353,7 @@ impl Home {
             }
             return stack(layers);
         }
-        let cover = self.player_view(p, cover, w - 32.0, cover_h, false).margin_each(16.0, 8.0 + ins.top, 16.0, 0.0);
+        let cover = self.player_view(p, cover, w - 32.0, cover_h, false).margin_each(16.0, 0.0, 16.0, 0.0);
 
         let titles = ["Ma'lumot", "Qismlar", "Bo'limlar", "Izohlar"];
         let tabs: Vec<Element> = titles
@@ -374,11 +378,11 @@ impl Home {
         let pc = p.clone();
         let body = body.on_swipe(move |d| pc.tab.set((pc.tab.get() as i32 + d).clamp(0, 3) as usize));
         // Muqova va yorliqlar tepada qoladi, ma'lumot/qism/izoh ro'yxati esa ularning OSTIDAN o'tadi (yorliq paneli shisha).
-        let top_h = 8.0 + ins.top + cover_h + 10.0 + 40.0 + 6.0;
+        let top_h = 12.0 + ins.top + 40.0 + 8.0 + cover_h + 8.0 + 38.0 + 6.0;
         let mut layers = vec![
             Self::glass_backdrop(),
             column(vec![body.padding_add(0.0, top_h, 0.0, ins.bottom).grow(1.0)]),
-            column(vec![cover, tab_bar]).bg(BG),
+            column(vec![column(vec![head_row, cover, tab_bar]).bg(BG), spacer()]),
         ];
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));

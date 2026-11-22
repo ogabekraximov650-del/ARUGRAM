@@ -232,11 +232,12 @@ impl Home {
             .enumerate()
             .map(|(i, name)| {
                 let t = p.tab.clone();
-                let e = column(vec![tx(*name, 12.5, if i == tab { Color::WHITE } else { Color::rgba(255, 255, 255, 170) }).bold()]).center().weight(1.0).padding_xy(4.0, 11.0).radius(20.0).on_click(move || t.set(i));
-                if i == tab { e.gradient(ACCENT, ACCENT2) } else { e }
+                // Kotlin: alohida tugmalar, 14 dp burchak; faol — apelsin gradient, aks holda karta + chegara.
+                let e = column(vec![tx(*name, 12.5, if i == tab { Color::WHITE } else { Color::rgba(255, 255, 255, 153) }).bold()]).center().weight(1.0).padding_xy(4.0, 11.0).radius(14.0).on_click(move || t.set(i));
+                if i == tab { e.gradient(ACCENT, ACCENT2) } else { e.bg(CARD).border(1.0, BORDER) }
             })
             .collect();
-        let tab_bar = Self::pglass(row(tabs).gap(4.0).padding_xy(6.0, 6.0)).radius(28.0);
+        let tab_bar = row(tabs).gap(8.0);
         let body = match tab {
             0 => self.bill_topup(p, &d, now),
             1 => self.bill_subscribe(p, &d, now),
@@ -319,7 +320,7 @@ impl Home {
         ];
         let links: Vec<PayLink> = d.links.iter().filter(|l| l.expires_at > now).cloned().collect();
         if links.is_empty() {
-            kids.push(tx("Summani yozing — to'lov sahifasi o'zi ochiladi.\nPul hisobingizga avtomatik tushadi, havola esa 1 soat faol turadi.", 12.0, Color::WHITE).padding_each(4.0, 8.0, 4.0, 0.0));
+            kids.push(tx("Summani yozing — to'lov sahifasi o'zi ochiladi.\nPul hisobingizga avtomatik tushadi, havola esa 1 soat faol turadi.", 12.0, Color::rgba(255, 255, 255, 115)).line_height(18.0).padding_each(4.0, 6.0, 4.0, 0.0));
         }
         for l in links {
             let left = ((l.expires_at - now) / 1000).max(0);
@@ -446,14 +447,14 @@ impl Home {
         let price = d.plans.iter().find(|x| x.days == days).map(|x| x.price).unwrap_or(0);
         let (pc, pb, me) = (p.clone(), p.clone(), self.clone());
         let panel = column(vec![
-            tx("Obunani tasdiqlang", 18.0, Color::WHITE).bold(),
-            gap_box(0.0, 10.0),
-            tx(format!("{} obuna — {}.\nSumma balansingizdan yechiladi.", plan_label(days), format_sum(price)), 14.0, Color::WHITE),
-            gap_box(0.0, 18.0),
+            tx("Obunani tasdiqlang", 24.0, Color::WHITE),
+            gap_box(0.0, 16.0),
+            tx(format!("{} obuna — {}.\nSumma balansingizdan yechiladi.", plan_label(days), format_sum(price)), 14.0, TEXT_DIM),
+            gap_box(0.0, 24.0),
             row(vec![
                 spacer(),
-                self.chip("Bekor qilish", false, move || pc.confirm.set(0)),
-                self.chip("Sotib olish", true, move || {
+                Self::text_btn("Bekor qilish", ACCENT, move || pc.confirm.set(0)),
+                Self::text_btn("Sotib olish", ACCENT, move || {
                     pb.confirm.set(0);
                     let (p2, me2, session) = (pb.clone(), me.clone(), me.session.clone());
                     spawn_bg(move || post(&session, "/api/billing/subscribe", json!({"days": days})), move |r| match r {
@@ -468,11 +469,11 @@ impl Home {
             ])
             .gap(8.0),
         ])
-        .flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
+        .bg(SURFACE)
         .radius(28.0)
-        .padding(22.0)
+        .padding(24.0)
         .margin_each(24.0, 0.0, 24.0, 0.0);
         let pc = p.clone();
-        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.confirm.set(0))
+        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 82)).on_click(move || pc.confirm.set(0))
     }
 }

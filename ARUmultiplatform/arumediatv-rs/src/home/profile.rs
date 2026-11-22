@@ -152,6 +152,11 @@ impl Home {
         (self.on_logout)();
     }
 
+    /// Material `TextButton`: matnli tugma (14 sp, o'rtacha qalinlik), 12x8 ichki joy.
+    pub(super) fn text_btn(label: &str, color: Color, f: impl Fn() + 'static) -> Element {
+        column(vec![tx(label, 14.0, color).bold()]).center().padding_xy(12.0, 10.0).radius(20.0).on_click(f)
+    }
+
     fn dialog(self: &Rc<Self>) -> Element {
         let kind = self.dlg.get();
         let me = self.clone();
@@ -159,14 +164,14 @@ impl Home {
         let (title, text, buttons): (String, String, Vec<Element>) = match kind {
             1 => {
                 let (c, me) = (close.clone(), self.clone());
-                ("Chiqish".into(), "Hisobdan chiqasizmi?".into(), vec![self.chip("Bekor qilish", false, c), self.chip("Chiqish", true, move || me.do_logout())])
+                ("Chiqish".into(), "Hisobdan chiqasizmi?".into(), vec![Self::text_btn("Bekor qilish", ACCENT, c), Self::text_btn("Chiqish", Color::hex(0xF87171), move || me.do_logout())])
             }
             2 => {
                 let (c, me) = (close.clone(), self.clone());
                 (
                     "Accountni o'chirish".into(),
                     "Hisobingiz, tarix, sevimlilar, baholar va izohlaringiz o'chiriladi. Bu amalni qaytarib bo'lmaydi.".into(),
-                    vec![self.chip("Bekor qilish", false, c), self.chip("Davom etish", true, move || me.dlg.set(3))],
+                    vec![Self::text_btn("Bekor qilish", ACCENT, c), Self::text_btn("Davom etish", Color::hex(0xF87171), move || me.dlg.set(3))],
                 )
             }
             3 => {
@@ -175,8 +180,8 @@ impl Home {
                     "Ishonchingiz komilmi?".into(),
                     "Account butunlay o'chiriladi.".into(),
                     vec![
-                        self.chip("Yo'q", false, c),
-                        self.chip("Ha, o'chirilsin", true, move || {
+                        Self::text_btn("Yo'q", ACCENT, c),
+                        Self::text_btn("Ha, o'chirilsin", Color::hex(0xF87171), move || {
                             me.dlg_msg.set("Ma'lumotlar tozalanmoqda...".into());
                             me.dlg.set(6);
                             let (m2, session) = (me.clone(), me.session.clone());
@@ -194,27 +199,28 @@ impl Home {
             4 => (
                 "ARUMEDIATV".into(),
                 format!("Versiya: {}\nRust + uzcoders (OpenGL ES)", crate::api::APP_VERSION),
-                vec![self.chip("Yopish", true, close.clone())],
+                vec![Self::text_btn("Yopish", ACCENT, close.clone())],
             ),
             6 => (self.dlg_msg.get(), String::new(), vec![]),
-            _ => ("Xabar".into(), self.dlg_msg.get(), vec![self.chip("Yopish", true, close.clone())]),
+            _ => ("Xabar".into(), self.dlg_msg.get(), vec![Self::text_btn("Yopish", ACCENT, close.clone())]),
         };
-        let mut kids = vec![tx(title, 18.0, Color::WHITE).bold()];
+        // Material 3 `AlertDialog` (Kotlin): `SURFACE` fon, 28 dp burchak, nom 24 sp, matn 14 sp `TEXT_DIM`, matnli tugmalar.
+        let mut kids = vec![tx(title, 24.0, Color::WHITE)];
         if !text.is_empty() {
-            kids.push(gap_box(0.0, 10.0));
-            kids.push(tx(text, 14.0, Color::WHITE));
+            kids.push(gap_box(0.0, 16.0));
+            kids.push(tx(text, 14.0, TEXT_DIM));
         }
         if kind == 6 {
             kids.push(gap_box(0.0, 14.0));
             kids.push(spinner(28.0, 3.0, ACCENT2));
         }
         if !buttons.is_empty() {
-            kids.push(gap_box(0.0, 18.0));
+            kids.push(gap_box(0.0, 24.0));
             kids.push(row(std::iter::once(spacer()).chain(buttons).collect()).gap(8.0));
         }
         let scrim_close = close.clone();
-        let panel = column(kids).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(22.0).margin_each(24.0, 0.0, 24.0, 0.0);
-        let scrim = column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45));
+        let panel = column(kids).bg(SURFACE).radius(28.0).padding(24.0).margin_each(24.0, 0.0, 24.0, 0.0);
+        let scrim = column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 82));
         if kind == 6 { scrim } else { scrim.on_click(scrim_close) }
     }
 

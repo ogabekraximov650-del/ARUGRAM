@@ -542,7 +542,11 @@ impl Home {
         let header = row(vec![round_btn, capsule]).gap(8.0).align(Align::Center).margin_each(10.0, 12.0 + ins.top, 10.0, 8.0);
         // Sarlavha ro'yxat USTIDA chiziladi (xabarlar shisha ostida suriladi, hech qachon ustiga chiqmaydi).
         let page = stack(vec![
-            Self::glass_backdrop(),
+            // Kotlin `SupportChatScreen`: fon 0C0A09 va ustida yumshoq rangli gradient.
+            stack(vec![
+                column(vec![]).bg(Color::hex(0x0C0A09)),
+                column(vec![]).gradient(Color::rgba(107, 58, 28, 66), Color::rgba(43, 59, 74, 56)),
+            ]),
             column(vec![body.grow(1.0)]),
             column(vec![spacer(), column(low)]).padding_each(0.0, 0.0, 0.0, ins.bottom),
             column(vec![header]),
