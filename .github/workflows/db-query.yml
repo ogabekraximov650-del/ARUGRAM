@@ -62,26 +62,31 @@ jobs:
         run: |
           if ! git diff --name-only HEAD~1 HEAD | grep -q '^ci/DB_RECOVER$'; then echo "ci/DB_RECOVER o'zgarmagan — o'tkazildi"; exit 0; fi
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          # JR_KEY: GitHub Secret bo'lsa u, aks holda `tgstore/jr_key.enc` (ENCODE_TOKEN bilan shifrlangan).
-          if [ -z "${JR_KEY:-}" ] && [ -f ARUmultiplatform/tgstore/jr_key.enc ]; then
-            JR_KEY=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ARUmultiplatform/tgstore/jr_key.enc 2>/dev/null | tr -d '[:space:]')
-          fi
-          if [ -z "${JR_KEY:-}" ]; then echo "::error::JR_KEY topilmadi (secret ham, jr_key.enc ham)"; exit 1; fi
-          echo "::add-mask::$JR_KEY"
           DB=$(grep -E '^CHANNEL_ID=' ARUmultiplatform/tgstore/channels.txt | head -1 | cut -d= -f2- | tr -d '[:space:]')
           echo "::add-mask::$DB"
-          (cd ARUmultiplatform/ample-rs && cargo build --release 2>&1 | tail -3)
+          (cd ARUmultiplatform/ample-rs && cargo build --release 2>&1 | tail -2)
+          # Kalitlar: GitHub Secret `JR_KEY` va/yoki `tgstore/jr_key*.enc` (ENCODE_TOKEN bilan shifrlangan); hammasi sinab ko'riladi.
+          KEYS=""
+          [ -n "${JR_KEY:-}" ] && KEYS="$JR_KEY"
+          for KF in ARUmultiplatform/tgstore/jr_key.enc ARUmultiplatform/tgstore/jr_key2.enc; do
+            [ -f "$KF" ] || continue
+            KK=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$KF" 2>/dev/null | tr -d '[:space:]')
+            [ -n "$KK" ] && { echo "::add-mask::$KK"; KEYS="$KEYS $KK"; }
+          done
+          i=0
           for F in ARUmultiplatform/tgstore/bot.enc tool/bot/main_bot.enc; do
             [ -f "$F" ] || continue
             BOT=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$F" 2>/dev/null | tr -d '[:space:]')
             [ -n "$BOT" ] || continue
             echo "::add-mask::$BOT"
-            rm -rf "$RUNNER_TEMP/jr" "$RUNNER_TEMP/dump"
-            echo "Urinish: $F"
-            if TG_BOT_TOKEN="$BOT" TG_CHANNEL_ID="$DB" JR_KEY="$JR_KEY" JR_DIR="$RUNNER_TEMP/jr" RECOVER_OUT="$RUNNER_TEMP/dump" \
-                 ./ARUmultiplatform/ample-rs/target/release/tgstore-jr 2>&1 | tee "$RUNNER_TEMP/rec.log" | grep -v "^$" | tail -80; then
-              if grep -q "jadval " "$RUNNER_TEMP/rec.log"; then echo "✅ tiklandi"; exit 0; fi
-            fi
+            for KK in $KEYS; do
+              i=$((i+1)); rm -rf "$RUNNER_TEMP/jr" "$RUNNER_TEMP/dump"
+              echo "Urinish $i: bot=$F kalit=#$i"
+              TG_BOT_TOKEN="$BOT" TG_CHANNEL_ID="$DB" JR_KEY="$KK" JR_DIR="$RUNNER_TEMP/jr" RECOVER_OUT="$RUNNER_TEMP/dump" \
+                ./ARUmultiplatform/ample-rs/target/release/tgstore-jr > "$RUNNER_TEMP/rec.log" 2>&1; rc=$?
+              tail -40 "$RUNNER_TEMP/rec.log"
+              if [ $rc -eq 0 ] && grep -q "jadval " "$RUNNER_TEMP/rec.log"; then echo "✅ tiklandi (urinish $i)"; exit 0; fi
+            done
           done
           echo "::error::Telegram nusxadan tiklab bo'lmadi (yuqoridagi logga qarang)"; exit 1
       # SINOV: telefon -> worker -> Telegram yuklash tezligi (R2'siz). Faqat `ci/UPLOAD_SPEED` o'zgarganda (har safar 4 x 18 MiB x 2).
