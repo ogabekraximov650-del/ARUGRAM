@@ -9,6 +9,7 @@ import { push } from '../router.js';
 import { icon, appBar, bindAppBar, toast, confirmDialog, spinner, C } from '../ui.js';
 import { uploadFile as vdUpload } from '../vd/upload.js';
 import { fileOf, fmtSize } from './admin-util.js';
+import { thumbOfEpisode } from '../vd/thumb.js';
 
 const QS = ['360p', '480p', '720p', '1080p'];
 const INTRO_ROWS = 5; // `lib/services/intro_times.dart` -> kIntroRows
@@ -49,13 +50,23 @@ export function openAdminEpisodes(anime, season) {
         const qs = QS.filter((k) => { const u = fileOf(e[`url_${k}`]); return u && u !== o; });
         const sub = [qs.join(', '), o ? 'asl video' : ''].filter(Boolean).join(' · ') || 'Fayl yo\'q';
         return `<div class="glass ad-row" data-i="${i}">
-          <div class="ad-num">${esc(e.epizod_number ?? '?')}</div>
+          <div class="ad-num" data-i="${i}">${esc(e.epizod_number ?? '?')}</div>
           <div class="ss-main"><div class="ss-t">${esc(e.epizod_name || `${e.epizod_number ?? ''}-qism`)}</div><div class="ss-h">${esc(sub)}</div></div>
           <button class="icon-btn ad-post" aria-label="Kanalga joylash">${icon('send', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</button>
           <button class="icon-btn ad-edit" aria-label="Tahrirlash">${icon('edit', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</button>
           <button class="icon-btn ad-del" aria-label="O'chirish">${icon('delete', { fill: false, size: 20, color: C.danger })}</button>
         </div>`;
       }).join('');
+      // Kadr (thumbnail): ko'rinishga kirganda yasaladi, faqat brauzer keshida saqlanadi.
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver((ens) => ens.forEach((en) => {
+          if (!en.isIntersecting) return;
+          io.unobserve(en.target);
+          const e = list[+en.target.dataset.i];
+          thumbOfEpisode(e, { exclude: `${e.origin_video ?? ''}` }).then((u) => { if (u && !closed && en.target.isConnected) { en.target.style.backgroundImage = `url(${u})`; en.target.classList.add('th'); } }).catch(() => {});
+        }), { rootMargin: '120px' });
+        host.querySelectorAll('.ad-num').forEach((n) => io.observe(n));
+      }
       host.querySelectorAll('.ad-row').forEach((r) => {
         const e = list[+r.dataset.i];
         r.querySelector('.ad-post').addEventListener('click', () => postToChannel(e));

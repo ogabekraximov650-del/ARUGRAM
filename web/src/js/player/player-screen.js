@@ -11,6 +11,7 @@ import { push, back as routerBack } from '../router.js';
 import { hooks } from '../hooks.js';
 import { icon, spinner, toast, promptDialog, bindTap, mdDialog } from '../ui.js';
 import { dlStat, dlStart, dlPause, dlRemove, dlRefresh } from '../vd/downloads.js';
+import { thumbOfEpisode } from '../vd/thumb.js';
 import { formatBytes } from '../screens/stats.js';
 import { esc, formatCount } from '../format.js';
 import { seasonsRepo } from '../seasons.js';
@@ -316,7 +317,7 @@ function buildPlayer(el, route, season, opts) {
     const en = `${e.epizod_name ?? ''}`.trim();
     return `<div class="pl-ep${isCur ? ' cur' : ''}${seen ? ' seen' : ''}" data-k="${esc(epKey(e))}">
       <div class="row">
-        <div class="main"><div class="bx">${isCur ? icon('play_arrow', { size: 26, color: '#fff' }) : `<span>${epNum(e)}</span>`}</div>
+        <div class="main"><div class="bx" data-tk="${esc(epKey(e))}">${isCur ? icon('play_arrow', { size: 26, color: '#fff' }) : `<span>${epNum(e)}</span>`}</div>
           <div class="tx"><div class="t">${epNum(e)}-qism</div><div class="st">${esc(en ? `${status} \u00B7 ${en}` : status)}</div></div></div>
         <div class="share" data-k="${esc(epKey(e))}">${icon('share', { size: 22, color: 'rgba(255,255,255,0.6)' })}</div>
         <div class="dlb" data-k="${esc(epKey(e))}"></div>
@@ -334,6 +335,23 @@ function buildPlayer(el, route, season, opts) {
     const u = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
     try { if (tg?.openTelegramLink) { tg.openTelegramLink(u); return; } } catch (_) { /* */ }
     window.open(u, '_blank');
+  }
+
+  /** Qism kadrlari: ko'rinishga kirganda yasaladi, FAQAT brauzer keshida saqlanadi (`vd/thumb.js`). */
+  let thumbIO = null;
+  function lazyThumbs(pane, list) {
+    thumbIO?.disconnect();
+    if (!('IntersectionObserver' in window)) return;
+    thumbIO = new IntersectionObserver((entries) => {
+      entries.forEach((en) => {
+        if (!en.isIntersecting) return;
+        const n = en.target; thumbIO.unobserve(n);
+        const e = list.find((x) => epKey(x) === n.dataset.tk);
+        if (!e || n.classList.contains('th')) return;
+        thumbOfEpisode(e).then((u) => { if (u && !disposed && n.isConnected) { n.style.backgroundImage = `url(${u})`; n.classList.add('th'); } }).catch(() => {});
+      });
+    }, { rootMargin: '120px' });
+    pane.querySelectorAll('.bx[data-tk]').forEach((n) => thumbIO.observe(n));
   }
 
   function paintEps() {
@@ -358,6 +376,7 @@ function buildPlayer(el, route, season, opts) {
       });
     });
     paintDl();
+    lazyThumbs(pane, list);
   }
 
   const dlBtn = (st) => {
@@ -1250,6 +1269,7 @@ function buildPlayer(el, route, season, opts) {
       window.removeEventListener('aru-enhance-failed', onEnhFail);
       window.removeEventListener('aru-dl', onDl);
       clearInterval(dlPoll);
+      thumbIO?.disconnect();
       enhancer.destroy();
       window.removeEventListener('resize', applyRot);
       document.removeEventListener('fullscreenchange', onFsChange);

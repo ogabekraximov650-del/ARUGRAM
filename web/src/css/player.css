@@ -323,3 +323,7 @@
 .shep .it.cur b { color: var(--accent2); }
 .shep .it span { margin-left: 8px; color: var(--text-dim); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .shdl .dlr:first-child { padding-top: 0; }
+
+/* Qism kadri (brauzer keshidan) */
+.pl-ep .bx { background-size: cover; background-position: center; position: relative; overflow: hidden; }
+.pl-ep .bx.th > span { position: absolute; left: 3px; bottom: 2px; padding: 0 5px; border-radius: 6px; background: rgba(0, 0, 0, 0.6); font-size: 12px; }
