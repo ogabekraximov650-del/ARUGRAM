@@ -47,9 +47,9 @@ function banLeftText(u) {
 }
 const errText = (e) => `${e?.body?.error || e?.message || e}`;
 
-export function openAdminUsers() {
+export function openAdminUsers(initialTab = 'chats') {
   push((el) => {
-    let tab = 'chats';
+    let tab = initialTab;
     let closed = false;
     let picked = false;
     let query = '';

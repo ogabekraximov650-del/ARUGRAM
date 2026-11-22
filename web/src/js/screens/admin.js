@@ -11,24 +11,36 @@ import { icon, appBar, bindAppBar, bindTap, ripple, toast, confirmDialog, spinne
 import { fileOf, toJpeg, uploadImage } from './admin-util.js';
 import { openAdminSeasons } from './admin-seasons.js';
 import { openAdminUsers } from './admin-users.js';
+import { openAdminReports, openAdminChannels, openAdminStats, openAdminEncode, openAdminDb, openAdminApp } from './admin-more.js';
+
+const SECTIONS = [
+  ['anime', 'movie_filter', 'Animelarni boshqarish', "Qo'shish, tahrirlash, o'chirish"],
+  ['users', 'people_alt', 'Foydalanuvchilar', 'Balans, obuna, bloklash'],
+  ['chats', 'chat', 'Suhbatlar', 'Foydalanuvchilar yozishmalari'],
+  ['reports', 'flag', 'Shikoyatlar', 'Izohlarga kelgan shikoyatlar'],
+  ['channels', 'campaign', 'Majburiy obunalar', 'Kanallar, limit va statistika'],
+  ['stats', 'insights', 'Umumiy statistika', "Kontent, foydalanuvchilar, ko'rishlar, trafik"],
+  ['encode', 'movie', 'Kodlash navbati', 'Kodlanayotgan va navbatdagi qismlar, log'],
+  ['db', 'insights', "Ma'lumotlar bazasi", "Jurnallar, ustunlar va yozuvlarni ko'rish (faqat o'qish)"],
+  ['app', 'security', 'Ilova va xavfsizlik', "Eng past versiya, ulanish kaliti"],
+];
 
 function adminTile(id, ic, title, sub) {
-  return `<div class="glass ad-tile" data-t="${id}">
-    <div class="ss-ic">${icon(ic, { size: 22, color: C.accent })}</div>
-    <div class="ss-main"><div class="ss-t">${title}</div><div class="ss-h">${sub}</div></div>
+  return `<div class="ad-tile" data-t="${id}">
+    <div class="ad-ic">${icon(ic, { size: 26, color: C.accent2 })}</div>
+    <div class="ss-main"><div class="ad-tt">${title}</div><div class="ad-ts">${sub}</div></div>
     ${icon('chevron_right', { size: 24, color: 'rgba(255,255,255,0.38)' })}
   </div>`;
 }
 
 export function openAdmin() {
   push((el) => {
-    el.innerHTML = `${appBar({ title: 'Admin paneli' })}
-      <div class="scroll"><div class="ss">
-        ${adminTile('anime', 'movie_filter', 'Animelarni boshqarish', "Qo'shish, tahrirlash, o'chirish")}
-        ${adminTile('users', 'people_alt', 'Foydalanuvchilar', 'Hisoblar, balans, obuna, blok va yozishmalar')}
-      </div></div>`;
+    el.innerHTML = `${appBar({ title: 'Admin paneli', actions: icon('admin_panel_settings', { size: 24, color: 'rgba(255,255,255,0.54)' }) })}
+      <div class="scroll"><div class="ss ad-hub">${SECTIONS.map((x) => adminTile(...x)).join('')}</div></div>`;
     bindAppBar(el);
-    el.querySelectorAll('.ad-tile').forEach((t) => ripple(t, () => { if (t.dataset.t === 'anime') openAdminAnimes(); else if (t.dataset.t === 'users') openAdminUsers(); }));
+    const go = { anime: openAdminAnimes, users: () => openAdminUsers('new'), chats: () => openAdminUsers('chats'), reports: openAdminReports,
+      channels: openAdminChannels, stats: openAdminStats, encode: openAdminEncode, db: openAdminDb, app: openAdminApp };
+    el.querySelectorAll('.ad-tile').forEach((t) => ripple(t, () => go[t.dataset.t]?.()));
     return {};
   });
 }

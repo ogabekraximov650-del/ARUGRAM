@@ -27,7 +27,7 @@ function tileHtml(s) {
   const device = `${s.device ?? ''}`;
   const platform = `${s.platform ?? ''}`;
   const version = `${s.app_version ?? ''}`;
-  return `<div class="glass se-tile">
+  return `<div class="se-tile">
     <div class="se-head">
       ${icon(current ? 'phone_iphone' : 'devices_other', { size: 20, color: current ? C.success : 'rgba(255,255,255,0.7)' })}
       <span class="se-dev">${esc(device || "Noma'lum qurilma")}</span>
@@ -44,7 +44,7 @@ function tileHtml(s) {
 
 export function openSessions() {
   push((el) => {
-    el.innerHTML = `${appBar({ title: 'Kirgan qurilmalar' })}<div class="scroll se"></div>`;
+    el.innerHTML = `${appBar({ title: 'Qurilmalar' })}<div class="scroll se"></div>`;
     bindAppBar(el);
     const body = el.querySelector('.scroll');
     let dead = false;

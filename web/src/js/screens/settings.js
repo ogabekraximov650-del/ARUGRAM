@@ -26,9 +26,8 @@ const ROWS = [
   { kind: 'watch', ic: 'schedule', hint: 'Jami necha soat tomosha qilganingiz' },
 ];
 
-function rowHtml(id, ic, title, hint, value, fill = true) {
-  return `<div class="glass ss-row">
-    <div class="ss-ic">${icon(ic, { fill, size: 18, color: C.accent })}</div>
+function rowHtml(id, title, hint, value) {
+  return `<div class="ss-row">
     <div class="ss-main"><div class="ss-t">${title}</div><div class="ss-h">${hint}</div></div>
     <label class="switch"><input type="checkbox" data-id="${id}"${value ? ' checked' : ''}${currentUser() ? '' : ' disabled'}><span class="tr"></span><span class="th"></span></label>
   </div>`;
@@ -42,12 +41,12 @@ export function openSettings() {
       <div class="scroll"><div class="ss">
         <div class="ss-sec">MAXFIYLIK</div>
         <div class="ss-note" style="margin-top:6px">Statistikangiz odatda OCHIQ turadi. Yashirmoqchi bo'lganingizning tugmasini yoqing — yoqilgani boshqalarga umuman ko'rinmaydi.</div>
-        <div style="height:12px"></div>
-        ${ROWS.map((r) => rowHtml(r.kind, r.ic, esc(STAT_KINDS[r.kind].label), r.hint, hidden.includes(r.kind), r.fill !== false)).join('')}
-        <div class="ss-note" style="margin-top:2px">Profil rasmi, ismingiz, username va ID raqamingiz har doim ko'rinadi.<br>Balansingiz va sarflagan trafigingiz esa HECH QACHON boshqalarga ko'rinmaydi.</div>
-        <div class="ss-sec" style="margin-top:22px">BEPUL KO'RISH</div>
-        <div style="height:10px"></div>
-        ${rowHtml('__chan', 'campaign', 'Kanallarga avtomatik obuna',
+        <div style="height:4px"></div>
+        ${ROWS.map((r) => rowHtml(r.kind, esc(STAT_KINDS[r.kind].label), r.hint, hidden.includes(r.kind))).join('')}
+        <div class="ss-note" style="margin-top:10px">Profil rasmi, ismingiz, username va ID raqamingiz har doim ko'rinadi. Balansingiz va sarflagan trafigingiz esa HECH QACHON boshqalarga ko'rinmaydi.</div>
+        <div class="ss-sec" style="margin-top:18px">BEPUL KO'RISH</div>
+        <div style="height:6px"></div>
+        ${rowHtml('__chan', 'Kanallarga avtomatik obuna',
     "Bepul bo'limlar uchun ilova Telegram hisobingiz bilan majburiy kanallarga qo'shiladi (yopiq kanalga so'rov yuboradi). O'chirsangiz, bepul bo'lim ochilganda ruxsat yana so'raladi.",
     chanConsent())}
       </div></div>`;
