@@ -20,6 +20,7 @@ const A_PHONE: &str = "M17,1.01L7,1c-1.1,0 -2,0.9 -2,2v18c0,1.1 0.9,2 2,2h10c1.1
 const A_CHECK: &str = "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z";
 const A_DOWNLOAD: &str = "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z";
 const OK_GREEN: Color = Color::rgb(0x4A, 0xDE, 0x80);
+const A_SHARE: &str = "M18,16.08c-0.76,0 -1.44,0.3 -1.96,0.77L8.91,12.7c0.05,-0.23 0.09,-0.46 0.09,-0.7s-0.04,-0.47 -0.09,-0.7l7.05,-4.11c0.54,0.5 1.25,0.81 2.04,0.81 1.66,0 3,-1.34 3,-3s-1.34,-3 -3,-3 -3,1.34 -3,3c0,0.24 0.04,0.47 0.09,0.7L8.04,9.81C7.5,9.31 6.79,9 6,9c-1.66,0 -3,1.34 -3,3s1.34,3 3,3c0.79,0 1.5,-0.31 2.04,-0.81l7.12,4.16c-0.05,0.21 -0.08,0.43 -0.08,0.65 0,1.61 1.31,2.92 2.92,2.92 1.61,0 2.92,-1.31 2.92,-2.92s-1.31,-2.92 -2.92,-2.92z";
 
 /// Bo'lim sahifasi holati (har ochilganda yangidan quriladi).
 pub struct SeasonPage {
@@ -545,28 +546,22 @@ impl Home {
                 Self::empty(A_PLAY, "Qismlar topilmadi")
             };
         }
-        const RANGE: usize = 50;
-        let chunks: Vec<&[Episode]> = eps.chunks(RANGE).collect();
-        let sel = if p.chunk.get() == usize::MAX { chunks.len().saturating_sub(1) } else { p.chunk.get().min(chunks.len().saturating_sub(1)) };
-        let mut shown: Vec<Episode> = chunks.get(sel).map(|c| c.to_vec()).unwrap_or_default();
-        if p.newest.get() {
-            shown.reverse();
-        }
-        // Oraliq chiplari va tartib tugmasi (gorizontal suriladi).
-        let mut chips: Vec<Element> = Vec::new();
-        if chunks.len() > 1 {
-            for (i, c) in chunks.iter().enumerate() {
-                let pc = p.chunk.clone();
-                chips.push(self.chip(&format!("{}–{}", c[0].number, c[c.len() - 1].number), i == sel, move || pc.set(i)));
+        // Kotlin `EpisodesTab`: HAMMA qismlar bitta ro'yxatda (guruhlar va tartib tugmasi yo'q), oxirgi qism tepada, 1-qism pastda.
+        let shown: Vec<Episode> = eps.iter().rev().cloned().collect();
+        let cur_id = p.pl.cur.get().map(|c| c.0);
+        // Ochilganda joriy qism ko'rinadigan joyga suriladi (bir marta).
+        if p.chunk.get() == usize::MAX {
+            if let Some(i) = cur_id.and_then(|id| shown.iter().position(|e| e.id == id)) {
+                p.scroll[1].set_offset((i.saturating_sub(1)) as f32 * 80.0 * density());
+                p.chunk.set(0);
             }
         }
-        let pn = p.newest.clone();
-        chips.push(self.chip(if p.newest.get() { "Yangilari tepada" } else { "Eskilari tepada" }, false, move || pn.set(!pn.get())));
-        let mut kids: Vec<Element> = vec![row(chips).gap(8.0).scroll(&p.chips_scroll).height(40.0).margin_each(0.0, 0.0, 0.0, 8.0)];
+        let mut kids: Vec<Element> = Vec::new();
         let live = self.dl.get();
         let exp = p.exp.get();
         for e in shown.iter() {
             let open = exp == e.id;
+            let is_cur = cur_id == Some(e.id);
             // Yuklash holati (barcha sifatlar bo'yicha).
             let (mut done, mut active, mut pct) = (false, false, 0);
             for q in &e.qualities {
@@ -578,35 +573,82 @@ impl Home {
                     }
                 }
             }
+            // Ko'rish holati: tomosha tarixidan (qism bo'yicha).
+            let (pos, dur) = crate::data::ep_progress(e.id);
+            let finished = dur > 0 && pos > dur - 5000;
+            let resumable = dur > 0 && pos >= 3000 && !finished;
+            let seen = !is_cur && finished;
+            let clock = |ms: i64| format!("{}:{:02}", ms / 60000, (ms / 1000) % 60);
+            let status = if resumable {
+                format!("{} dan davom etasiz", clock(pos))
+            } else if finished {
+                "Ko'rildi \u{2713}".to_string()
+            } else if is_cur {
+                "Hozir ijro etilmoqda".to_string()
+            } else {
+                "Ko'rilmagan".to_string()
+            };
+            let sub = if e.name.trim().is_empty() { status } else { format!("{status} \u{b7} {}", e.name.trim()) };
+            let dim = |c: Color| if seen { c.with_opacity(0.6) } else { c };
             let (pe, me, eid) = (p.exp.clone(), self.clone(), e.id);
             let urls: Vec<String> = e.urls.iter().map(|(_, u)| u.clone()).collect();
             let right: Element = if done {
                 icon(A_CHECK, 24.0).color(OK_GREEN)
             } else if active {
-                tx(format!("{pct}"), 12.0, ACCENT2).black()
+                stack(vec![
+                    column(vec![spinner(38.0, 3.0, ACCENT2)]).center(),
+                    column(vec![tx(format!("{pct}"), 10.0, ACCENT2).bold()]).center(),
+                ])
+                .width(38.0)
+                .height(38.0)
             } else {
-                icon(A_DOWNLOAD, 24.0).color(Color::WHITE)
+                icon(A_DOWNLOAD, 24.0).color(Color::rgba(255, 255, 255, 153))
             };
-            let sub = if e.name.trim().is_empty() { format!("{} ko'rish", format_count(e.views)) } else { format!("{} · {} ko'rish", e.name.trim(), format_count(e.views)) };
-            let mut col = vec![row(vec![
-                column(vec![tx(e.number.to_string(), 16.0, Color::WHITE).bold()]).center().width(48.0).height(48.0).radius(13.0).bg(Color::rgba(255, 255, 255, 18)),
-                column(vec![tx(format!("{}-qism", e.number), 15.5, Color::WHITE).bold(), tx(sub, 12.0, TEXT_DIM)]).weight(1.0),
-                column(vec![right]).center().width(48.0).height(48.0).on_click(move || {
-                    if pe.get() == eid {
-                        pe.set(0);
-                    } else {
-                        pe.set(eid);
-                        me.dl_watch(&urls);
-                    }
-                }),
+            let badge: Element = if is_cur {
+                column(vec![icon(A_PLAY, 26.0).color(Color::WHITE)]).center().width(48.0).height(48.0).radius(13.0).bg(ACCENT)
+            } else {
+                column(vec![tx(e.number.to_string(), 16.0, dim(Color::WHITE)).bold()]).center().width(48.0).height(48.0).radius(13.0).bg(CARD_ALT)
+            };
+            let share = {
+                let (s, ee) = (p.season.clone(), e.clone());
+                column(vec![icon(A_SHARE, 22.0).color(Color::rgba(255, 255, 255, 153))]).center().width(48.0).height(48.0).on_click(move || {
+                    let link = format!("https://arumediatvuz.pages.dev/s/{}/{}/{}", s.anime_id, s.season_id, ee.id);
+                    uzcoders::android::activity_call("share", &format!("{} \u{b7} {}-qism\n{link}", s.name, ee.number));
+                })
+            };
+            let (pp, ee) = (p.clone(), e.clone());
+            let play = row(vec![
+                badge,
+                column(vec![tx(format!("{}-qism", e.number), 15.5, if is_cur { ACCENT2 } else { dim(Color::WHITE) }).bold(), tx(sub, 12.0, dim(TEXT_DIM))]).weight(1.0),
             ])
             .gap(12.0)
             .align(Align::Center)
-            .padding_xy(12.0, 12.0)
+            .padding_each(12.0, 12.0, 0.0, 12.0)
+            .weight(1.0)
             .on_click({
-                let (me, pp, ee) = (self.clone(), p.clone(), e.clone());
+                let me = self.clone();
                 move || me.play_episode(&pp, &ee, None, None, true)
-            })];
+            });
+            let dl = column(vec![right]).center().width(48.0).height(48.0).on_click(move || {
+                if pe.get() == eid {
+                    pe.set(0);
+                } else {
+                    pe.set(eid);
+                    me.dl_watch(&urls);
+                }
+            });
+            let mut col = vec![row(vec![play, share, dl, gap_box(8.0, 0.0)]).align(Align::Center).height(72.0)];
+            if resumable {
+                let f = (pos as f32 / dur as f32).clamp(0.0, 1.0);
+                let w = (f * 1000.0).max(0.001);
+                col.push(
+                    row(vec![column(vec![]).weight(w).height(3.0).gradient(ACCENT, ACCENT2), column(vec![]).weight((1000.0 - w).max(0.001)).height(3.0)])
+                        .height(3.0)
+                        .radius(2.0)
+                        .bg(Color::rgba(255, 255, 255, 26))
+                        .margin_each(12.0, 0.0, 12.0, 10.0),
+                );
+            }
             if open {
                 let mut rows: Vec<Element> = Vec::new();
                 for q in &e.qualities {
@@ -614,7 +656,9 @@ impl Home {
                 }
                 col.push(column(rows).padding_each(12.0, 0.0, 12.0, 10.0));
             }
-            kids.push(Self::card_box(column(col)).margin_each(0.0, 0.0, 0.0, 8.0));
+            let card = column(col).radius(16.0);
+            let card = if is_cur { card.bg(ACCENT_TINT).border(1.0, ACCENT.with_opacity(0.5)) } else { card.bg(CARD).border(1.0, BORDER) };
+            kids.push(card.margin_each(0.0, 0.0, 0.0, 8.0));
         }
         kids.push(gap_box(0.0, 16.0));
         scroll_column(&p.scroll[1], kids).padding_each(16.0, 4.0, 16.0, 0.0)

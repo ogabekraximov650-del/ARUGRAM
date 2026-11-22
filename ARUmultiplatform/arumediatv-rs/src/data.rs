@@ -282,11 +282,25 @@ pub fn tg_port() -> i64 {
     0
 }
 
+static EP_HIST: std::sync::Mutex<Vec<(i64, i64, i64)>> = std::sync::Mutex::new(Vec::new());
+
+/// Qismning tarixdagi joyi va davomiyligi (ms); yo'q bo'lsa (0, 0). Birinchi (eng yangi) yozuv olinadi.
+pub fn ep_progress(ep_id: i64) -> (i64, i64) {
+    EP_HIST.lock().ok().and_then(|g| g.iter().find(|h| h.0 == ep_id).map(|h| (h.1, h.2))).unwrap_or((0, 0))
+}
+
 /// Kutubxona: (sevimlilar, tarix). Tarix bo'lim bo'yicha guruhlanadi (har bir bo'lim — eng oxirgi ko'rilgani).
 pub fn fetch_library(session: &str) -> Result<(Vec<Season>, Vec<HistoryItem>), String> {
     let fav = crate::api::get_json("/api/favorites", "", Some(session))?;
     let hist = crate::api::get_json("/api/history", "", Some(session))?;
     let favs = parse_seasons(&fav["items"].to_string());
+    // Qism darajasidagi tarix (Kotlin `lib.history.firstOrNull { it.epizodId == e.id }`): (epizod_id, joy ms, davomiylik ms).
+    if let Some(a) = hist["items"].as_array() {
+        let v: Vec<(i64, i64, i64)> = a.iter().map(|o| (num(&o["epizod_id"]), num(&o["position_ms"]), num(&o["duration_ms"]))).collect();
+        if let Ok(mut g) = EP_HIST.lock() {
+            *g = v;
+        }
+    }
     let mut items: Vec<HistoryItem> = hist["items"]
         .as_array()
         .map(|a| {

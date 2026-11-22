@@ -79,6 +79,21 @@ public class AruActivity extends UzActivity {
         return sb.toString();
     }
 
+    /** Ulashish oynasi (Kotlin `DeepLink.share`): matn + havola. */
+    public void share(final String text) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                try {
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType("text/plain");
+                    send.putExtra(Intent.EXTRA_TEXT, text);
+                    startActivity(Intent.createChooser(send, "Ulashish").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                } catch (Throwable e) {
+                }
+            }
+        });
+    }
+
     /** Bot havolasini TANLANGAN Telegram ilovasida ochadi: `spec` = "paket|https://t.me/<bot>?start=<token>" (paket bo'sh bo'lsa tizim tanlaydi). */
     public void tgOpen(final String spec) {
         runOnUiThread(new Runnable() {
