@@ -317,8 +317,15 @@ thread_local! {
     static DO_SEEDED: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(std::collections::HashSet::new());
 }
 
+/// UZ: Ample ish yurituvchisi manzili. Baza Supabase'da bo'lsa Ample (o'lik server) ISHLATILMAYDI — aks holda belgilar markazi javob bermay,
+/// "o'chirilgan fayl" belgilari noto'g'ri qo'yilib, hamma fayl "topilmadi" bo'lib qolardi. EN: ignored when the DB is Supabase.
+fn jobs_url_raw(env: &Env) -> String {
+    if supabase_cfg(env).is_some() { return String::new(); }
+    tg_secret(env, "JOBS_URL")
+}
+
 fn hub_url(env: &Env) -> Option<String> {
-    let u = tg_secret(env, "JOBS_URL");
+    let u = jobs_url_raw(env);
     let u = u.trim().trim_end_matches('/');
     if u.is_empty() { None } else { Some(u.to_string()) }
 }
@@ -3794,7 +3801,7 @@ async fn job_enqueue_cleanup(env: &Env, items: Vec<Value>) {
 
 /// Ample ish yurituvchisini uyg'otadi: u worker'ning `/api/vd/jobstep` ini ENCODE_TOKEN bilan takror chaqiradi (token xotirada, saqlanmaydi).
 pub(crate) async fn jobs_kick(env: &Env) -> bool {
-    let url = tg_secret(env, "JOBS_URL");
+    let url = jobs_url_raw(env);
     let token = tg_secret(env, "ENCODE_TOKEN");
     if url.trim().is_empty() || token.is_empty() {
         return false;
@@ -3809,7 +3816,7 @@ pub(crate) async fn jobs_kick(env: &Env) -> bool {
 
 /// Cron (har daqiqada): navbatda tugamagan ish bo'lsa ish yurituvchi qayta uyg'otiladi (u o'lib qolgan yoki uxlagan bo'lishi mumkin).
 async fn jobs_cron(env: &Env) {
-    if tg_secret(env, "JOBS_URL").trim().is_empty() {
+    if jobs_url_raw(env).trim().is_empty() {
         // Ish yurituvchi sozlanmagan: zaxira — worker o'zi cron'da bir qismni bajaradi (fayllar yetim qolmasin).
         let _ = job_step(env).await;
         return;

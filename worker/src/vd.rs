@@ -105,7 +105,7 @@ async fn meta_drop(name: &str) {
 /// tugaguncha yoki siqib chiqarilguncha qolishi mumkin, lekin ularsiz kalit yo'q). DO javob bermasa tekshiruv o'tkazib yuboriladi (hamma narsa
 /// "o'chirilgan" bo'lib qolmasin).
 fn del_key(name: &str) -> String {
-    format!("vddel_{name}")
+    format!("vddel2_{name}")
 }
 
 async fn tombstoned_many(env: &Env, names: &[String]) -> std::collections::HashSet<String> {

@@ -7784,3 +7784,8 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 
 ### Worker bazaga yaqin ishlaydi (2026-11-22)
 - Supabase Tokio'da (`ap-northeast-1`), har ilova so'rovi bazaga ketma-ket ko'p murojaat qiladi — masofa sekinlikning asosiy sababi (bazaning o'zi ~100 ms, tarjima 0,4 ms). `worker/wrangler.toml` `[env.production.placement] region = "aws:ap-northeast-1"`: worker Tokioda ishlaydi, bazaga murojaat tezlashadi. Sekin bo'lib qolsa: `placement` ni olib tashlash yoki Supabase regionini foydalanuvchilarga yaqinroqqa ko'chirish.
+
+### Supabase: o'lik Ample belgilar markazi "hamma fayl o'chirilgan" qilib qo'ygan edi (2026-11-22)
+- **Alomat:** ilovada video/rasm "HTTP 200 error fayl topilmadi" (yozishma videosi ham), bazada ma'lumot esa bor edi.
+- **Sabab:** `JOBS_URL` (o'lik Ample) sozlangan bo'lgani uchun belgilar markazi (`hub_url`) javob bermadi va zaxira DO'ga o'tildi; u "uzoq ishlatilmagan" deb so'ralgan HAR kalitni (shu jumladan `vddel_<nom>` — "o'chirilgan" belgisi) "hozir" qilib qo'ydi -> hamma fayl o'chirilgan hisoblandi. Har so'rov markazni 4 soniya kutgani ham sekinlikka sabab edi.
+- **Tuzatish:** Supabase sozlangan bo'lsa `jobs_url_raw` bo'sh (Ample ishlatilmaydi; fondagi ishlarni worker cron'i o'zi bajaradi); o'chirilgan belgisi kaliti `vddel2_` ga ko'chirildi (DO'da buzilgan eski belgilar e'tiborga olinmaydi).
