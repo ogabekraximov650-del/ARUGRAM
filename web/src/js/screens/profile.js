@@ -277,7 +277,7 @@ export function createProfile(page) {
         try {
           await uploadFile(blob, name);
         } catch (e) {
-          throw new Error(`${e?.message}` === 'tg_not_ready' ? 'Telegram hisobi ulanmagan' : "Tarmoq xatosi — qaytadan urinib ko'ring");
+          throw new Error(e?.message || "Tarmoq xatosi — qaytadan urinib ko'ring");
         }
         let j;
         try {

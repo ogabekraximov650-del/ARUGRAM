@@ -12,7 +12,7 @@ import { toast } from '../ui.js';
 
 export { openBilling } from './billing.js'; // openBilling({ startPage }) — 0: To'ldirish, 1: Obuna
 export { openTelegramAccount, isTelegramAuthorized, checkTelegram } from '../tg/account.js';
-export { uploadFile } from '../tg/media.js'; // profil rasmi (ilovadagi `TelegramService.uploadFile`)
+export { uploadFile } from '../vd/upload.js'; // profil rasmi (ilovadagi `VdUpload`: Telegram hisobi kerak emas)
 
 export { openSupport } from './support.js';
 export { openMyPacks } from './packs.js';
