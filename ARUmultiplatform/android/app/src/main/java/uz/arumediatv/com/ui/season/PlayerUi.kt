@@ -150,7 +150,7 @@ fun PlayerControls(
 ) {
     var visible by remember { mutableStateOf(true) }
     var bump by remember { mutableLongStateOf(0L) }
-    // Ikki marta bosib sek: har bosish 5 soniya, jamlanib boradi (Flutter bilan bir xil); sek qisqa tinchlikdan keyin bir marta bajariladi.
+    // Ikki marta bosib sek: har bosish 10 soniya, jamlanib boradi (Flutter bilan bir xil); sek qisqa tinchlikdan keyin bir marta bajariladi.
     var leftAccum by remember { mutableIntStateOf(0) }
     var rightAccum by remember { mutableIntStateOf(0) }
     var pendingSec by remember { mutableIntStateOf(0) }
@@ -196,8 +196,8 @@ fun PlayerControls(
                         // Haqiqiy chegaralar ichida: ko'rsatilgan son bilan bajariladigan sakrash bir xil bo'ladi.
                         val eff = player.positionMs + pendingSec * 1000L
                         val dur = player.durationMs
-                        val add = if (left) minOf(5L, (eff / 1000).coerceAtLeast(0)).toInt()
-                        else if (dur > 0) minOf(5L, ((dur - eff) / 1000).coerceAtLeast(0)).toInt() else 5
+                        val add = if (left) minOf(10L, (eff / 1000).coerceAtLeast(0)).toInt()
+                        else if (dur > 0) minOf(10L, ((dur - eff) / 1000).coerceAtLeast(0)).toInt() else 10
                         if (add > 0) {
                             if (left) { leftAccum += add; rightAccum = 0; pendingSec -= add }
                             else { rightAccum += add; leftAccum = 0; pendingSec += add }
