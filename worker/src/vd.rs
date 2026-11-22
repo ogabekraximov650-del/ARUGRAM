@@ -1545,6 +1545,104 @@ pub(crate) async fn up_complete(env: &Env, me: i64, admin: bool, body: &Value) -
     ok(json!({"ok": true, "kick": k}))
 }
 
+// ── Katta fayl: telefon/brauzer 18 MiB bo'laklarni WORKER orqali yuklaydi (R2 va Actions kerak emas) ──
+
+/// `POST /api/vd/cup/init {name, size, key}` (admin yoki o'z `chat_`/`avatar_` fayli): yangi yuklash boshlanadi; kalitni mijoz o'zi tanlaydi
+/// va har bo'lakni shu kalit bilan (AES-128-CTR, fayldagi o'rni bilan) shifrlab yuboradi. Qaytadi: `{ok, chunk, done}` — `done` nechta bo'lak
+/// allaqachon yuklangan (uzilgan yuklash shu joydan davom etadi). Bo'laklar KETMA-KET yuboriladi.
+pub(crate) async fn cup_init(env: &Env, me: i64, admin: bool, body: &Value) -> Result<Response> {
+    ensure(env).await?;
+    let name = body["name"].as_str().unwrap_or("").to_string();
+    let size = jint(body, "size");
+    let key = body["key"].as_str().unwrap_or("").to_ascii_lowercase();
+    if !upload_allowed(&name, me, admin) || size <= 0 || size > 5 * 1024 * 1024 * 1024 - CHUNK as i64 || !valid_file_key(&key) {
+        return bad("so'rov");
+    }
+    if let Some(m) = meta_one(env, &name).await.filter(|m| m["state"].as_str() == Some("ready")) {
+        if jint(&m, "size") == size && m["key"].as_str() == Some(key.as_str()) {
+            return ok(json!({"ok": true, "chunk": CHUNK, "done": chunks_of(size), "ready": true}));
+        }
+    }
+    // Shu nom/kalit/hajm bilan yuklash allaqachon boshlangan bo'lsa — davom ettiriladi.
+    if let Some(r) = turso_exec(env, "SELECT size,vkey,chunk_ids FROM vd_queue WHERE name=? AND state='cup'", vec![TursoArg::text(&name)]).await?.pipe_first() {
+        if jint(&r, "size") == size && r["vkey"].as_str() == Some(key.as_str()) {
+            let done = ids(r["chunk_ids"].as_str().unwrap_or("")).len();
+            return ok(json!({"ok": true, "chunk": CHUNK, "done": done}));
+        }
+    }
+    turso_exec(env,
+        "INSERT INTO vd_queue (name,size,chunks,vkey,state,layout,chunk_ids,msg_ids,created) VALUES (?,?,?,?,'cup','chunks','','',?) \
+         ON CONFLICT(name) DO UPDATE SET size=excluded.size, chunks=excluded.chunks, vkey=excluded.vkey, state='cup', layout='chunks', \
+           chunk_ids='', msg_ids='', lease=0, tries=0, created=excluded.created",
+        vec![TursoArg::text(&name), TursoArg::int(size), TursoArg::int(chunks_of(size)), TursoArg::text(&key), TursoArg::int(now_ms())]).await?;
+    ok(json!({"ok": true, "chunk": CHUNK, "done": 0}))
+}
+
+/// `PUT /api/vd/cup/chunk?name=<nom>&i=<raqam>` (tana = shifrlangan bo'lak: 18 MiB, oxirgisi qolgani): Telegram'ga `.bin` hujjat sifatida
+/// yuboriladi. Bo'laklar tartib bilan (`i` = hozirgacha yuklanganlar soni); allaqachon yuklangan bo'lak qayta yuborilsa — mavjud natija.
+pub(crate) async fn cup_chunk(env: &Env, me: i64, admin: bool, name: &str, i: u64, mut req: Request) -> Result<Response> {
+    if !upload_allowed(name, me, admin) {
+        return json_resp(&json!({"error": "ruxsat yo'q"}), 403);
+    }
+    ensure(env).await?;
+    let Some(row) = turso_exec(env, "SELECT id,size,chunks,chunk_ids,msg_ids FROM vd_queue WHERE name=? AND state='cup'", vec![TursoArg::text(name)]).await?.pipe_first() else {
+        return json_resp(&json!({"error": "holat"}), 409);
+    };
+    let (size, total) = (jint(&row, "size") as u64, jint(&row, "chunks") as u64);
+    let (fids, mids) = (row["chunk_ids"].as_str().unwrap_or("").to_string(), row["msg_ids"].as_str().unwrap_or("").to_string());
+    let have = ids(&fids).len() as u64;
+    if i >= total {
+        return bad("bo'lak raqami");
+    }
+    if i < have {
+        return ok(json!({"ok": true, "done": have, "existing": true}));
+    }
+    if i > have {
+        return json_resp(&json!({"error": "tartib", "done": have}), 409);
+    }
+    let want = CHUNK.min(size - i * CHUNK);
+    let bytes = req.bytes().await?;
+    if bytes.len() as u64 != want {
+        return json_resp(&json!({"error": format!("hajm mos emas ({} != {want})", bytes.len())}), 422);
+    }
+    let vid = jint(&row, "id");
+    let (stem, ext) = doc_stem(name, vid);
+    let (fid, mid) = match tg_send_document(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), vd_channel(env), &format!("{stem}_{}.{ext}", i + 1), "", &bytes).await {
+        Ok(v) => v,
+        Err(e) => return json_resp(&json!({"error": e.to_string()}), 502),
+    };
+    let (nf, nm) = if have == 0 { (fid.clone(), mid.to_string()) } else { (format!("{fids},{fid}"), format!("{mids},{mid}")) };
+    // Ikki marta yuborilgan bir xil bo'lak yozuvni buzmasin: faqat hozirgi holat o'zgarmagan bo'lsa yoziladi.
+    let upd = turso_exec(env, "UPDATE vd_queue SET chunk_ids=?, msg_ids=? WHERE name=? AND state='cup' AND chunk_ids=? RETURNING name",
+        vec![TursoArg::text(&nf), TursoArg::text(&nm), TursoArg::text(name), TursoArg::text(&fids)]).await?;
+    if first_row(&upd).is_none() {
+        let _ = tg_api_tok(&tg_secret(env, "TELEGRAM_BOT_TOKEN"), "deleteMessage", json!({"chat_id": vd_channel(env), "message_id": mid})).await;
+        return json_resp(&json!({"error": "tartib"}), 409);
+    }
+    ok_nostore(json!({"ok": true, "done": have + 1}))
+}
+
+/// `POST /api/vd/cup/complete {name}`: hamma bo'lak yuklangan bo'lsa fayl `ready` bo'ladi (egasiga ko'chadi, kesh ma'lumoti yoziladi).
+pub(crate) async fn cup_complete(env: &Env, me: i64, admin: bool, body: &Value) -> Result<Response> {
+    ensure(env).await?;
+    let name = body["name"].as_str().unwrap_or("").to_string();
+    if !upload_allowed(&name, me, admin) {
+        return bad("nom");
+    }
+    let Some(row) = turso_exec(env, "SELECT size,chunks,vkey,chunk_ids FROM vd_queue WHERE name=? AND state='cup'", vec![TursoArg::text(&name)]).await?.pipe_first() else {
+        return json_resp(&json!({"error": "holat"}), 409);
+    };
+    let (size, total) = (jint(&row, "size"), jint(&row, "chunks") as usize);
+    let fids = row["chunk_ids"].as_str().unwrap_or("").to_string();
+    if ids(&fids).len() != total {
+        return json_resp(&json!({"error": format!("bo'laklar to'liq emas ({}/{total})", ids(&fids).len())}), 422);
+    }
+    turso_exec(env, "UPDATE vd_queue SET state='ready' WHERE name=? AND state='cup'", vec![TursoArg::text(&name)]).await?;
+    let _ = try_attach(env, &name).await;
+    meta_put(&name, &json!({"state": "ready", "size": size, "chunks": total, "key": row["vkey"], "chunk_ids": fids})).await;
+    ok_nostore(json!({"ok": true}))
+}
+
 // ── Ko'rish: Telegram -> Cloudflare kesh (oyna = 1 bo'lak) ──
 
 async fn chunk_stream(env: &Env, tg_file_id: &str, expect: u64) -> Result<web_sys::ReadableStream> {

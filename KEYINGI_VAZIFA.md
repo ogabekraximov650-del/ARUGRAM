@@ -7764,3 +7764,11 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 - **Sabab (taxmin, jurnalni ko'rib bo'lmadi):** Telegram eski xabarni tahrirlash/o'chirishga ruxsat bermagan (48 soat); `del`/`del_many` natijasi jim yutilgan.
 - **Tuzatish:** (1) ro'yxat xabari 24 soatdan eskirsa tahrirlanmaydi — yangisi yuborilib pin qilinadi va eskisi hali o'chadigan paytda o'chiriladi (`manifest_at`); (2) o'chish natijasi endi tekshiriladi (`Tg::del_report`): o'chmaganlar `orphans` ro'yxatiga (id, vaqt) yoziladi, sababi `del_err` da, har ~30 daqiqada qayta uriniladi (`retry_orphans`); (3) `usage` javobida `tg_orphans`, `tg_orphan_oldest_ms`, `tg_del_error` ko'rinadi. Hammasi `jr_snap.json` da saqlanadi.
 - **Joylash:** Ample'dagi servis qo'lda qayta joylanmaguncha eski xulq saqlanadi. Kanaldagi allaqachon qolgan eski nusxalarni qo'lda o'chirish kerak (bot ularni o'chira olmasa).
+
+## Katta fayllar WORKER orqali 18 MiB bo'laklarda yuklanadi (R2'siz) (2026-11-22)
+
+- **Talab (foydalanuvchi):** ilova va veb'da qo'lda yuklanadigan hamma narsa worker orqali, R2siz.
+- **Worker** (`vd.rs`, `lib.rs`): `POST /api/vd/cup/init {name,size,key}` (kalitni mijoz tanlaydi), `PUT /api/vd/cup/chunk?name=&i=` (shifrlangan 18 MiB bo'lak, KETMA-KET; worker uni Telegram'ga `.bin` hujjat qilib saqlaydi, `vd_queue.chunk_ids/msg_ids` ga tartib bilan yozadi, `state='cup'`), `POST /api/vd/cup/complete` (hamma bo'lak bor bo'lsa `ready`, egasiga ko'chadi, kesh ma'lumoti yoziladi). Uzilgan yuklash `init` dagi `done` dan davom etadi. Kichik fayl (<= 18 MiB) oldingidek `PUT /api/vd/small`.
+- **Mijozlar:** `web/src/js/vd/upload.js`, `ARUmultiplatform/android/.../vd/VdUpload.kt` — R2 yo'li olib tashlandi. Eski `/api/vd/up/init|complete` (R2) worker'da qoldi, lekin ishlatilmaydi.
+- **Cheklov:** bo'laklar ketma-ket (parallel emas) — tezlik bitta oqimga teng; tugallanmagan `cup` qatorlari avtomatik tozalanmaydi (Telegram'dagi bo'laklari qoladi).
+- **Muhim:** `ep_*`/`orig_*` fayllari endi `vdstore.yml` (R2 -> Telegram) navbatidan o'tmaydi — to'g'ridan-to'g'ri `ready` bo'ladi.

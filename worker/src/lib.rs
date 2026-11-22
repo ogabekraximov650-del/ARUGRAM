@@ -15276,6 +15276,21 @@ async fn vd_user_route(mut req: Request, env: &Env, path: &str, method: Method) 
             let name = req.url()?.query_pairs().find(|(k, _)| k == "name").map(|(_, v)| v.to_string()).unwrap_or_default();
             vd::small(env, me, admin, &name, req).await
         }
+        // Katta fayl: 18 MiB bo'laklar worker orqali Telegram'ga (R2 va Actions kerak emas).
+        (Method::Post, "/api/vd/cup/init") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::cup_init(env, me, admin, &body).await
+        }
+        (Method::Put, "/api/vd/cup/chunk") => {
+            let u = req.url()?;
+            let q = |k: &str| u.query_pairs().find(|(a, _)| a == k).map(|(_, v)| v.to_string()).unwrap_or_default();
+            let (name, i) = (q("name"), q("i").parse::<u64>().unwrap_or(u64::MAX));
+            vd::cup_chunk(env, me, admin, &name, i, req).await
+        }
+        (Method::Post, "/api/vd/cup/complete") => {
+            let body: Value = req.json().await.unwrap_or(json!({}));
+            vd::cup_complete(env, me, admin, &body).await
+        }
         (Method::Post, "/api/vd/up/init") => {
             let body: Value = req.json().await.unwrap_or(json!({}));
             vd::up_init(env, me, admin, &body).await

@@ -4,6 +4,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okio.BufferedSink
 import org.json.JSONObject
 import uz.arumediatv.com.BuildConfig
@@ -105,31 +106,55 @@ object VdUpload {
         val f = File(path)
         if (!f.isFile || f.length() <= 0) return Result(null, "Fayl o'qilmadi")
         if (f.length() <= VdCtr.CHUNK) smallUpload(f, name, bearer, onProgress)?.let { return it }
+        // Katta fayl: yangi tasodifiy kalit bilan har 18 MiB bo'lak shifrlanib KETMA-KET WORKER orqali yuboriladi (R2 va Actions kerak emas);
+        // worker har bo'lakni Telegram'ga saqlaydi. Uzilsa shu joydan davom etadi.
         val key = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val keyHex = key.joinToString("") { "%02x".format(it) }
         val base = BuildConfig.API_BASE
-        val init = Http.client.callJson("$base/api/vd/up/init", "POST",
-            JSONObject().put("name", name).put("size", f.length()).put("key", keyHex), bearer)
-        val url = init.json?.optString("url").orEmpty()
-        if (!init.ok || url.isEmpty()) return Result(null, (init.error ?: "Yuklash boshlanmadi (HTTP ${init.code})") + if (smallNote.isNotEmpty()) " [$smallNote]" else "")
-        // R2 havolasi imzolangan — ilova imzosi kerak emas (oddiy mijoz), uzoq yuklash uchun cheklovsiz.
-        val plain: OkHttpClient = OkHttpClient.Builder().connectTimeout(20, TimeUnit.SECONDS).writeTimeout(10, TimeUnit.MINUTES)
-            .readTimeout(10, TimeUnit.MINUTES).callTimeout(0, TimeUnit.SECONDS).build()
-        var last = "xato"
-        repeat(4) { attempt ->
-            try {
-                plain.newCall(Request.Builder().url(url).put(EncryptedBody(f, key, onProgress)).build()).execute().use { r ->
-                    if (r.isSuccessful) {
-                        val done = Http.client.callJson("$base/api/vd/up/complete", "POST", JSONObject().put("name", name), bearer)
-                        return if (done.ok) { keys[name] = keyHex; Result(keyHex, null) } else Result(null, done.error ?: "Tasdiqlanmadi (HTTP ${done.code})")
+        val size = f.length()
+        val init = Http.client.callJson("$base/api/vd/cup/init", "POST", JSONObject().put("name", name).put("size", size).put("key", keyHex), bearer)
+        if (!init.ok) return Result(null, (init.error ?: "Yuklash boshlanmadi (HTTP ${init.code})") + if (smallNote.isNotEmpty()) " [$smallNote]" else "")
+        if (init.json?.optBoolean("ready") == true) { keys[name] = keyHex; onProgress(size, size); return Result(keyHex, null) }
+        val chunk = VdCtr.CHUNK
+        val total = ((size + chunk - 1) / chunk).toInt()
+        var done = init.json?.optInt("done", 0) ?: 0
+        onProgress(minOf(size, done * chunk), size)
+        val client = Http.client.newBuilder().writeTimeout(5, TimeUnit.MINUTES).readTimeout(5, TimeUnit.MINUTES).callTimeout(0, TimeUnit.SECONDS).build()
+        java.io.RandomAccessFile(f, "r").use { raf ->
+            while (done < total) {
+                val off = done * chunk
+                val buf = ByteArray(minOf(chunk, size - off).toInt())
+                raf.seek(off)
+                raf.readFully(buf)
+                val enc = VdCtr.cipherAt(key, off).update(buf)
+                var ok = false
+                var last = "xato"
+                for (attempt in 0 until 5) {
+                    if (ok) break
+                    try {
+                        val req = Request.Builder()
+                            .url("$base/api/vd/cup/chunk?name=" + java.net.URLEncoder.encode(name, "UTF-8") + "&i=$done")
+                            .header("Authorization", "Bearer $bearer")
+                            .put(enc.toRequestBody("application/octet-stream".toMediaType())).build()
+                        client.newCall(req).execute().use { r ->
+                            val j = runCatching { JSONObject(r.body?.string().orEmpty()) }.getOrNull()
+                            when {
+                                r.isSuccessful && j?.optBoolean("ok") == true -> { ok = true; done = maxOf(done + 1, j.optInt("done", 0)) }
+                                r.code == 409 && j?.has("done") == true -> { done = j.optInt("done"); ok = true }
+                                r.code == 401 || r.code == 403 -> return Result(null, j?.optString("error")?.takeIf { it.isNotEmpty() } ?: "Ruxsat yo'q")
+                                else -> last = "HTTP ${r.code} ${j?.optString("error").orEmpty().take(120)}"
+                            }
+                        }
+                    } catch (e: Exception) {
+                        last = e.message ?: e.javaClass.simpleName
                     }
-                    last = "R2 HTTP ${r.code}"
+                    if (!ok) Thread.sleep(2000L * (attempt + 1))
                 }
-            } catch (e: Exception) {
-                last = e.message ?: e.javaClass.simpleName
+                if (!ok) return Result(null, "Yuklab bo'lmadi: $last")
+                onProgress(minOf(size, done * chunk), size)
             }
-            Thread.sleep(2000L * (attempt + 1))
         }
-        return Result(null, "Yuklab bo'lmadi: $last")
+        val fin = Http.client.callJson("$base/api/vd/cup/complete", "POST", JSONObject().put("name", name), bearer)
+        return if (fin.ok) { keys[name] = keyHex; Result(keyHex, null) } else Result(null, fin.error ?: "Tasdiqlanmadi (HTTP ${fin.code})")
     }
 }
