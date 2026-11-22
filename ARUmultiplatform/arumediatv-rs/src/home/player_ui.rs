@@ -661,7 +661,7 @@ impl Home {
             me.pl_set_fullscreen(&pc, on);
         });
         let pc = p.clone();
-        let gear = Self::pl_icon(V_GEAR, 22.0, if fullscreen { 9.0 } else { 4.0 }, move || pc.pl.settings.set(true));
+        let gear = Self::pl_icon(V_GEAR, 22.0, if fullscreen { 9.0 } else { 4.0 }, { let me = self.clone(); move || me.pl_open_settings(&pc) });
 
         if fullscreen {
             let (me, pc) = (self.clone(), p.clone());
@@ -723,73 +723,126 @@ impl Home {
         stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 90)).on_click(move || pc.pl.ep_list.set(false)), row(vec![spacer(), panel.margin_each(0.0, 16.0, 16.0, 16.0)])])
     }
 
-    /// Pleyer sozlamalari: sifat, avto-keyingi, intro avto o'tkazish, uyqu taymeri.
+    /// Sozlamalarni ochadi (yuklab olish qatorlari holati kuzatuvga qo'shiladi).
+    fn pl_open_settings(self: &Rc<Self>, p: &Rc<SeasonPage>) {
+        if let Some(c) = p.pl.cur.get() {
+            if let Some(e) = p.eps.get().iter().find(|e| e.id == c.0) {
+                let urls: Vec<String> = e.urls.iter().map(|(_, u)| u.clone()).collect();
+                self.dl_watch(&urls);
+            }
+        }
+        p.pl.settings.set(true);
+    }
+
+    /// Kotlin `Chip`: tanlangan — `ACCENT`->`ACCENT2` gradient, aks holda karta fon + chegara; min. balandlik 40 dp.
+    fn sheet_chip(label: &str, on: bool, f: impl Fn() + 'static) -> Element {
+        let e = column(vec![tx(label, 13.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 191) }).bold()]).center().height(40.0).padding_xy(16.0, 0.0).radius(12.0).on_click(f);
+        if on { e.gradient(ACCENT, ACCENT2) } else { e.bg(CARD).border(1.0, BORDER) }
+    }
+
+    /// Chiplarni qatorlarga o'raydi (Kotlin `FlowRow`, oraliq 8 dp): har bir chip kengligi matndan hisoblanadi.
+    fn flow_chips(items: Vec<(String, bool, Box<dyn Fn()>)>, avail: f32) -> Element {
+        thread_local! {
+            static BOLD: Font = Font::parse(include_bytes!("../../assets/fonts/Roboto-Bold.ttf")).expect("Roboto Bold");
+        }
+        let mut rows: Vec<Vec<Element>> = vec![Vec::new()];
+        let mut used = 0.0f32;
+        for (label, on, f) in items {
+            let w = BOLD.with(|b| b.text_width(&label, 13.0)).ceil() + 32.0 + 2.0;
+            if used > 0.0 && used + 8.0 + w > avail {
+                rows.push(Vec::new());
+                used = 0.0;
+            }
+            used += if used > 0.0 { 8.0 + w } else { w };
+            rows.last_mut().unwrap().push(Self::sheet_chip(&label, on, move || f()));
+        }
+        column(rows.into_iter().map(|r| row(r).gap(8.0)).collect()).gap(8.0)
+    }
+
+    /// Kotlin `PlayerSettingsSheet`: pastdan ochiladigan oyna (to'liq ekranda — o'ngdagi panel): Sifat, Yuklab olish, Tezlik, Avtomatik, Uyqu taymeri.
     pub(super) fn player_settings(self: &Rc<Self>, p: &Rc<SeasonPage>) -> Element {
         let cur = p.pl.cur.get();
         let ep = cur.as_ref().and_then(|c| p.eps.get().iter().find(|e| e.id == c.0).cloned());
-        let mut kids: Vec<Element> = vec![tx("Sozlamalar", 18.0, Color::WHITE).bold(), gap_box(0.0, 12.0)];
+        let (sw, sh) = window_dp();
+        let fullscreen = p.pl.fullscreen.get();
+        let pw = if fullscreen { (sw * 0.66).min(560.0) } else { sw };
+        let avail = pw - 40.0;
+        let title = |t: String| tx(t, 12.0, ACCENT2).bold().letter_spacing(1.0).padding_each(0.0, 16.0, 0.0, 8.0);
+        let mut kids: Vec<Element> = Vec::new();
         if let (Some(e), Some((_, q, _))) = (&ep, &cur) {
-            kids.push(tx("Sifat", 13.0, Color::WHITE).bold());
-            kids.push(gap_box(0.0, 8.0));
-            let chips: Vec<Element> = e
-                .qualities
-                .iter()
-                .map(|qq| {
-                    let (me, pc, e2, q2) = (self.clone(), p.clone(), e.clone(), qq.clone());
-                    let size = e.size(qq);
-                    let label = format!("{}{}", e.quality_title(qq), if size > 0 { format!(" · {}", crate::data::format_bytes(size)) } else { String::new() });
-                    self.chip(&label, qq == q, move || {
-                        pc.pl.settings.set(false);
-                        let pos = pc.pl.player.borrow().as_ref().map(|x| x.status().pos_ms).unwrap_or(0);
-                        me.play_episode(&pc, &e2, Some(q2.clone()), Some(pos), true);
+            if !e.qualities.is_empty() {
+                kids.push(title("Sifat".into()));
+                let items = e
+                    .qualities
+                    .iter()
+                    .map(|qq| {
+                        let (me, pc, e2, q2) = (self.clone(), p.clone(), e.clone(), qq.clone());
+                        let size = e.size(qq);
+                        let label = format!("{}{}", e.quality_title(qq), if size > 0 { format!(" · {}", crate::data::format_bytes(size)) } else { String::new() });
+                        let f: Box<dyn Fn()> = Box::new(move || {
+                            pc.pl.settings.set(false);
+                            let pos = pc.pl.player.borrow().as_ref().map(|x| x.status().pos_ms).unwrap_or(0);
+                            me.play_episode(&pc, &e2, Some(q2.clone()), Some(pos), true);
+                        });
+                        (label, qq == q, f)
                     })
-                })
-                .collect();
-            kids.push(row(chips).gap(8.0).scroll(&self.chips_scroll2).height(44.0));
-            kids.push(gap_box(0.0, 12.0));
+                    .collect();
+                kids.push(Self::flow_chips(items, avail));
+                kids.push(title("Yuklab olish".into()));
+                for qq in &e.qualities {
+                    kids.push(self.quality_row(e.url(qq), e.quality_title(qq), e.size(qq)));
+                }
+            }
         }
-        let toggle = |label: &str, st: &State<bool>| {
-            let s2 = st.clone();
-            row(vec![tx(label, 14.0, Color::WHITE).weight(1.0), Self::switch(st.get(), move || s2.set(!s2.get()))]).align(Align::Center).padding_xy(2.0, 8.0)
-        };
-        kids.push(tx("Tezlik", 13.0, Color::WHITE).bold());
-        kids.push(gap_box(0.0, 8.0));
-        let speeds: Vec<Element> = [(50u32, "0.5x"), (75, "0.75x"), (100, "1x"), (125, "1.25x"), (150, "1.5x"), (200, "2x")]
+        kids.push(title("Tezlik".into()));
+        let speeds = [(50u32, "0.5x"), (75, "0.75x"), (100, "Oddiy"), (125, "1.25x"), (150, "1.5x"), (200, "2.0x")]
             .iter()
             .map(|(v, l)| {
-                let pc = p.clone();
-                let v = *v;
-                self.chip(l, pc.pl.speed.get() == v, move || {
+                let (pc, v) = (p.clone(), *v);
+                let f: Box<dyn Fn()> = Box::new(move || {
                     pc.pl.speed.set(v);
                     if let Some(pl) = pc.pl.player.borrow().as_ref() {
                         pl.set_speed(v as f32 / 100.0);
                     }
-                })
+                });
+                (l.to_string(), p.pl.speed.get() == v, f)
             })
             .collect();
-        kids.push(row(speeds).gap(8.0).scroll(&self.chips_scroll2).height(44.0));
-        kids.push(gap_box(0.0, 12.0));
-        kids.push(toggle("Avto keyingi qism", &p.pl.auto_next));
+        kids.push(Self::flow_chips(speeds, avail));
+        let toggle = |label: &str, st: &State<bool>| {
+            let (s2, s3) = (st.clone(), st.clone());
+            row(vec![tx(label, 15.0, Color::WHITE).weight(1.0), Self::switch(st.get(), move || s2.set(!s2.get()))]).align(Align::Center).height(52.0).on_click(move || s3.set(!s3.get()))
+        };
+        kids.push(title("Avtomatik".into()));
+        kids.push(toggle("Keyingi qismni avto ochish", &p.pl.auto_next));
         kids.push(toggle("Introni avto o'tkazish", &p.pl.auto_skip));
-        kids.push(tx("Uyqu taymeri", 13.0, Color::WHITE).bold().padding_each(0.0, 8.0, 0.0, 8.0));
-        let timers: Vec<Element> = [(0, "O'chiq"), (15, "15 daq"), (30, "30 daq"), (60, "60 daq")]
-            .iter()
-            .map(|(m, l)| {
-                let pc = p.clone();
-                let m = *m;
-                let on = m == 0 && pc.pl.sleep_at.get().is_none();
-                self.chip(l, on, move || {
-                    pc.pl.sleep_at.set(if m == 0 { None } else { Some(Instant::now() + std::time::Duration::from_secs(m as u64 * 60)) });
-                    pc.pl.settings.set(false);
-                })
-            })
-            .collect();
-        kids.push(row(timers).gap(8.0).scroll(&self.chips_scroll2).height(44.0));
+        let left = p.pl.sleep_at.get().map(|t| t.saturating_duration_since(Instant::now()).as_secs() / 60 + 1);
+        kids.push(title(match left {
+            Some(m) => format!("Uyqu taymeri \u{b7} {m} daqiqa qoldi"),
+            None => "Uyqu taymeri".into(),
+        }));
+        let mut timers: Vec<(String, bool, Box<dyn Fn()>)> = Vec::new();
         let pc = p.clone();
-        kids.push(row(vec![spacer(), self.chip("Yopish", true, move || pc.pl.settings.set(false))]).padding_each(0.0, 14.0, 0.0, 0.0));
-        let panel = scroll_column(&p.pl.set_scroll, kids).flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).width(380.0).margin_each(0.0, 12.0, 0.0, 12.0);
+        timers.push(("O'chiq".into(), left.is_none(), Box::new(move || pc.pl.sleep_at.set(None))));
+        for m in [15u64, 30, 45, 60, 90] {
+            let pc = p.clone();
+            timers.push((format!("{m} daqiqa"), false, Box::new(move || {
+                pc.pl.sleep_at.set(Some(Instant::now() + std::time::Duration::from_secs(m * 60)));
+                pc.pl.settings.set(false);
+            })));
+        }
+        kids.push(Self::flow_chips(timers, avail));
+        let handle = row(vec![column(vec![]).width(32.0).height(4.0).radius(2.0).bg(Color::rgba(255, 255, 255, 71))]).center().padding_each(0.0, 12.0, 0.0, 4.0);
+        let body = scroll_column(&p.pl.set_scroll, kids).padding_each(20.0, 0.0, 20.0, 28.0 + safe_insets().bottom).grow(1.0);
         let pc = p.clone();
-        stack(vec![column(vec![]).bg(Color::rgba(0, 0, 0, 45)).on_click(move || pc.pl.settings.set(false)), row(vec![spacer(), panel, spacer()])])
+        let scrim = column(vec![]).bg(Color::rgba(0, 0, 0, 102)).on_click(move || pc.pl.settings.set(false));
+        if fullscreen {
+            let panel = column(vec![handle, body]).width(pw).height(sh).bg(SURFACE).radius(22.0);
+            stack(vec![scrim, row(vec![spacer(), panel])])
+        } else {
+            let panel = column(vec![handle, body]).bg(SURFACE).radius(28.0).height(sh * 0.9);
+            stack(vec![scrim, column(vec![spacer(), panel])])
+        }
     }
 }
 
