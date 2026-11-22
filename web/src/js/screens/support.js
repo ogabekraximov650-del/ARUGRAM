@@ -17,6 +17,7 @@
 // (admin paneli ko'chirilmaydi).
 
 import * as tgMedia from '../tg/media.js';
+import { uploadFile as vdUpload } from '../vd/upload.js';
 import { push, back } from '../router.js';
 import { icon, spinner, toast, haptic, avatarHtml, C } from '../ui.js';
 import { esc } from '../format.js';
@@ -1392,7 +1393,7 @@ function buildChat(el, opts = {}) {
     render();
     toBottom();
     try {
-      const up = async () => tgMedia.uploadFile(file, name, { waitForClaim: false, onProgress: (sent, total) => ring.set(total > 0 ? sent / total : 0) });
+      const up = async () => vdUpload(file, name, { waitForClaim: false, onProgress: (sent, total) => ring.set(total > 0 ? sent / total : 0) });
       let res;
       try {
         res = await up();

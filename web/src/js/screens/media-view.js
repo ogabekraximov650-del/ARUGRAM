@@ -13,6 +13,8 @@
 //   isTgNotReady(e), tgRetry() — Telegram'ga hali kirilmagan holat.
 
 import * as tgMedia from '../tg/media.js';
+import { vdInfo, openVdFile } from '../vd/store.js';
+import { guessType } from '../tg/ctr.js';
 import { push } from '../router.js';
 import { icon, spinner, bindAppBar } from '../ui.js';
 import { esc } from '../format.js';
@@ -25,12 +27,25 @@ export function isTgNotReady(e) {
   return m.includes('tg_not_ready');
 }
 
-/** Faylni Telegram'dan oladi (ochilgan, deshifrlangan `blob:` manzil). */
+/** Yangi tizimdan (`vd`, Telegram hisobi kerak emas): fayl bor bo'lsa `blob:` manzil, aks holda `null`. */
+async function vdBlobUrl(name, opts = {}) {
+  let info = null;
+  try { info = await vdInfo(name); } catch (_) { return null; }
+  if (!info || info.size > 300 * 1024 * 1024) return null;
+  const f = openVdFile(info);
+  try {
+    const u8 = await f.read(0, info.size);
+    const t = guessType(name);
+    return URL.createObjectURL(new Blob([u8], { type: t === 'application/octet-stream' ? (opts.fallbackType || t) : t }));
+  } finally { f.close(); }
+}
+
+/** Faylni avval yangi tizimdan, topilmasa Telegram'dan oladi (ochilgan, deshifrlangan `blob:` manzil). */
 export function loadMedia(name, opts = {}) {
   const key = `${name}`;
   let p = cache.get(key);
   if (!p) {
-    p = Promise.resolve().then(() => tgMedia.mediaUrl(key, opts));
+    p = vdBlobUrl(key, opts).then((u) => u || tgMedia.mediaUrl(key, opts));
     cache.set(key, p);
     // Xato — keyingi urinishda qaytadan.
     p.catch(() => { if (cache.get(key) === p) cache.delete(key); });
