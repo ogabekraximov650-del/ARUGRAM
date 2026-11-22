@@ -15,6 +15,10 @@ mod validate;
 mod crypto;
 mod mp4;
 mod video_cache;
+#[cfg(feature = "telegram")]
+pub mod telegram;
+#[cfg(not(feature = "telegram"))]
+#[path = "telegram_off.rs"]
 pub mod telegram;
 mod player_source;
 

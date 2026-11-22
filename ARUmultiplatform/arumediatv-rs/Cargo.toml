@@ -12,14 +12,15 @@ crate-type = ["cdylib", "rlib"]
 uzcoders = { path = "../uzcoders/crates/uzcoders" }
 uzcoders-lottie = { path = "../uzcoders/crates/uzcoders-lottie" }
 
-# Telegram (grammers) yadrosi: ARUMEDIATV'ning mavjud Rust yadrosi (kirish, MTProto) shu yerdan ishlatiladi.
-rust_core = { path = "../android/rust" }
+# Rust yadro (imzo, shifrlash, pleyer keshi). Telegram (grammers/MTProto) O'CHIRILGAN: Telegram faqat worker orqali.
+rust_core = { path = "../android/rust", default-features = false }
 serde_json = "1"
+# Worker `vd` tizimi: rasm/video bo'laklari AES-128-CTR bilan shifrlangan (kalitni worker beradi), ilova o'zi ochadi.
+aes = "0.9"
+ctr = "0.10"
 ureq = "2"
 # WebP (stiker/GIF to'plam kichik rasmlari, posterlar): sof Rust dekoder.
 image-webp = "0.2"
-# QR kod (Telegram orqali kirish): Nayuki qrcodegen, sof Rust.
-qrcodegen = "1"
 
 [profile.release]
 opt-level = 3

@@ -96,6 +96,10 @@ jobs:
           unzip -l "$OUT"/*.apk | grep -E "libarumediatv|AndroidManifest|classes.dex"
           echo "dir=$OUT" >> "$GITHUB_OUTPUT"
 
+      # Runner'dagi standart Python 3.14 da Pyrogram import xatosi beradi (`There is no current event loop`) — 3.11 qo'yiladi (android-native.yml kabi).
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
       - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
         continue-on-error: true
         env:

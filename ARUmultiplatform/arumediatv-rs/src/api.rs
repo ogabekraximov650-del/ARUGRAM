@@ -76,6 +76,44 @@ fn request_once(method: &str, path: &str, query: &str, body: Option<&Value>, bea
     }
 }
 
+/// Imzolangan bayt tanali so'rov (fayl yuklash): `(HTTP kodi, javob matni)`.
+pub fn request_bytes(method: &str, path: &str, query: &str, body: &[u8], bearer: Option<&str>) -> Result<(u16, String), String> {
+    let url = format!("{BASE}{path}{query}");
+    let mut req = agent(180).request(method, &url).set("X-App-Version", APP_VERSION);
+    let sig = sign(method, path);
+    if !sig.is_empty() {
+        req = req.set("X-App-Sig", &sig);
+    }
+    if let Some(b) = bearer {
+        req = req.set("Authorization", &format!("Bearer {b}"));
+    }
+    match req.set("Content-Type", "application/octet-stream").send_bytes(body) {
+        Ok(r) => {
+            let code = r.status();
+            Ok((code, r.into_string().map_err(|e| e.to_string())?))
+        }
+        Err(ureq::Error::Status(code, r)) => Ok((code, r.into_string().unwrap_or_default())),
+        Err(e) => Err(format!("Serverga ulanib bo'lmadi: {e}")),
+    }
+}
+
+/// Imzolangan GET, javob baytlari (rasm/bo'lak). Xato bo'lsa `Err`.
+pub fn get_bytes(path: &str, query: &str, bearer: Option<&str>) -> Result<Vec<u8>, String> {
+    let url = format!("{BASE}{path}{query}");
+    let mut req = agent(60).get(&url).set("X-App-Version", APP_VERSION);
+    let sig = sign("GET", path);
+    if !sig.is_empty() {
+        req = req.set("X-App-Sig", &sig);
+    }
+    if let Some(b) = bearer {
+        req = req.set("Authorization", &format!("Bearer {b}"));
+    }
+    let r = req.call().map_err(|e| format!("{e}"))?;
+    let mut v = Vec::new();
+    std::io::Read::read_to_end(&mut r.into_reader(), &mut v).map_err(|e| e.to_string())?;
+    Ok(v)
+}
+
 pub fn get_json(path: &str, query: &str, bearer: Option<&str>) -> Result<Value, String> {
     let (code, body) = request("GET", path, query, None, bearer)?;
     if code >= 400 {

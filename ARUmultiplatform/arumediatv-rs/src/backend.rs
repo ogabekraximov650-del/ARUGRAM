@@ -1,118 +1,94 @@
-//! Telegram orqali kirish backend'i: haqiqiy (grammers yadrosi) va sinov (tarmoqsiz).
+//! Kirish backend'i: Telegram bot orqali (worker bilan), grammers/MTProto YO'Q.
+//! UZ: ilova Telegram'ga to'g'ridan-to'g'ri ulanmaydi. Kirish: worker bir martalik token beradi, foydalanuvchi Telegram'da botda «Start» bosadi,
+//! ilova holatni so'rab turadi (Kotlin `BotLoginScreen` bilan bir xil oqim). EN: no MTProto; the Telegram bot flow runs through the worker.
 
 use serde_json::Value;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
-use std::sync::Mutex;
 
-/// Kirish bosqichi natijasi (Rust yadrosi `ok/password/hint/error/sent/wait`).
-#[derive(Default, Debug, Clone)]
-pub struct Step {
-    pub done: bool,
-    pub need_password: bool,
-    pub hint: String,
-    pub error: Option<String>,
-    /// Kod qayerga yuborilgani (odam tushunadigan matn).
-    pub sent: Option<String>,
-    pub logged_in: bool,
-    pub wait: u32,
-    /// QR kirish: `tg://login?token=...` va amal qilish muddati (soniya).
-    pub url: Option<String>,
+/// Worker bergan kirish so'rovi: token, Telegram havolasi (`deep_link`) va amal qilish muddati (soniya).
+#[derive(Clone, Debug, Default)]
+pub struct BotLink {
+    pub token: String,
+    pub link: String,
     pub expires: u64,
 }
 
-impl Step {
-    pub fn err(e: impl Into<String>) -> Step {
-        Step { error: Some(e.into()), ..Step::default() }
-    }
-
-    fn from_json(j: &Value) -> Step {
-        let sent = j.get("sent").filter(|s| !s.is_null());
-        Step {
-            done: j["ok"].as_bool().unwrap_or(false),
-            need_password: j["password"].as_bool().unwrap_or(false),
-            hint: j["hint"].as_str().unwrap_or("").to_string(),
-            error: j["error"].as_str().filter(|e| !e.is_empty()).map(String::from),
-            sent: sent.map(|s| {
-                match s["type"].as_str().unwrap_or("") {
-                    "app" => "Kod Telegram ilovasiga yuborildi",
-                    "sms" | "sms_word" | "sms_phrase" => "Kod SMS orqali yuborildi",
-                    "call" | "flash_call" | "missed_call" => "Kod qo'ng'iroq orqali beriladi",
-                    "email" => "Kod elektron pochtaga yuborildi",
-                    _ => "Kod yuborildi",
-                }
-                .to_string()
-            }),
-            logged_in: j["ok"].as_bool().unwrap_or(false) && sent.is_none(),
-            wait: j["wait"].as_u64().unwrap_or(0) as u32,
-            url: j["url"].as_str().filter(|u| !u.is_empty()).map(String::from),
-            expires: j["expires"].as_u64().unwrap_or(30),
-        }
-    }
-}
-
-/// Saqlangan kirish bosqichi (ilova yopilib qayta ochilganda tiklash uchun).
-#[derive(Debug, Clone, Default)]
-pub struct LoginInfo {
-    /// `phone`, `code`, `password` yoki `done` (Telegram allaqachon ulangan).
-    pub stage: String,
-    pub phone: String,
-    pub hint: String,
-    pub sent: Option<String>,
+/// Kirish holati so'rovi natijasi.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Poll {
+    Pending,
+    Ok(String),
+    Expired,
+    Banned(String),
+    Error(String),
 }
 
 /// Bloklovchi chaqiruvlar: fon oqimida ishlatiladi (`uzcoders::spawn_bg`).
 pub trait Backend: Send + Sync {
-    fn request_code(&self, phone: &str) -> Step;
-    fn sign_in(&self, code: &str) -> Step;
-    fn check_password(&self, password: &str) -> Step;
-    /// QR kirish: yangi token (yoki tasdiqlangan bo'lsa — kirish natijasi).
-    fn qr_token(&self) -> Step {
-        Step::err("QR kirish bu rejimda yo'q")
-    }
-    /// QR boshqa qurilmada tasdiqlandimi (tarmoqsiz).
-    fn qr_accepted(&self) -> bool {
-        false
-    }
-    fn reset(&self);
-    /// IP manzil bo'yicha davlat ISO kodi (`UZ`).
-    fn nearest_country(&self) -> Option<String>;
-    /// Saqlangan kirish bosqichi (tarmoqsiz).
-    fn login_state(&self) -> Option<LoginInfo>;
-    /// Telegram ulangach ilova hisobiga kirish: botga `/start <token>` yuboriladi, server sessiya beradi.
-    fn finish_login(&self) -> Result<String, String>;
-    /// Telegram hisobidan chiqish (boshqa raqam bilan kirish uchun).
-    fn logout(&self);
+    /// Bir martalik kirish tokenini oladi (`POST /api/auth/telegram/start`).
+    fn start(&self) -> Result<BotLink, String>;
+    /// Token holatini so'raydi (`GET /api/auth/telegram/status`).
+    fn poll(&self, token: &str) -> Poll;
+    /// Chiqish: mahalliy sessiya tozalanadi (Telegram hisobi yo'q).
+    fn logout(&self) {}
 }
 
-/// Sinov rejimi: tarmoqsiz. Kod `12345` bo'lsa ikki bosqichli parol so'raladi.
+fn device_json() -> Value {
+    serde_json::json!({"device": "Android", "platform": "Android", "app_version": crate::api::APP_VERSION})
+}
+
+/// Haqiqiy backend: faqat worker.
+pub struct WorkerBackend;
+
+impl Backend for WorkerBackend {
+    fn start(&self) -> Result<BotLink, String> {
+        let (code, body) = crate::api::request("POST", "/api/auth/telegram/start", "", Some(&device_json()), None)?;
+        let j: Value = serde_json::from_str(&body).map_err(|_| "Server javobi noto'g'ri".to_string())?;
+        let token = j["token"].as_str().unwrap_or("").to_string();
+        let link = j["deep_link"].as_str().unwrap_or("").to_string();
+        if code >= 400 || token.is_empty() || link.is_empty() {
+            return Err("Serverga ulanib bo'lmadi. Internetni tekshirib, qaytadan urinib ko'ring.".into());
+        }
+        Ok(BotLink { token, link, expires: j["expires_in"].as_u64().unwrap_or(300) })
+    }
+
+    fn poll(&self, token: &str) -> Poll {
+        let Ok(j) = crate::api::get_json("/api/auth/telegram/status", &format!("?token={token}"), None) else { return Poll::Pending };
+        match j["status"].as_str().unwrap_or("") {
+            "ok" => {
+                let s = j["session"].as_str().unwrap_or("");
+                if s.is_empty() { Poll::Error("Sessiya olinmadi".into()) } else { Poll::Ok(s.to_string()) }
+            }
+            "expired" => Poll::Expired,
+            "banned" => Poll::Banned(j["message"].as_str().filter(|m| !m.is_empty()).unwrap_or("Hisobingiz bloklangan.").to_string()),
+            _ => Poll::Pending,
+        }
+    }
+}
+
+/// Sinov rejimi (kompyuterda, tarmoqsiz).
 pub struct StubBackend;
 
 impl Backend for StubBackend {
-    fn request_code(&self, _phone: &str) -> Step {
-        Step { done: true, sent: Some("Kod yuborildi (sinov rejimi: 12345)".into()), ..Step::default() }
+    fn start(&self) -> Result<BotLink, String> {
+        Ok(BotLink { token: "test".into(), link: "tg://resolve?domain=test".into(), expires: 300 })
     }
-    fn sign_in(&self, code: &str) -> Step {
-        if code == "12345" {
-            Step { need_password: true, hint: "sinov".into(), ..Step::default() }
-        } else {
-            Step::err("Kod noto'g'ri")
-        }
+    fn poll(&self, _token: &str) -> Poll {
+        Poll::Pending
     }
-    fn check_password(&self, _password: &str) -> Step {
-        Step::err("Sinov rejimi: Telegram yadrosi ulanmagan")
-    }
-    fn reset(&self) {}
-    fn nearest_country(&self) -> Option<String> {
-        None
-    }
-    fn login_state(&self) -> Option<LoginInfo> {
-        None
-    }
-    fn finish_login(&self) -> Result<String, String> {
-        Err("Sinov rejimi: server ulanmagan".into())
-    }
-    fn logout(&self) {}
+}
+
+/// Butun ilova uchun backend.
+pub fn shared() -> std::sync::Arc<WorkerBackend> {
+    static S: std::sync::OnceLock<std::sync::Arc<WorkerBackend>> = std::sync::OnceLock::new();
+    S.get_or_init(|| std::sync::Arc::new(WorkerBackend)).clone()
+}
+
+/// UZ: Telegram yadrosi (MTProto) olib tashlangan — bu chaqiruv har doim xato qaytaradi, Telegram'ga bog'liq yo'llar worker yo'liga o'tadi.
+/// EN: the MTProto core is gone; callers fall back to the worker path.
+pub fn ensure_tg_ready() -> Result<(), String> {
+    Err("Telegram yadrosi o'chirilgan: hamma narsa worker orqali".into())
 }
 
 #[cfg_attr(not(target_os = "android"), allow(dead_code))]
@@ -158,285 +134,6 @@ pub fn ensure_master() -> bool {
     })
 }
 
-/// Haqiqiy Telegram: ARUMEDIATV'ning Rust yadrosi (`rust_core`, grammers/MTProto).
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-pub struct TgBackend {
-    dir: String,
-    ready: Mutex<bool>,
-    bot: Mutex<String>,
-}
-
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
-/// Butun ilova uchun bitta Telegram yadro holati (kirish va posterlar bir xil yadrodan foydalanadi).
-#[cfg(target_os = "android")]
-pub fn shared() -> std::sync::Arc<TgBackend> {
-    static S: std::sync::OnceLock<std::sync::Arc<TgBackend>> = std::sync::OnceLock::new();
-    S.get_or_init(|| std::sync::Arc::new(TgBackend::new(&uzcoders::android::files_dir()))).clone()
-}
-
-/// Yadroni to'liq ishga tushiradi (api_id/hash, bot nomi, mahalliy server porti). Android bo'lmasa — hech narsa.
-pub fn ensure_tg_ready() -> Result<(), String> {
-    #[cfg(target_os = "android")]
-    {
-        let r = shared().ensure();
-        if let Err(e) = &r {
-            uzcoders::prelude::report_error("Telegram yadrosi", e);
-        }
-        r
-    }
-    #[cfg(not(target_os = "android"))]
-    {
-        Ok(())
-    }
-}
-
-impl TgBackend {
-    pub fn new(files_dir: &str) -> TgBackend {
-        TgBackend { dir: format!("{files_dir}/tg"), ready: Mutex::new(false), bot: Mutex::new(String::new()) }
-    }
-
-    /// Tarmoqsiz ishga tushirish: kalit va saqlangan sessiya/kirish holati uchun (api_id keyinroq).
-    fn ensure_offline(&self) -> Result<(), String> {
-        let _ = std::fs::create_dir_all(&self.dir);
-        let root = self.dir.trim_end_matches("/tg");
-        ensure_master_key(root)?;
-        let dir = CString::new(self.dir.as_str()).unwrap_or_default();
-        let empty = CString::new("").unwrap_or_default();
-        call(rust_core::telegram::rust_tg_init(dir.as_ptr(), 0, empty.as_ptr()));
-        Ok(())
-    }
-
-    /// Yadroni ishga tushiradi va serverdan `api_id/api_hash` ni oladi (bir marta).
-    fn ensure(&self) -> Result<(), String> {
-        let mut ready = self.ready.lock().unwrap();
-        if *ready {
-            return Ok(());
-        }
-        let _ = std::fs::create_dir_all(&self.dir);
-        let root = self.dir.trim_end_matches("/tg");
-        ensure_master_key(root)?;
-        let c = |s: &str| CString::new(s).unwrap_or_default();
-        let (model, sys, app) = (c("Android"), c("Android"), c("ARUMEDIATV Rust 0.1"));
-        rust_core::telegram::rust_tg_set_device(model.as_ptr(), sys.as_ptr(), app.as_ptr());
-        let dir = c(&self.dir);
-        let empty = c("");
-        call(rust_core::telegram::rust_tg_init(dir.as_ptr(), 0, empty.as_ptr()));
-        // Sozlama diskdan darhol olinadi (tarmoqni kutmaymiz), fonda yangilanadi.
-        let cfg_path = format!("{}/tg_config.json", self.dir.trim_end_matches("/tg"));
-        let cached: Option<Value> = std::fs::read_to_string(&cfg_path).ok().and_then(|s| serde_json::from_str(&s).ok()).filter(|c: &Value| c["enabled"].as_bool().unwrap_or(false));
-        let cfg = match cached {
-            Some(c) => {
-                let p = cfg_path.clone();
-                std::thread::spawn(move || {
-                    if let Ok(c) = crate::api::get_json("/api/tg/config", "", None) {
-                        let _ = std::fs::write(p, c.to_string());
-                    }
-                });
-                c
-            }
-            None => {
-                let c = crate::api::get_json("/api/tg/config", "", None)?;
-                let _ = std::fs::write(&cfg_path, c.to_string());
-                c
-            }
-        };
-        if !cfg["enabled"].as_bool().unwrap_or(false) {
-            return Err("Telegram orqali kirish hozircha yoqilmagan".into());
-        }
-        *self.bot.lock().unwrap() = cfg["bot"].as_str().unwrap_or("").to_string();
-        let bot = c(cfg["bot"].as_str().unwrap_or(""));
-        rust_core::telegram::rust_tg_set_bot(bot.as_ptr());
-        let id = cfg["api_id"].as_i64().unwrap_or(0) as i32;
-        let hash = c(cfg["api_hash"].as_str().unwrap_or(""));
-        let r = call(rust_core::telegram::rust_tg_init(dir.as_ptr(), id, hash.as_ptr()));
-        if let Some(e) = r["error"].as_str() {
-            return Err(e.to_string());
-        }
-        *ready = true;
-        Ok(())
-    }
-
-    fn run(&self, f: impl FnOnce() -> *mut c_char) -> Step {
-        match self.ensure() {
-            Ok(()) => Step::from_json(&call(f())),
-            Err(e) => Step::err(e),
-        }
-    }
-}
-
-/// Yadro qaytargan C satrini JSON ga o'giradi va xotirani bo'shatadi.
-fn call(p: *mut c_char) -> Value {
-    if p.is_null() {
-        return Value::Null;
-    }
-    let s = unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned();
-    rust_core::ffi_utils::rust_free_string(p);
-    serde_json::from_str(&s).unwrap_or(Value::Null)
-}
-
-impl Backend for TgBackend {
-    fn request_code(&self, phone: &str) -> Step {
-        let p = CString::new(phone).unwrap_or_default();
-        self.run(|| rust_core::telegram::rust_tg_request_code(p.as_ptr()))
-    }
-    fn sign_in(&self, code: &str) -> Step {
-        let c = CString::new(code).unwrap_or_default();
-        self.run(|| rust_core::telegram::rust_tg_sign_in(c.as_ptr()))
-    }
-    fn qr_token(&self) -> Step {
-        self.run(|| rust_core::telegram::rust_tg_qr_token())
-    }
-    fn qr_accepted(&self) -> bool {
-        rust_core::telegram::rust_tg_qr_accepted() == 1
-    }
-    fn check_password(&self, password: &str) -> Step {
-        let c = CString::new(password).unwrap_or_default();
-        self.run(|| rust_core::telegram::rust_tg_check_password(c.as_ptr()))
-    }
-    fn finish_login(&self) -> Result<String, String> {
-        self.ensure()?;
-        let dev = serde_json::json!({"device": "Android", "platform": "Android", "app_version": crate::api::APP_VERSION});
-        let (code, body) = crate::api::request("POST", "/api/auth/telegram/start", "", Some(&dev), None)?;
-        let j: Value = serde_json::from_str(&body).map_err(|_| "Server javobi noto'g'ri".to_string())?;
-        let token = j["token"].as_str().unwrap_or("").to_string();
-        if code >= 400 || token.is_empty() {
-            return Err("Server bilan bog'lanib bo'lmadi".into());
-        }
-        let bot = CString::new(self.bot.lock().unwrap().as_str()).unwrap_or_default();
-        let tok = CString::new(token.as_str()).unwrap_or_default();
-        let r = call(rust_core::telegram::rust_tg_start_bot(bot.as_ptr(), tok.as_ptr()));
-        if !r["ok"].as_bool().unwrap_or(false) {
-            return Err(r["error"].as_str().unwrap_or("Botga yuborilmadi").to_string());
-        }
-        for _ in 0..40 {
-            std::thread::sleep(std::time::Duration::from_millis(750));
-            let Ok(j) = crate::api::get_json("/api/auth/telegram/status", &format!("?token={token}"), None) else { continue };
-            match j["status"].as_str().unwrap_or("") {
-                "ok" => {
-                    let s = j["session"].as_str().unwrap_or("");
-                    return if s.is_empty() { Err("Sessiya olinmadi".into()) } else { Ok(s.to_string()) };
-                }
-                "expired" => return Err("Kirish muddati tugadi — qayta urinib ko'ring".into()),
-                "banned" => return Err(j["message"].as_str().filter(|m| !m.is_empty()).unwrap_or("Hisobingiz bloklangan.").to_string()),
-                _ => {}
-            }
-        }
-        Err("Kirish tasdiqlanmadi — qayta urinib ko'ring".into())
-    }
-
-    fn login_state(&self) -> Option<LoginInfo> {
-        self.ensure_offline().ok()?;
-        let j = call(rust_core::telegram::rust_tg_login_state());
-        let st = Step::from_json(&serde_json::json!({"sent": j["sent"]}));
-        Some(LoginInfo {
-            stage: j["stage"].as_str()?.to_string(),
-            phone: j["phone"].as_str().unwrap_or("").to_string(),
-            hint: j["hint"].as_str().unwrap_or("").to_string(),
-            sent: st.sent,
-        })
-    }
-    fn logout(&self) {
-        if self.ensure_offline().is_ok() {
-            call(rust_core::telegram::rust_tg_logout());
-        }
-    }
-    fn reset(&self) {
-        if self.ensure().is_ok() {
-            rust_core::telegram::rust_tg_login_reset();
-        }
-    }
-    fn nearest_country(&self) -> Option<String> {
-        self.ensure().ok()?;
-        let j = call(rust_core::telegram::rust_tg_nearest_country());
-        j["country"].as_str().filter(|c| !c.is_empty()).map(|c| c.to_uppercase())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn javob_tahlili() {
-        let s = Step::from_json(&serde_json::json!({"ok": true, "sent": {"type": "app", "length": 5}}));
-        assert!(s.done && !s.logged_in);
-        assert_eq!(s.sent.as_deref(), Some("Kod Telegram ilovasiga yuborildi"));
-        let s = Step::from_json(&serde_json::json!({"ok": true}));
-        assert!(s.logged_in);
-        let s = Step::from_json(&serde_json::json!({"password": true, "hint": "h"}));
-        assert!(s.need_password && s.hint == "h");
-        let s = Step::from_json(&serde_json::json!({"error": "xato", "wait": 30}));
-        assert_eq!((s.error.as_deref(), s.wait), (Some("xato"), 30));
-    }
-}
-
-
-/// Faylni Telegram'ga (bot chatiga) yuboradi; bot kanalga ko'chirgach (`/api/tg/claim`) tayyor bo'ladi. Baytlar worker'dan O'TMAYDI.
-/// Bloklaydi — fon oqimida chaqiring. `progress(sent, total)` ixtiyoriy.
-#[cfg(target_os = "android")]
-pub fn upload_file(path: &str, name: &str, mime: &str, session: &str, progress: &dyn Fn(u64, u64)) -> Result<(), String> {
-    upload_file_key(path, name, mime, session, progress).map(|_| ())
-}
-
-/// `upload_file`, lekin fayl kalitini ham qaytaradi (qismlar uchun bazaga `key_<sifat>` yoziladi).
-#[cfg(target_os = "android")]
-pub fn upload_file_key(path: &str, name: &str, mime: &str, session: &str, progress: &dyn Fn(u64, u64)) -> Result<String, String> {
-    shared().ensure()?;
-    let (p, n, m) = (CString::new(path).unwrap_or_default(), CString::new(name).unwrap_or_default(), CString::new(mime).unwrap_or_default());
-    let started = call(rust_core::telegram::rust_tg_upload_start(p.as_ptr(), n.as_ptr(), m.as_ptr(), 0));
-    let job = started["job"].as_u64().unwrap_or(0);
-    if job == 0 {
-        let e = started["error"].as_str().unwrap_or("Yuklash boshlanmadi").to_string();
-        uzcoders::prelude::report_error("Telegramga yuklash", &e);
-        return Err(e);
-    }
-    let mut key = String::new();
-    let mut all_sent_at: Option<std::time::Instant> = None;
-    loop {
-        std::thread::sleep(std::time::Duration::from_millis(400));
-        let st = call(rust_core::telegram::rust_tg_upload_status(job));
-        let (sent, total) = (st["sent"].as_u64().unwrap_or(0), st["total"].as_u64().unwrap_or(0));
-        if total > 0 {
-            progress(sent, total);
-        }
-        if total > 0 && sent >= total && !st["done"].as_bool().unwrap_or(false) {
-            let t0 = *all_sent_at.get_or_insert_with(std::time::Instant::now);
-            if t0.elapsed().as_secs() > 120 {
-                rust_core::telegram::rust_tg_upload_cancel(job);
-                return Err("Telegram javob bermadi — internetni tekshirib, qayta urinib ko'ring".into());
-            }
-        }
-        if st["done"].as_bool().unwrap_or(false) {
-            if let Some(e) = st["error"].as_str().filter(|e| !e.is_empty()) {
-                uzcoders::prelude::report_error("Telegramga yuklash", e);
-                return Err(e.to_string());
-            }
-            key = st["key"].as_str().unwrap_or("").to_string();
-            break;
-        }
-    }
-    let q = format!("?file={}&key={}", urlenc(name), urlenc(&key));
-    for wait in [1u64, 1, 2, 2, 3, 4, 5, 8] {
-        std::thread::sleep(std::time::Duration::from_secs(wait));
-        if let Ok(j) = crate::api::get_json("/api/tg/claim", &q, Some(session)) {
-            if j["ready"].as_bool().unwrap_or(false) {
-                break;
-            }
-        }
-    }
-    Ok(key)
-}
-
-#[cfg(not(target_os = "android"))]
-pub fn upload_file_key(_path: &str, _name: &str, _mime: &str, _session: &str, _progress: &dyn Fn(u64, u64)) -> Result<String, String> {
-    Err("Yuklash faqat telefonda ishlaydi".into())
-}
-
-#[cfg(not(target_os = "android"))]
-pub fn upload_file(_path: &str, _name: &str, _mime: &str, _session: &str, _progress: &dyn Fn(u64, u64)) -> Result<(), String> {
-    Err("Yuklash faqat telefonda ishlaydi".into())
-}
-
 pub fn urlenc(s: &str) -> String {
     let mut o = String::new();
     for b in s.bytes() {
@@ -449,61 +146,46 @@ pub fn urlenc(s: &str) -> String {
     o
 }
 
-/// Kanal ma'lumoti (admin Telegram hisobi bilan): `{ok, id, title, username, members, about, ...}`.
-#[cfg(target_os = "android")]
-pub fn channel_info(arg: &str) -> Value {
-    if let Err(e) = shared().ensure() {
-        return serde_json::json!({"error": e});
+
+/// Fayl yuklash (worker orqali): hozircha faqat kichik fayllar (<= 18 MiB) — worker o'zi shifrlab Telegram'ga saqlaydi (`PUT /api/vd/small`).
+/// Katta fayllar keyingi bosqichda (bo'laklab). Bloklaydi — fon oqimida chaqiring.
+pub fn upload_file_key(path: &str, name: &str, _mime: &str, session: &str, progress: &dyn Fn(u64, u64)) -> Result<String, String> {
+    let len = std::fs::metadata(path).map_err(|e| format!("Fayl o'qilmadi: {e}"))?.len();
+    if len == 0 {
+        return Err("Fayl bo'sh".into());
     }
-    let a = CString::new(arg).unwrap_or_default();
-    call(rust_core::telegram::rust_tg_channel_info(a.as_ptr()))
+    if len > 18 * 1024 * 1024 {
+        return Err("Fayl 18 MB dan katta — bu versiyada hali qo'llab-quvvatlanmaydi".into());
+    }
+    let bytes = std::fs::read(path).map_err(|e| format!("Fayl o'qilmadi: {e}"))?;
+    progress(0, len);
+    let (code, body) = crate::api::request_bytes("PUT", "/api/vd/small", &format!("?name={}", urlenc(name)), &bytes, Some(session))?;
+    let j: Value = serde_json::from_str(&body).map_err(|_| "Server javobi noto'g'ri".to_string())?;
+    if code == 200 && j["ok"].as_bool() == Some(true) {
+        progress(len, len);
+        return Ok(j["key"].as_str().unwrap_or("").to_string());
+    }
+    Err(j["error"].as_str().unwrap_or("Yuklab bo'lmadi").to_string())
 }
 
-/// Botni kanalga admin qilib qo'shadi.
-#[cfg(target_os = "android")]
-pub fn make_bot_admin(arg: &str) -> Value {
-    if let Err(e) = shared().ensure() {
-        return serde_json::json!({"error": e});
-    }
-    let a = CString::new(arg).unwrap_or_default();
-    call(rust_core::telegram::rust_tg_make_bot_admin(a.as_ptr()))
+pub fn upload_file(path: &str, name: &str, mime: &str, session: &str, progress: &dyn Fn(u64, u64)) -> Result<(), String> {
+    upload_file_key(path, name, mime, session, progress).map(|_| ())
 }
 
-#[cfg(not(target_os = "android"))]
+/// Admin kanal amallari (MTProto kerak edi) — worker orqali hali yo'q.
 pub fn channel_info(_arg: &str) -> Value {
-    serde_json::json!({"error": "Faqat telefonda ishlaydi"})
+    serde_json::json!({"error": "Bu amal hali worker orqali ishlamaydi"})
 }
 
-#[cfg(not(target_os = "android"))]
 pub fn make_bot_admin(_arg: &str) -> Value {
-    serde_json::json!({"error": "Faqat telefonda ishlaydi"})
+    serde_json::json!({"error": "Bu amal hali worker orqali ishlamaydi"})
 }
 
-/// Telegram hisobi ulanganmi (kirish tugagan).
-#[cfg(target_os = "android")]
-pub fn tg_authorized() -> bool {
-    if shared().ensure().is_err() {
-        return false;
-    }
-    call(rust_core::telegram::rust_tg_status())["authorized"].as_bool().unwrap_or(false)
-}
-
-#[cfg(not(target_os = "android"))]
+/// Majburiy kanallarga qo'shilish Telegram hisobini talab qilardi — endi ilova qo'shilmaydi.
 pub fn tg_authorized() -> bool {
     false
 }
 
-/// Kanalga qo'shiladi (`public:<nom>` yoki `private:<havola>`): `{ok}` yoki `{error}`.
-#[cfg(target_os = "android")]
-pub fn join_channel(arg: &str) -> Value {
-    if let Err(e) = shared().ensure() {
-        return serde_json::json!({"error": e});
-    }
-    let a = CString::new(arg).unwrap_or_default();
-    call(rust_core::telegram::rust_tg_join_channel(a.as_ptr()))
-}
-
-#[cfg(not(target_os = "android"))]
 pub fn join_channel(_arg: &str) -> Value {
-    serde_json::json!({"error": "Faqat telefonda ishlaydi"})
+    serde_json::json!({"error": "Kanalga qo'shilish bu versiyada yo'q"})
 }

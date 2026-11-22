@@ -1,728 +1,305 @@
-//! Telegram orqali kirish oynasi (Kotlin ilovadagi `LoginScreen` ga mos): telefon -> kod -> (2 bosqichli parol).
+//! Kirish oynalari (Kotlin `AddAccountScreen` + `BotLoginScreen` bilan bir xil): avval usulni tanlash (Telegram / Google),
+//! Telegram — bot orqali (worker bir martalik token beradi, foydalanuvchi botda «Start» bosadi, ilova holatni so'raydi).
+//! UZ: telefon raqami, kod, QR va MTProto YO'Q — Telegram'ga faqat worker orqali. EN: no phone/code/QR, the Telegram bot flow runs through the worker.
 
-use crate::backend::{Backend, LoginInfo, Step as BStep};
-use crate::countries::{Country, COUNTRIES};
+use crate::backend::{Backend, Poll};
 use crate::theme::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use uzcoders::prelude::*;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Step {
-    Phone,
-    Code,
-    Password,
-    Qr,
-    /// Telegram ulandi, ilova hisobi tasdiqlanmoqda.
-    Finishing,
+pub enum Stage {
+    /// Kirish usulini tanlash.
+    Choose,
+    /// Worker'dan token olinmoqda.
+    Preparing,
+    /// Telegram botida «Start» kutilmoqda.
+    Waiting,
+    Expired,
+    Error,
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub enum Route {
-    Login,
-    CountryPicker,
-}
+const TG_PATH: &str = "M9.04 15.6l-.38 4.1c.55 0 .79-.24 1.08-.52l2.6-2.48 5.38 3.94c.99.55 1.69.26 1.96-.91l3.55-16.6c.32-1.46-.53-2.03-1.5-1.67L1.2 10.6c-1.42.55-1.4 1.35-.24 1.7l5.35 1.67 12.42-7.83c.58-.38 1.12-.17.68.21z";
+// Google logotipi: asl 48x48 `viewBox`; `icon()` 24x24 kutadi, shu sabab raqamlar 0,5 ga ko'paytiriladi.
+const G_RED: &str = "M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z";
+const G_BLUE: &str = "M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z";
+const G_YELLOW: &str = "M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z";
+const G_GREEN: &str = "M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z";
 
-thread_local! {
-    /// Raqam maydoni formatlovchisi (`fn` ko'rsatkich bo'lgani uchun joriy shablon shu yerda).
-    static PATTERN: RefCell<&'static str> = const { RefCell::new("") };
-}
-
-fn format_number(s: &str) -> String {
-    format_with(PATTERN.with(|p| *p.borrow()), s)
-}
-
-/// Raqamni davlat shabloni bo'yicha bo'laklaydi (`901234567` -> `90 123 45 67`).
-fn format_with(pattern: &str, s: &str) -> String {
-    let digits: Vec<char> = s.chars().filter(|c| c.is_ascii_digit()).collect();
-    if pattern.is_empty() {
-        return digits.into_iter().collect();
-    }
+/// SVG yo'lidagi hamma sonlarni `k` marta kichraytiradi (faqat M/L/H/V/C/S/Q/T/Z va ularning kichik harfli variantlari — yoy yo'q).
+fn scale_path(d: &str, k: f32) -> String {
     let mut out = String::new();
-    let mut i = 0;
-    for ch in pattern.chars() {
-        if i >= digits.len() {
-            break;
+    let mut num = String::new();
+    let flush = |num: &mut String, out: &mut String| {
+        if !num.is_empty() {
+            if let Ok(v) = num.parse::<f32>() {
+                out.push_str(&format!("{:.3}", v * k));
+            } else {
+                out.push_str(num);
+            }
+            num.clear();
         }
-        if ch == ' ' {
-            out.push(' ');
+    };
+    let mut prev_e = false;
+    for ch in d.chars() {
+        let part = ch.is_ascii_digit() || ch == '.' || (ch == '-' && (num.is_empty() || prev_e)) || ((ch == 'e' || ch == 'E') && !num.is_empty());
+        if ch == '-' && !num.is_empty() && !prev_e {
+            flush(&mut num, &mut out);
+            num.push(ch);
+        } else if part {
+            if ch == '.' && num.contains('.') {
+                flush(&mut num, &mut out);
+            }
+            num.push(ch);
         } else {
-            out.push(digits[i]);
-            i += 1;
+            flush(&mut num, &mut out);
+            out.push(ch);
         }
+        prev_e = ch == 'e' || ch == 'E';
     }
-    out.extend(digits[i..].iter());
+    flush(&mut num, &mut out);
     out
 }
 
-fn format_prefix(s: &str) -> String {
-    let d: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
-    format!("+{d}")
+fn google_paths() -> &'static [&'static str; 4] {
+    static P: std::sync::OnceLock<[&'static str; 4]> = std::sync::OnceLock::new();
+    P.get_or_init(|| {
+        let leak = |s: &str| -> &'static str { Box::leak(scale_path(s, 0.5).into_boxed_str()) };
+        [leak(G_RED), leak(G_BLUE), leak(G_YELLOW), leak(G_GREEN)]
+    })
 }
 
-fn is_digit(c: char) -> bool {
-    c.is_ascii_digit()
-}
-
-fn digits_of(s: &str) -> String {
-    s.chars().filter(|c| c.is_ascii_digit()).collect()
-}
-
-pub fn country_by_code(code: &str, prefer: Option<usize>) -> Option<usize> {
-    if code.is_empty() {
-        return None;
-    }
-    if let Some(p) = prefer {
-        if COUNTRIES[p].code == code {
-            return Some(p);
-        }
-    }
-    const MAIN: &[(&str, &str)] = &[
-        ("1", "US"),
-        ("7", "RU"),
-        ("44", "GB"),
-        ("39", "IT"),
-        ("61", "AU"),
-        ("262", "RE"),
-        ("358", "FI"),
-        ("590", "GP"),
-        ("599", "CW"),
-        ("47", "NO"),
-        ("212", "MA"),
-    ];
-    if let Some((_, iso)) = MAIN.iter().find(|(c, _)| *c == code) {
-        if let Some(i) = COUNTRIES.iter().position(|c| c.iso == *iso) {
-            return Some(i);
-        }
-    }
-    COUNTRIES.iter().position(|c| c.code == code)
-}
-
-/// Material 3 `bodyLarge` uslubidagi matn: qator qutisi 24dp, harflar orasi 0.5.
-fn t(s: impl Into<String>, size: f32, color: Color) -> Element {
-    text(s).size(size).color(color).line_height(24.0).letter_spacing(0.5)
-}
-
-const DROP_DOWN: &str = "M7,10l5,5 5,-5z";
-const GLASS: Color = Color::rgba(255, 255, 255, 22);
-
-const ARROW_BACK: &str = "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z";
-
-fn pattern_len(c: &Country) -> usize {
-    c.pattern.chars().filter(|x| *x != ' ').count()
+fn tx(s: impl Into<String>, size: f32, color: Color) -> Element {
+    text(s).size(size).color(color).line_height(size * 1.3)
 }
 
 /// Kirish oynasi holati.
 pub struct Login {
-    pub nav: Navigator<Route>,
-    step: State<Step>,
-    busy: State<bool>,
-    error: State<Option<String>>,
-    prefix: State<String>,
-    number: State<String>,
-    code: State<String>,
-    password: State<String>,
-    sent_info: State<String>,
-    country: State<Option<usize>>,
-    query: State<String>,
-    scroll: ScrollState,
-    picker_scroll: ScrollState,
+    stage: State<Stage>,
+    message: State<String>,
+    left: State<i64>,
+    link: RefCell<String>,
+    token: RefCell<String>,
+    /// Har urinish yangi raqam oladi: eski so'rovlar natijasi e'tiborga olinmaydi (Orqaga / qayta urinish).
+    gen: Cell<u32>,
+    until: Cell<Option<Instant>>,
     backend: Arc<dyn Backend>,
     on_done: Rc<dyn Fn(String)>,
-    wait: State<u32>,
-    hint: State<String>,
-    qr_img: State<Option<Rc<Image>>>,
-    qr_gen: std::cell::Cell<u32>,
-    qr_until: std::cell::Cell<Option<std::time::Instant>>,
 }
 
 impl Login {
     pub fn new(backend: Arc<dyn Backend>, on_done: Rc<dyn Fn(String)>) -> Rc<Login> {
-        let uz = COUNTRIES.iter().position(|c| c.iso == "UZ");
-        let login = Rc::new(Login {
-            nav: Navigator::new(Route::Login),
-            step: State::new(Step::Phone),
-            busy: State::new(false),
-            error: State::new(None),
-            prefix: State::new(format!("+{}", uz.map_or("998", |i| COUNTRIES[i].code))),
-            number: State::new(String::new()),
-            code: State::new(String::new()),
-            password: State::new(String::new()),
-            sent_info: State::new(String::new()),
-            country: State::new(uz),
-            query: State::new(String::new()),
-            scroll: ScrollState::new(),
-            picker_scroll: ScrollState::new(),
+        Rc::new(Login {
+            stage: State::new(Stage::Choose),
+            message: State::new(String::new()),
+            left: State::new(0),
+            link: RefCell::new(String::new()),
+            token: RefCell::new(String::new()),
+            gen: Cell::new(0),
+            until: Cell::new(None),
             backend,
             on_done,
-            wait: State::new(0),
-            hint: State::new(String::new()),
-            qr_img: State::new(None),
-            qr_gen: std::cell::Cell::new(0),
-            qr_until: std::cell::Cell::new(None),
-        });
-        // Ilova qayta ochilganda saqlangan kirish bosqichini tiklaymiz (kod kutilayotgan paytda yopilgan bo'lsa).
-        let me = login.clone();
-        let b = login.backend.clone();
-        spawn_bg(move || b.login_state(), move |info| {
-            if let Some(info) = info {
-                me.restore(info);
-            }
-        });
-        // IP bo'yicha davlat (Telegram aniqlaydi): foydalanuvchi hali tegmagan bo'lsa.
-        let me = login.clone();
-        let b = login.backend.clone();
-        spawn_bg(move || b.nearest_country(), move |iso| {
-            if let Some(iso) = iso {
-                if me.number.get().is_empty() {
-                    if let Some(i) = COUNTRIES.iter().position(|c| c.iso == iso) {
-                        me.country.set(Some(i));
-                        me.prefix.set(format!("+{}", COUNTRIES[i].code));
-                    }
-                }
-            }
-        });
-        login
+        })
     }
 
-    /// "Orqaga": birinchi navbatda ekranlar steki, keyin kirish bosqichi.
+    /// "Orqaga": bot oynasidan usul tanlashga qaytadi; tanlash oynasida — ilovadan chiqish tizimga qoladi.
     pub fn back(&self) -> bool {
-        if self.nav.pop() {
-            return true;
+        if self.stage.get() == Stage::Choose {
+            return false;
         }
-        if self.step.get() != Step::Phone && !self.busy.get() {
-            self.reset_login();
-            self.step.set(Step::Phone);
-            self.error.set(None);
-            return true;
-        }
-        false
+        self.restart();
+        true
     }
 
-    /// Saqlangan bosqichni ekranga qaytaradi.
-    fn restore(self: &Rc<Self>, info: LoginInfo) {
-        if self.step.get() != Step::Phone || self.busy.get() || !self.number.get().is_empty() {
-            return; // foydalanuvchi allaqachon yozishni boshlagan
-        }
-        let digits = digits_of(&info.phone);
-        // Telefon: eng uzun mos davlat kodi.
-        if let Some((i, c)) = COUNTRIES
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| digits.starts_with(c.code))
-            .max_by_key(|(_, c)| c.code.len())
-        {
-            self.country.set(Some(i));
-            self.prefix.set(format!("+{}", c.code));
-            self.number.set(format_with(c.pattern, &digits[c.code.len()..]));
-        }
-        match info.stage.as_str() {
-            "code" => {
-                self.sent_info.set(info.sent.unwrap_or_else(|| "Kod yuborildi".into()));
-                self.step.set(Step::Code);
-            }
-            "password" => {
-                self.hint.set(info.hint);
-                self.step.set(Step::Password);
-            }
-            // Ilova sessiyasi bor bo'lsa botga qayta /start yubormaymiz (bosh sahifa allaqachon ochilgan).
-            "done" if crate::api::load_session().is_none() => self.finish(),
-            _ => {}
-        }
-    }
-
-    /// Chiqishdan keyin: boshidan (telefon raqami) boshlaydi.
+    /// Boshidan (usul tanlash).
     pub fn restart(&self) {
-        self.step.set(Step::Phone);
-        self.busy.set(false);
-        self.error.set(None);
-        self.number.set(String::new());
-        self.code.set(String::new());
-        self.password.set(String::new());
+        self.gen.set(self.gen.get().wrapping_add(1));
+        self.stage.set(Stage::Choose);
+        self.message.set(String::new());
+        self.until.set(None);
     }
 
-    fn reset_login(&self) {
-        let b = self.backend.clone();
-        spawn_bg(move || b.reset(), |_| {});
-    }
-
-    /// Bloklovchi backend chaqiruvini fon oqimida bajaradi, natijani UI oqimida qabul qiladi.
-    fn run_bg(self: &Rc<Self>, work: impl FnOnce(Arc<dyn Backend>) -> BStep + Send + 'static, ok: impl FnOnce(&Rc<Login>, BStep) + 'static) {
-        self.busy.set(true);
+    fn start_bot(self: &Rc<Self>) {
+        let g = self.gen.get().wrapping_add(1);
+        self.gen.set(g);
+        self.stage.set(Stage::Preparing);
+        self.message.set(String::new());
         let (b, me) = (self.backend.clone(), self.clone());
-        spawn_bg(move || work(b), move |st| {
-            me.busy.set(false);
-            if st.wait > 0 {
-                me.wait.set(st.wait);
+        spawn_bg(move || b.start(), move |r| {
+            if me.gen.get() != g {
+                return;
             }
-            if let Some(e) = st.error.clone() {
-                me.error.set(Some(e));
-            } else if st.need_password {
-                me.hint.set(st.hint.clone());
-                me.password.set(String::new());
-                me.step.set(Step::Password);
-            } else {
-                ok(&me, st);
+            match r {
+                Ok(l) => {
+                    *me.link.borrow_mut() = l.link.clone();
+                    *me.token.borrow_mut() = l.token.clone();
+                    me.until.set(Some(Instant::now() + Duration::from_secs(l.expires.max(30))));
+                    me.left.set(l.expires as i64);
+                    me.stage.set(Stage::Waiting);
+                    // Telegram ilovasi (yoki tanlash oynasi) darhol ochiladi; foydalanuvchi botda «Start» bosadi.
+                    uzcoders::android::open_url(&l.link);
+                    me.poll(g);
+                }
+                Err(e) => {
+                    me.message.set(e);
+                    me.stage.set(Stage::Error);
+                }
             }
         });
     }
 
-    fn phone_digits(&self) -> String {
-        digits_of(&self.number.get())
-    }
-
-    fn submit(self: &Rc<Self>) {
-        if self.busy.get() {
-            return;
-        }
-        self.error.set(None);
-        match self.step.get() {
-            Step::Phone => {
-                let nd = self.phone_digits();
-                let need = self.country.get().map_or(0, |i| pattern_len(&COUNTRIES[i]));
-                let full = digits_of(&self.prefix.get()) + &nd;
-                if full.len() < 8 || (need > 0 && nd.len() < need) {
-                    self.error.set(Some("Raqamni to'liq kiriting".into()));
-                    return;
-                }
-                let phone = format!("+{full}");
-                self.run_bg(
-                    move |b| b.request_code(&phone),
-                    |me, st| {
-                        if st.logged_in {
-                            me.finish();
-                        } else {
-                            me.sent_info.set(st.sent.unwrap_or_else(|| "Kod yuborildi".into()));
-                            me.code.set(String::new());
-                            me.step.set(Step::Code);
-                        }
-                    },
-                );
+    /// Holatni har ~0,8 soniyada so'raydi (Kotlin bilan bir xil).
+    fn poll(self: &Rc<Self>, g: u32) {
+        let (b, me, token) = (self.backend.clone(), self.clone(), self.token.borrow().clone());
+        spawn_bg(move || {
+            std::thread::sleep(Duration::from_millis(800));
+            b.poll(&token)
+        }, move |p| {
+            if me.gen.get() != g || me.stage.get() != Stage::Waiting {
+                return;
             }
-            Step::Code => {
-                let code = self.code.get().trim().to_string();
-                if code.is_empty() {
-                    return;
-                }
-                self.run_bg(move |b| b.sign_in(&code), |me, st| {
-                    if st.done {
-                        me.finish();
-                    } else {
-                        me.error.set(Some("Kod noto'g'ri".into()));
-                    }
-                });
-            }
-            Step::Password => {
-                let p = self.password.get();
-                if p.is_empty() {
-                    return;
-                }
-                self.run_bg(move |b| b.check_password(&p), |me, st| {
-                    if st.done {
-                        me.finish();
-                    } else {
-                        me.error.set(Some("Parol noto'g'ri".into()));
-                    }
-                });
-            }
-            Step::Qr | Step::Finishing => {}
-        }
-    }
-
-    /// QR kirishni boshlaydi: kod har ~30 soniyada yangilanadi, boshqa qurilmada tasdiqlansa kirish davom etadi.
-    fn qr_start(self: &Rc<Self>) {
-        self.qr_img.set(None);
-        self.qr_until.set(None);
-        let gen = self.qr_gen.get() + 1;
-        self.qr_gen.set(gen);
-        self.qr_poll(gen);
-    }
-
-    fn qr_poll(self: &Rc<Self>, gen: u32) {
-        if self.step.get() != Step::Qr || self.qr_gen.get() != gen {
-            return;
-        }
-        let expired = self.qr_until.get().map_or(true, |t| std::time::Instant::now() >= t);
-        let (b, me) = (self.backend.clone(), self.clone());
-        spawn_bg(
-            move || {
-                let acc = b.qr_accepted();
-                let r = if expired || acc { Some(b.qr_token()) } else { None };
-                std::thread::sleep(std::time::Duration::from_millis(1000));
-                r
-            },
-            move |r| {
-                if me.step.get() != Step::Qr || me.qr_gen.get() != gen {
-                    return;
-                }
-                if let Some(st) = r {
-                    if st.done && st.url.is_none() {
-                        me.finish();
-                        return;
-                    }
-                    if st.need_password {
-                        me.hint.set(st.hint.clone());
-                        me.password.set(String::new());
-                        me.step.set(Step::Password);
-                        return;
-                    }
-                    match (st.url.as_deref(), st.error) {
-                        (Some(u), _) => {
-                            me.error.set(None);
-                            me.qr_img.set(crate::qr::qr_image(u).map(Rc::new));
-                            me.qr_until.set(Some(std::time::Instant::now() + std::time::Duration::from_secs(st.expires.max(5))));
-                        }
-                        (None, Some(e)) => {
-                            me.error.set(Some(e));
-                            me.qr_until.set(Some(std::time::Instant::now() + std::time::Duration::from_secs(5)));
-                        }
-                        _ => {}
-                    }
-                }
-                me.qr_poll(gen);
-            },
-        );
-    }
-
-    /// Telegram ulandi: ilova hisobini botga `/start <token>` yuborib tasdiqlaymiz va sessiya olamiz.
-    fn finish(self: &Rc<Self>) {
-        self.step.set(Step::Finishing);
-        self.error.set(None);
-        self.busy.set(true);
-        let (b, me) = (self.backend.clone(), self.clone());
-        spawn_bg(move || b.finish_login(), move |r| {
-            me.busy.set(false);
-            match r {
-                Ok(session) => {
+            match p {
+                Poll::Ok(session) => {
                     crate::api::save_session(&session);
                     (me.on_done)(session);
                 }
-                // Telegram ulangan: telefon oynasiga QAYTMAYMIZ (hisobdan chiqib ketgandek tuyulardi), qayta urinish beramiz.
-                Err(e) => me.error.set(Some(e)),
+                Poll::Expired => me.stage.set(Stage::Expired),
+                Poll::Banned(m) => {
+                    me.message.set(m);
+                    me.stage.set(Stage::Error);
+                }
+                Poll::Error(e) => {
+                    me.message.set(e);
+                    me.stage.set(Stage::Error);
+                }
+                Poll::Pending => {
+                    let left = me.until.get().map_or(0, |t| t.saturating_duration_since(Instant::now()).as_secs() as i64 + 1);
+                    me.left.set(left);
+                    if left <= 0 {
+                        me.stage.set(Stage::Expired);
+                    } else {
+                        me.poll(g);
+                    }
+                }
             }
         });
     }
 
     pub fn view(self: &Rc<Self>) -> Element {
-        match self.nav.current() {
-            Route::Login => self.login_view(),
-            Route::CountryPicker => self.picker_view(),
-        }
+        let content = match self.stage.get() {
+            Stage::Choose => self.choose_view(),
+            _ => self.bot_view(),
+        };
+        stack(vec![column(vec![]).bg(BG), content])
     }
 
-    fn login_view(self: &Rc<Self>) -> Element {
-        // Kod maydoni o'zgargan bo'lsa davlat yangilanadi.
-        let digits = digits_of(&self.prefix.get());
-        let cur = self.country.get();
-        let wanted = country_by_code(&digits, cur);
-        if wanted != cur {
-            self.country.set(wanted);
-        }
-        let country = self.country.get().map(|i| &COUNTRIES[i]);
-        PATTERN.with(|p| *p.borrow_mut() = country.map_or("", |c| c.pattern));
-
-        let step = self.step.get();
-        let subtitle = match step {
-            Step::Phone => "Telegram raqamingizni kiriting".to_string(),
-            Step::Finishing => "Hisob tasdiqlanmoqda...".to_string(),
-            Step::Code => format!(
-                "{}\n{} {}",
-                self.sent_info.get(),
-                self.prefix.get(),
-                self.number.get()
-            ),
-            Step::Password => "Ikki bosqichli parol".to_string(),
-            Step::Qr => "QR kodni Telegram bilan skanerlang".to_string(),
-        };
-
-        let me = self.clone();
-        let back = icon(ARROW_BACK, 28.0).color(Color::WHITE).on_click(move || {
-            me.back();
-        });
-
-        let mut body: Vec<Element> = vec![
-            row(vec![back]),
-            gap_box(0.0, 24.0),
-            row(vec![
-                t("ARU", 30.0, Color::WHITE).black(),
-                t("MEDIATV", 30.0, ACCENT2).black(),
-            ]),
-            gap_box(0.0, 6.0),
-            t(subtitle, 15.0, TEXT_DIM),
-            gap_box(0.0, 28.0),
-        ];
-
-        match step {
-            Step::Phone => {
-                body.push(
-                    t(
-                        "Davlatni tanlang va Telegram hisobingiz ulangan telefon raqamini kiriting.",
-                        14.0,
-                        TEXT_DIM,
-                    ),
-                );
-                body.push(gap_box(0.0, 14.0));
-                let me = self.clone();
-                let (iso, name, name_color) = match country {
-                    Some(c) => (c.iso, c.name.to_string(), Color::WHITE),
-                    None if digits.is_empty() => ("", "Davlatni tanlang".into(), ERROR),
-                    None => ("", "Noto'g'ri kod".into(), ERROR),
-                };
-                body.push(
-                    row(vec![
-                        crate::flags::flag_view(iso),
-                        t(name, 16.0, name_color).weight(1.0),
-                        icon(DROP_DOWN, 20.0).color(TEXT_DIM),
-                    ])
-                    .gap(8.0)
-                    .align(Align::Center)
-                    .flat_glass(GLASS)
-                    .radius(14.0)
-                    .padding_xy(14.0, 14.0)
-                    .on_click(move || {
-                        me.query.set(String::new());
-                        me.picker_scroll.scroll_to_top();
-                        me.nav.push(Route::CountryPicker);
-                    }),
-                );
-                body.push(gap_box(0.0, 12.0));
-                let hint = country
-                    .map(|c| c.pattern.replace('X', "0"))
-                    .filter(|h| !h.is_empty())
-                    .unwrap_or_else(|| "Telefon raqam".into());
-                let me = self.clone();
-                body.push(
-                    row(vec![
-                        self.styled(field(&self.prefix))
-                            .keyboard(KeyboardKind::Phone)
-                            .filter(|c| c.is_ascii_digit() || c == '+')
-                            .max_len(5)
-                            .format(format_prefix)
-                            .label("Kod")
-                            .width(96.0),
-                        self.styled(field(&self.number))
-                            .keyboard(KeyboardKind::Phone)
-                            .filter(is_digit)
-                            .max_len(country.map_or(15, |c| pattern_len(c).max(1)))
-                            .format(format_number)
-                            .label(hint)
-                            .weight(1.0)
-                            .on_submit(move || me.submit()),
-                    ])
-                    .gap(10.0)
-                    .align(Align::Center),
-                );
-            }
-            Step::Code => {
-                let me = self.clone();
-                body.push(
-                    self.styled(field(&self.code))
-                        .keyboard(KeyboardKind::Number)
-                        .filter(is_digit)
-                        .max_len(8)
-                        .label("Kod")
-                        .on_submit(move || me.submit()),
-                );
-            }
-            Step::Finishing => {
-                if self.busy.get() {
-                    body.push(column(vec![spinner(40.0, 3.0, ACCENT2)]).height(80.0).center());
-                } else {
-                    let (me, me2) = (self.clone(), self.clone());
-                    body.push(t("Telegram hisobingiz ulangan. Ilova hisobiga kirishni tasdiqlash tugamadi.", 14.0, TEXT_DIM));
-                    body.push(gap_box(0.0, 16.0));
-                    body.push(
-                        column(vec![t("Qayta urinish", 16.0, Color::WHITE).bold()])
-                            .flat_glass(ACCENT.with_opacity(0.62))
-                            .radius(16.0)
-                            .padding_xy(0.0, 16.0)
-                            .center()
-                            .on_click(move || me.finish()),
-                    );
-                    body.push(gap_box(0.0, 14.0));
-                    body.push(
-                        column(vec![t("Boshqa raqam bilan kirish", 14.0, ACCENT2)]).center().on_click(move || {
-                            let b = me2.backend.clone();
-                            spawn_bg(move || b.logout(), |_| {});
-                            me2.code.set(String::new());
-                            me2.password.set(String::new());
-                            me2.error.set(None);
-                            me2.step.set(Step::Phone);
-                        }),
-                    );
-                }
-            }
-            Step::Qr => {
-                body.push(match self.qr_img.get() {
-                    Some(img) => column(vec![image(&img, 240.0, 240.0)]).center().bg(Color::WHITE).radius(16.0).width(260.0).height(260.0),
-                    None => column(vec![spinner(28.0, 3.0, ACCENT2)]).center().border(1.0, BORDER_BRIGHT).radius(16.0).width(260.0).height(260.0),
-                });
-                body.push(gap_box(0.0, 12.0));
-                body.push(t(
-                    "Boshqa qurilmada Telegram -> Sozlamalar -> Qurilmalar -> Qurilmani ulash",
-                    12.0,
-                    TEXT_DIM,
-                ));
-            }
-            Step::Password => {
-                let me = self.clone();
-                if !self.hint.get().is_empty() {
-                    body.push(t(format!("Maslahat: {}", self.hint.get()), 13.0, TEXT_DIM));
-                    body.push(gap_box(0.0, 8.0));
-                }
-                body.push(
-                    self.styled(field(&self.password))
-                        .password()
-                        .label("Parol")
-                        .on_submit(move || me.submit()),
-                );
-            }
-        }
-
-        if let Some(e) = self.error.get() {
-            body.push(gap_box(0.0, 12.0));
-            body.push(t(e, 13.0, ERROR));
-        }
-
-        body.push(gap_box(0.0, 24.0));
-        let me = self.clone();
-        let label = match step {
-            Step::Phone => "Kod yuborish",
-            Step::Code => "Tasdiqlash",
-            Step::Password => "Kirish",
-            Step::Qr | Step::Finishing => "",
-        };
-        if step != Step::Qr && step != Step::Finishing {
-            body.push(
-                column(vec![if self.busy.get() {
-                    // Kotlin'dagi kabi: bosilganda tugma ichida aylanuvchi chiziq.
-                    column(vec![spinner(20.0, 2.0, Color::WHITE)]).height(24.0).center()
-                } else {
-                    t(label, 16.0, Color::WHITE).bold()
-                }])
-                    .flat_glass(ACCENT.with_opacity(if self.busy.get() { 0.5 } else { 0.62 }))
-                    .radius(16.0)
-                    .padding_xy(0.0, 16.0)
-                    .center()
-                    .on_click(move || me.submit()),
-            );
-        }
-        if step == Step::Phone {
-            body.push(gap_box(0.0, 16.0));
-            let me = self.clone();
-            body.push(
-                column(vec![t("QR orqali kirish", 14.0, ACCENT2).bold()])
-                    .center()
-                    .on_click(move || {
-                        me.error.set(None);
-                        me.step.set(Step::Qr);
-                        me.qr_start();
-                    }),
-            );
-        }
-        if step == Step::Code || step == Step::Password {
-            body.push(gap_box(0.0, 12.0));
-            let me = self.clone();
-            body.push(
-                column(vec![t("Raqamni o'zgartirish", 14.0, ACCENT2)])
-                    .center()
-                    .on_click(move || {
-                        me.reset_login();
-                        me.code.set(String::new());
-                        me.password.set(String::new());
-                        me.error.set(None);
-                        me.step.set(Step::Phone);
-                    }),
-            );
-        }
-        body.push(gap_box(0.0, 24.0));
-        body.push(
-            t(
-                "Telegram hisobingiz ilova ichida xavfsiz saqlanadi: u rasm va videolarni yopiq kanaldan olish uchun kerak.",
-                12.0,
-                TEXT_FAINT,
-            ),
-        );
-        body.push(gap_box(0.0, 24.0));
-
-        // Status bar va navigatsiya paneli ostida qolmaslik (Kotlin: `statusBarsPadding`).
-        let ins = safe_insets();
-        column(vec![scroll_column(&self.scroll, body)
-            .padding_each(24.0, 16.0 + ins.top, 24.0, 16.0 + ins.bottom)
-            .grow(1.0)])
-        .bg(BG)
-        // Fon: yumshoq rangli yorug'lik dog'lari (shisha panellar shu ustida turadi).
-        .glows(vec![
-            (0.10, 0.08, 300.0, Color::rgba(226, 98, 15, 120)),
-            (1.00, 0.45, 320.0, Color::rgba(110, 80, 230, 90)),
-            (0.20, 0.95, 300.0, Color::rgba(226, 98, 15, 70)),
+    /// Kapsula tugma (Kotlin `Choice`): 58 dp balandlik, to'liq yumaloq, chapda dumaloq logotip, matn o'rtada.
+    fn choice(label: &str, logo: Element, f: impl Fn() + 'static) -> Element {
+        let (w, _) = window_dp();
+        stack(vec![
+            row(vec![gap_box(7.0, 0.0), logo]).align(Align::Center),
+            column(vec![tx(label, 16.0, Color::WHITE).bold()]).center(),
         ])
+        .width((w - 48.0).max(200.0))
+        .height(58.0)
+        .bg(ACCENT)
+        .radius(29.0)
+        .on_click(f)
     }
 
-    /// Kirish maydonlarining umumiy ko'rinishi (Kotlin `OutlinedTextField` ga mos).
-    fn styled(&self, f: Element) -> Element {
-        f.color(Color::WHITE)
-            .size(16.0)
-            .line_height(24.0)
-            .letter_spacing(0.5)
-            .padding_each(16.0, 26.0, 16.0, 10.0)
-            .label_inside()
-            .flat_glass(GLASS)
-            .hint_color(TEXT_DIM)
-            .accent(ACCENT2)
-            .border(1.0, Color::TRANSPARENT)
-            .radius(14.0)
+    fn logo_circle(bg: Color, inner: Element) -> Element {
+        column(vec![inner]).center().width(44.0).height(44.0).radius(22.0).bg(bg)
     }
 
-    fn picker_view(self: &Rc<Self>) -> Element {
-        let q = self.query.get().trim().to_lowercase();
-        let qcode = q.trim_start_matches('+').to_string();
-        let list: Vec<usize> = COUNTRIES
-            .iter()
-            .enumerate()
-            .filter(|(_, c)| {
-                q.is_empty() || c.name.to_lowercase().contains(&q) || c.code.starts_with(&qcode)
-            })
-            .map(|(i, _)| i)
-            .collect();
-        let this = self.clone();
-        let rows = lazy_column(&self.picker_scroll, list.len(), 48.0, move |k| {
-            let i = list[k];
-            let c = &COUNTRIES[i];
-            let me = this.clone();
-            row(vec![
-                crate::flags::flag_view(c.iso),
-                t(c.name, 15.0, Color::WHITE).weight(1.0),
-                t(format!("+{}", c.code), 14.0, TEXT_DIM),
-            ])
-            .gap(8.0)
-            .align(Align::Center)
-            .padding_xy(8.0, 0.0)
-            .on_click(move || {
-                me.country.set(Some(i));
-                me.prefix.set(format!("+{}", COUNTRIES[i].code));
-                me.number.set(String::new());
-                me.nav.pop();
-            })
-        });
+    fn choose_view(self: &Rc<Self>) -> Element {
         let me = self.clone();
-        let back = icon(ARROW_BACK, 28.0).color(Color::WHITE).on_click(move || {
-            me.nav.pop();
-        });
-        let picker = column(vec![
-            row(vec![
-                back,
-                self.styled(field(&self.query))
-                    .label_bg(SURFACE)
-                    .label("Qidirish")
-                    .weight(1.0),
+        let tg = Self::logo_circle(Color::hex(0x229ED9), icon(TG_PATH, 26.0).color(Color::WHITE));
+        let g = google_paths();
+        let google = Self::logo_circle(
+            Color::WHITE,
+            stack(vec![
+                icon(g[0], 26.0).color(Color::hex(0xEA4335)),
+                icon(g[1], 26.0).color(Color::hex(0x4285F4)),
+                icon(g[2], 26.0).color(Color::hex(0xFBBC05)),
+                icon(g[3], 26.0).color(Color::hex(0x34A853)),
             ])
-            .gap(12.0)
-            .align(Align::Center)
-            .padding_each(16.0, 12.0 + safe_insets().top, 16.0, 12.0),
-            rows.padding_xy(16.0, 0.0).grow(1.0),
-        ]);
-        stack(vec![crate::theme::glass_backdrop(), picker])
+            .width(26.0)
+            .height(26.0),
+        );
+        let m2 = self.clone();
+        let mut kids = vec![
+            tx("Accountga kirish", 22.0, Color::WHITE).bold(),
+            gap_box(0.0, 8.0),
+            tx("Kirish usulini tanlang", 14.0, Color::rgba(255, 255, 255, 140)),
+            gap_box(0.0, 28.0),
+            Self::choice("Telegram orqali", tg, move || me.start_bot()),
+            gap_box(0.0, 12.0),
+            Self::choice("Google orqali", google, move || m2.message.set("Google orqali kirish keyingi yangilanishda qo'shiladi".into())),
+        ];
+        let msg = self.message.get();
+        if !msg.is_empty() {
+            kids.push(gap_box(0.0, 16.0));
+            kids.push(tx(msg, 13.0, Color::hex(0xF87171)));
+        }
+        column(kids).center().padding(24.0)
+    }
+
+    fn retry_btn(self: &Rc<Self>) -> Element {
+        let me = self.clone();
+        column(vec![tx("Qayta urinish", 15.0, Color::WHITE).bold()]).center().bg(ACCENT).radius(14.0).padding_xy(24.0, 12.0).on_click(move || me.start_bot())
+    }
+
+    fn bot_view(self: &Rc<Self>) -> Element {
+        let mut kids = vec![tx("Telegram orqali kirish", 22.0, Color::WHITE).bold(), gap_box(0.0, 10.0)];
+        match self.stage.get() {
+            Stage::Preparing | Stage::Choose => kids.push(spinner(32.0, 2.0, ACCENT)),
+            Stage::Waiting => {
+                let me = self.clone();
+                let (w, _) = window_dp();
+                let cw = (w - 48.0).max(200.0);
+                kids.push(tx("Telegram ilovasini tanlang, botda «Start» tugmasini bosib hisobingizni tasdiqlang. Tasdiqlangach ilova o'zi kiradi.", 14.0, TEXT_DIM).width(cw));
+                kids.push(gap_box(0.0, 20.0));
+                kids.push(
+                    column(vec![tx("Telegram ilovasini tanlash", 15.0, Color::WHITE).bold()])
+                        .center()
+                        .width(cw)
+                        .bg(ACCENT)
+                        .radius(16.0)
+                        .padding_xy(0.0, 15.0)
+                        .on_click(move || uzcoders::android::open_url(&me.link.borrow())),
+                );
+                kids.push(gap_box(0.0, 10.0));
+                kids.push(tx(format!("Havola muddati: {} s", self.left.get().max(0)), 12.0, TEXT_FAINT));
+            }
+            Stage::Expired => {
+                kids.push(tx("Havola muddati tugadi", 14.0, TEXT_DIM));
+                kids.push(gap_box(0.0, 14.0));
+                kids.push(self.retry_btn());
+            }
+            Stage::Error => {
+                kids.push(tx(self.message.get(), 14.0, Color::hex(0xF87171)));
+                kids.push(gap_box(0.0, 14.0));
+                kids.push(self.retry_btn());
+            }
+        }
+        let me = self.clone();
+        kids.push(gap_box(0.0, 24.0));
+        kids.push(tx("Orqaga", 14.0, TEXT_DIM).padding_xy(10.0, 10.0).on_click(move || {
+            me.restart();
+        }));
+        column(kids).center().padding(24.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn yol_kichraytiriladi() {
+        assert_eq!(scale_path("M24 9.5c3.54-1", 0.5), "M12.000 4.750c1.770-0.500");
     }
 }

@@ -7799,3 +7799,10 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 - **Ranglar:** `TEXT`, `TEXT_DIM`, `TEXT_FAINT` Kotlin `AruColors` qiymatiga o'tkazildi; `BORDER`, `CARD_ALT`, `ACCENT_TINT` qo'shildi.
 - **Tenglashtirilgan ekranlar:** Bosh sahifa (sarlavha ro'yxat bilan suriladi, karta 0,65 nisbat, 14 dp oraliq, baho/ko'rish/"Pullik" belgilari ustunda, `formatCompact` "1,3 mln"), pastki menyu (`SURFACE` fon, 9 sp yozuv), Qidiruv (`PageHeader`, maydon 18 dp, `SearchCard` 0,68), Profil sarlavhasi.
 - **Tekshirish:** `ARU_SNAPSHOT_DIR=/tmp/x cargo test bosh_sahifa` ekranlarni PNG qiladi (hostda, qurilmasiz). **Qoldi:** Katalog, Kutubxona, Bo'lim sahifasi, pleyer, izohlar, chat, admin; tarjimon logotipi kartada yo'q (Rust `Season` da `tr_id` yo'q).
+
+### Rust ilova: grammers olib tashlandi, kirish Kotlin'dagidek (bot orqali) (2026-11-22)
+- **grammers YO'Q:** `android/rust` (rust_core) da `telegram` xususiyati qo'shildi (default — yoqilgan, Kotlin ilova o'zgarmadi); `arumediatv-rs` uni `default-features = false` bilan o'chiradi (`telegram_off.rs` — pleyer/kesh uchun bo'sh nuqtalar). Telegram'ga faqat worker orqali.
+- **Kirish:** `login.rs` qayta yozildi — usul tanlash (Telegram / Google, Kotlin `AddAccountScreen` kabi kapsula tugmalar) va `BotLoginScreen` (worker `POST /api/auth/telegram/start` -> `deep_link` Telegram'da ochiladi -> holat har 0,8 s). Telefon/kod/QR/davlat ro'yxati olib tashlandi. **Google hali yo'q** (tugma xabar chiqaradi): brauzer orqali kirish worker endpointi + Google Cloud'da redirect URI kerak.
+- **Rasmlar:** posterlar worker `vd` tizimidan (`vd.rs`: `imginfo` + `img/<nom>`, AES-128-CTR ochish), Telegram yadrosi kerak emas. Yozishma fayllari `PUT /api/vd/small` (<= 18 MiB).
+- **Hali ishlamaydi (keyingi bosqich):** video yuklab olish va pleyer manbasi (`downloads.rs`, `tg_deliver`), emoji/stiker/GIF (`tgmedia`), admin kanal amallari, majburiy kanalga qo'shilish, 18 MiB dan katta yuklash.
+- CI: `arumediatv-rs.yml` APK'ni Telegramga yuborishda Python 3.14 + Pyrogram xatosi (`no current event loop`) berardi — `setup-python 3.11` qo'yildi.

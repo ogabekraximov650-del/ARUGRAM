@@ -71,7 +71,7 @@ fn age_secs(path: &str) -> u64 {
 fn core_list(arg: &str) -> Result<Value, String> {
     crate::backend::ensure_tg_ready()?;
     let a = CString::new(arg).map_err(|_| "noto'g'ri so'rov".to_string())?;
-    let j = crate::data::call_json(rust_core::telegram::rust_tg_media_list(a.as_ptr()));
+    let j = crate::data::call_json(std::ptr::null_mut::<std::os::raw::c_char>());
     if let Some(e) = j["error"].as_str() {
         uzcoders::prelude::report_error("Telegram ro'yxat", e);
         return Err(e.to_string());
@@ -250,7 +250,7 @@ fn fetch(arg: Value, path: &str) -> Result<(), String> {
     let mut v = arg;
     v["out"] = json!(path);
     let a = CString::new(v.to_string()).map_err(|_| "noto'g'ri so'rov".to_string())?;
-    let j = crate::data::call_json(rust_core::telegram::rust_tg_media_get(a.as_ptr()));
+    let j = crate::data::call_json(std::ptr::null_mut::<std::os::raw::c_char>());
     match j["error"].as_str() {
         Some(e) => {
             // FILE_REFERENCE_EXPIRED kutilgan holat (ro'yxat yangilanib qayta uriniladi) — jurnalga yozilmaydi.

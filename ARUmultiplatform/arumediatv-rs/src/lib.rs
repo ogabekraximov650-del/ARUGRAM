@@ -6,16 +6,14 @@ mod data;
 mod downloads;
 mod home;
 mod sync;
-mod countries;
-mod flags;
 mod login;
 mod player;
 mod gate;
 mod theme;
-mod qr;
 mod secure;
 mod tgmedia;
 mod tganim;
+mod vd;
 mod emojifont;
 mod webp;
 
@@ -137,22 +135,15 @@ mod tests {
     fn kirish_oynasi_chiziladi() {
         let mut ui = make_ui(1.0);
         let t = texts(&ui.frame(Size::new(360.0, 640.0)));
-        assert!(t.iter().any(|x| x == "ARU"));
-        assert!(t.iter().any(|x| x == "MEDIATV"));
-        assert!(t.iter().any(|x| x == "O'zbekiston" || x.contains("zbekiston")));
-        assert!(t.iter().any(|x| x == "Kod yuborish"));
+        assert!(t.iter().any(|x| x == "Accountga kirish"), "{t:?}");
+        assert!(t.iter().any(|x| x == "Telegram orqali"));
+        assert!(t.iter().any(|x| x == "Google orqali"));
     }
 
     fn pos(cmds: &[DrawCmd], what: &str) -> (f32, f32) {
         cmds.iter()
             .find_map(|c| match c {
-                DrawCmd::Text {
-                    x,
-                    baseline,
-                    text,
-                    size,
-                    ..
-                } if text == what => Some((*x + 4.0, *baseline - *size * 0.3)),
+                DrawCmd::Text { x, baseline, text, size, .. } if text == what => Some((*x + 4.0, *baseline - *size * 0.3)),
                 _ => None,
             })
             .unwrap_or_else(|| panic!("matn topilmadi: {what}"))
@@ -170,80 +161,21 @@ mod tests {
     }
 
     #[test]
-    fn telefon_kod_parol_bosqichlari() {
+    fn telegram_bot_bosqichi_va_orqaga() {
         let size = Size::new(360.0, 640.0);
         let mut ui = make_ui(1.0);
-        snap(&mut ui, "1_telefon", size);
+        snap(&mut ui, "1_kirish_tanlash", size);
         let cmds = ui.frame(size);
-        // Raqam maydoniga bosib, 9 ta raqam yozamiz.
-        let (x, y) = pos(&cmds, "00 000 00 00");
+        let (x, y) = pos(&cmds, "Telegram orqali");
         tap(&mut ui, x, y);
-        assert!(ui.wants_keyboard());
-        ui.frame(size);
-        for c in "901234567".chars() {
-            assert!(ui.key_char(c));
-            ui.frame(size);
-        }
-        snap(&mut ui, "2_raqam", size);
+        pump();
         let t = texts(&ui.frame(size));
-        assert!(t.iter().any(|x| x == "90 123 45 67"), "{t:?}");
-        // "Kod yuborish" -> kod bosqichi.
-        let cmds = ui.frame(size);
-        let (x, y) = pos(&cmds, "Kod yuborish");
-        tap(&mut ui, x, y);
-        pump();
-        let cmds = ui.frame(size);
-        assert!(texts(&cmds).iter().any(|x| x == "Tasdiqlash"));
-        snap(&mut ui, "3_kod", size);
-        // Kodni yozamiz -> parol bosqichi.
-        let (x, y) = pos(&cmds, "Kod");
-        tap(&mut ui, x, y);
-        ui.frame(size);
-        for c in "12345".chars() {
-            ui.key_char(c);
-        }
-        let cmds = ui.frame(size);
-        let (x, y) = pos(&cmds, "Tasdiqlash");
-        tap(&mut ui, x, y);
-        pump();
-        let cmds = ui.frame(size);
-        assert!(texts(&cmds).iter().any(|x| x == "Kirish"));
-        snap(&mut ui, "4_parol", size);
-        // Orqaga: parol -> telefon.
+        assert!(t.iter().any(|x| x == "Telegram orqali kirish"), "{t:?}");
+        assert!(t.iter().any(|x| x.starts_with("Havola muddati")), "{t:?}");
+        snap(&mut ui, "2_kirish_bot", size);
+        // Orqaga: bot oynasidan usul tanlashga.
         assert!(ui.key_back());
         let t = texts(&ui.frame(size));
-        assert!(t.iter().any(|x| x == "Kod yuborish"));
-    }
-
-    #[test]
-    fn davlat_tanlash() {
-        let size = Size::new(360.0, 640.0);
-        let mut ui = make_ui(1.0);
-        let cmds = ui.frame(size);
-        let (x, y) = pos(&cmds, "O'zbekiston");
-        tap(&mut ui, x, y);
-        let cmds = ui.frame(size);
-        assert!(texts(&cmds).iter().any(|x| x == "Qidirish" || x.contains("Qidirish")));
-        snap(&mut ui, "5_davlat", size);
-        // Qidiruvga "rus" yozamiz: ro'yxat qisqaradi.
-        let (x, y) = pos(&cmds, "Qidirish");
-        tap(&mut ui, x, y);
-        ui.frame(size);
-        for c in "rus".chars() {
-            ui.key_char(c);
-        }
-        let n = texts(&ui.frame(size)).len();
-        assert!(n < 15, "{n}");
-        // Orqaga -> kirish oynasi.
-        assert!(ui.key_back()); // fokusni oladi
-        assert!(ui.key_back()); // ekranni yopadi
-        assert!(texts(&ui.frame(size)).iter().any(|x| x == "Kod yuborish"));
-    }
-
-    #[test]
-    fn countries_royxati() {
-        assert!(crate::countries::COUNTRIES.len() > 200);
-        let uz = crate::login::country_by_code("998", None).unwrap();
-        assert_eq!(crate::countries::COUNTRIES[uz].iso, "UZ");
+        assert!(t.iter().any(|x| x == "Accountga kirish"));
     }
 }

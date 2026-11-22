@@ -7,6 +7,12 @@ edition = "2024"
 # cdylib — Android uchun .so, Dart FFI shu bilan ishlaydi
 crate-type = ["cdylib", "rlib"]
 
+[features]
+# UZ: `telegram` (grammers/MTProto) — Kotlin ilovasi uchun YOQILGAN (default). Rust ilova (`arumediatv-rs`) uni O'CHIRADI: Telegram'ga faqat worker orqali.
+# EN: `telegram` (grammers/MTProto) is on for the Kotlin app; the Rust app turns it off and talks to Telegram only through the worker.
+default = ["telegram"]
+telegram = ["dep:grammers-client", "dep:grammers-mtsender", "dep:grammers-session", "dep:glass_pumpkin", "dep:grammers-crypto", "dep:tokio", "dep:aes", "dep:ctr"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -35,26 +41,26 @@ hex = "0.4"
 #            baytlarni faqat xotiraga qaytaradi.
 # Versiyalar QAT'IY: 0.x kutubxonada kichik versiya ham API'ni
 # o'zgartirishi mumkin.
-grammers-client = { version = "=0.10.0", default-features = false }
-grammers-mtsender = "=0.10.0"
-grammers-session = { version = "=0.10.0", default-features = false, features = ["serde"] }
+grammers-client = { version = "=0.10.0", default-features = false, optional = true }
+grammers-mtsender = { version = "=0.10.0", optional = true }
+grammers-session = { version = "=0.10.0", default-features = false, features = ["serde"], optional = true }
 # grammers-crypto `glass_pumpkin = "2.0.0-rc0"` so'raydi va Cargo
 # 2.0.0-rc1 ni tanlaydi — u API'ni buzgan, kompilyatsiya yiqiladi.
 # Cargo.lock repoda saqlanmaydi, shu sabab versiya shu yerda qotiriladi.
-glass_pumpkin = "=2.0.0-rc0"
+glass_pumpkin = { version = "=2.0.0-rc0", optional = true }
 # 2 bosqichli parol (SRP) — `grammers` ning `check_password` kirish
 # tokenini (`future_auth_token`) tashlab yuboradi, shu sabab parol
 # `telegram.rs` da shu kutubxona bilan tekshiriladi.
-grammers-crypto = "=0.10.0"
-tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"] }
+grammers-crypto = { version = "=0.10.0", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "fs"], optional = true }
 # aes + ctr — Telegram'ga yuklanadigan fayllar AES-128-CTR bilan
 #              shifrlanadi (`telegram.rs` -> "SHIFRLAB YUKLASH"). CTR
 #              faylning ISTALGAN joyini alohida ochishga imkon beradi:
 #              pleyer faqat kerakli baytlarni oladi va ochadi.
 #              Versiyalar grammers-crypto bilan bir xil (qayta
 #              kompilyatsiya yo'q).
-aes = "0.9"
-ctr = "0.10"
+aes = { version = "0.9", optional = true }
+ctr = { version = "0.10", optional = true }
 # jni — ExoPlayer manbasi (`player_source.rs`) Java bilan shu orqali gaplashadi.
 jni = { version = "0.21", default-features = false }
 
