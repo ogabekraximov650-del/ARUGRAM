@@ -61,8 +61,13 @@ jobs:
           JR_KEY: ${{ secrets.JR_KEY }}
         run: |
           if ! git diff --name-only HEAD~1 HEAD | grep -q '^ci/DB_RECOVER$'; then echo "ci/DB_RECOVER o'zgarmagan — o'tkazildi"; exit 0; fi
-          if [ -z "${JR_KEY:-}" ]; then echo "::error::JR_KEY GitHub Secret qo'yilmagan"; exit 1; fi
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          # JR_KEY: GitHub Secret bo'lsa u, aks holda `tgstore/jr_key.enc` (ENCODE_TOKEN bilan shifrlangan).
+          if [ -z "${JR_KEY:-}" ] && [ -f ARUmultiplatform/tgstore/jr_key.enc ]; then
+            JR_KEY=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ARUmultiplatform/tgstore/jr_key.enc 2>/dev/null | tr -d '[:space:]')
+          fi
+          if [ -z "${JR_KEY:-}" ]; then echo "::error::JR_KEY topilmadi (secret ham, jr_key.enc ham)"; exit 1; fi
+          echo "::add-mask::$JR_KEY"
           DB=$(grep -E '^CHANNEL_ID=' ARUmultiplatform/tgstore/channels.txt | head -1 | cut -d= -f2- | tr -d '[:space:]')
           echo "::add-mask::$DB"
           (cd ARUmultiplatform/ample-rs && cargo build --release 2>&1 | tail -3)
