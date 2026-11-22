@@ -191,15 +191,10 @@ function buildPlayer(el, route, season, opts) {
           <div class="tt"><div class="t1"></div><div class="t2"></div></div>
           <button class="lock">${icon('lock_open', { size: 22 })}</button>
           <button class="gear">${icon('settings', { size: 22 })}</button>
+          <button class="eplist">${icon('playlist_play', { size: 22 })}</button>
           <button class="fsexit">${icon('fullscreen_exit', { size: 22 })}</button>
         </div>
-        <button class="pl-more pl-nfs-only">${icon('more_vert', { size: 22 })}</button>
         <div class="pl-bottom">
-          <div class="pl-brow pl-chips pl-fs-only">
-            <div class="pl-chip eplist">${icon('playlist_play', { size: 16 })}</div>
-            <div class="pl-chip speed">${icon('speed', { size: 16 })}<span class="sl">1x</span></div>
-            <div class="pl-chip hqc">HQ</div>
-          </div>
           <div class="pl-brow pl-fsbtns pl-fs-only">
             <button class="pl-fsb prev2">${icon('skip_previous', { size: 24 })}</button>
             <button class="pl-fsb main pp2">${icon('play_arrow', { size: 30 })}</button>
@@ -208,7 +203,7 @@ function buildPlayer(el, route, season, opts) {
           <div class="pl-brow">
             <div class="pl-track"><div class="tr"></div><div class="bf"></div><div class="pd"></div><div class="th"></div></div>
             <div class="pl-time">0:00/0:00</div>
-            <button class="pl-hq pl-nfs-only hq">HQ</button>
+            <button class="pl-fsx pl-nfs-only gearn">${icon('settings', { size: 22 })}</button>
             <button class="pl-fsx pl-nfs-only fsbtn"><svg width="22" height="22" viewBox="0 0 24 24" fill="#fff"><path d="M6 14c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1h3c.55 0 1-.45 1-1s-.45-1-1-1H7v-2c0-.55-.45-1-1-1zm0-4c.55 0 1-.45 1-1V7h2c.55 0 1-.45 1-1s-.45-1-1-1H6c-.55 0-1 .45-1 1v3c0 .55.45 1 1 1zm11 7h-2c-.55 0-1 .45-1 1s.45 1 1 1h3c.55 0 1-.45 1-1v-3c0-.55-.45-1-1-1s-1 .45-1 1v2zM14 7c0 .55.45 1 1 1h2v2c0 .55.45 1 1 1s1-.45 1-1V6c0-.55-.45-1-1-1h-3c-.55 0-1 .45-1 1z"/></svg></button>
           </div>
         </div>
@@ -386,29 +381,40 @@ function buildPlayer(el, route, season, opts) {
       if (!agg.done || agg.run) n.querySelector('.dlb').innerHTML = dlBtn(agg.run ? { ...agg, done: false } : agg);
       else n.querySelector('.dlb').innerHTML = dlBtn(agg);
       const box = n.querySelector('.dlq');
-      if (box.hidden) return;
-      box.innerHTML = qs.map((x) => {
-        const name = fileNameOf(e[`url_${x}`]); const st = dlStat(name);
-        const total = st.total || toI(e[`size_${x}`]);
-        const pct = total > 0 ? Math.min(100, Math.floor((st.got / total) * 100)) : 0;
-        const chips = `${st.queued && !st.run ? '<i class="dlc">navbatda</i>' : ''}${st.run && st.speed ? `<i class="dlc a">${formatBytes(st.speed)}/s</i>` : ''}${st.retry ? '<i class="dlc w">qayta urinilmoqda</i>' : ''}${st.error && !st.run ? `<i class="dlc w">xato</i>` : ''}`;
-        return `<div class="dlr" data-q="${x}"><div class="in"><div class="h"><b class="q">${x}</b><b class="p${st.done ? ' ok' : ''}">${st.done ? 100 : pct}%</b><span class="b">${formatBytes(st.done ? st.total : st.got)} / ${total > 0 ? formatBytes(total) : '\u2014'}</span></div>
-          ${chips ? `<div class="ch">${chips}</div>` : ''}<div class="pb"><div style="width:${st.done ? 100 : pct}%"></div></div></div>
-          ${st.done ? '' : `<button class="sq go">${icon(st.run || st.queued ? 'pause' : 'download', { size: 20, color: st.run || st.queued ? '#E2620F' : '#fff' })}</button>`}
-          <button class="sq rm">${icon('delete', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</button></div>`;
-      }).join('');
-      box.querySelectorAll('.dlr').forEach((r) => {
-        const x = r.dataset.q; const name = fileNameOf(e[`url_${x}`]);
-        r.querySelector('.q').addEventListener('click', () => playEpisode(e, { resumeMs: savedPosMs(e) }));
-        r.querySelector('.go')?.addEventListener('click', () => { const st = dlStat(name); if (st.run || st.queued) dlPause(name); else dlStart(name); });
-        r.querySelector('.rm').addEventListener('click', async () => {
-          const ok = await mdDialog({ title: 'Tozalash', html: `Rostanham ${x} sifatidagi videoni tozalab tashlaysizmi?`, confirm: { label: 'Tozalash', color: '#F87171' }, dismiss: 'Bekor qilish' });
-          if (ok) { await dlRemove(name); paintDl(); }
-        });
-      });
+      if (!box.hidden) renderDlBox(box, e);
     });
   }
-  const onDl = () => { if (!disposed) paintDl(); };
+
+  /** Sifat qatorlari (foiz, hajm, tezlik, pauza, tozalash) — qism qatorida va sozlamalar oynasida bir xil. */
+  function renderDlBox(box, e) {
+    const qs = qualitiesOf(e);
+    box.innerHTML = qs.map((x) => {
+      const name = fileNameOf(e[`url_${x}`]); const st = dlStat(name);
+      const total = st.total || toI(e[`size_${x}`]);
+      const pct = total > 0 ? Math.min(100, Math.floor((st.got / total) * 100)) : 0;
+      const chips = `${st.queued && !st.run ? '<i class="dlc">navbatda</i>' : ''}${st.run && st.speed ? `<i class="dlc a">${formatBytes(st.speed)}/s</i>` : ''}${st.retry ? '<i class="dlc w">qayta urinilmoqda</i>' : ''}${st.error && !st.run ? `<i class="dlc w">xato</i>` : ''}`;
+      return `<div class="dlr" data-q="${x}"><div class="in"><div class="h"><b class="q">${x}</b><b class="p${st.done ? ' ok' : ''}">${st.done ? 100 : pct}%</b><span class="b">${formatBytes(st.done ? st.total : st.got)} / ${total > 0 ? formatBytes(total) : '\u2014'}</span></div>
+        ${chips ? `<div class="ch">${chips}</div>` : ''}<div class="pb"><div style="width:${st.done ? 100 : pct}%"></div></div></div>
+        ${st.done ? '' : `<button class="sq go">${icon(st.run || st.queued ? 'pause' : 'download', { size: 20, color: st.run || st.queued ? '#E2620F' : '#fff' })}</button>`}
+        <button class="sq rm">${icon('delete', { fill: false, size: 20, color: 'rgba(255,255,255,0.7)' })}</button></div>`;
+    }).join('');
+    box.querySelectorAll('.dlr').forEach((r) => {
+      const x = r.dataset.q; const name = fileNameOf(e[`url_${x}`]);
+      r.querySelector('.q').addEventListener('click', () => playEpisode(e, { resumeMs: savedPosMs(e) }));
+      r.querySelector('.go')?.addEventListener('click', () => { const st = dlStat(name); if (st.run || st.queued) dlPause(name); else dlStart(name); });
+      r.querySelector('.rm').addEventListener('click', async () => {
+        const ok = await mdDialog({ title: 'Tozalash', html: `Rostanham ${x} sifatidagi videoni tozalab tashlaysizmi?`, confirm: { label: 'Tozalash', color: '#F87171' }, dismiss: 'Bekor qilish' });
+        if (ok) { await dlRemove(name); paintDl(); }
+      });
+    });
+
+  }
+  const onDl = () => {
+    if (disposed) return;
+    paintDl();
+    const d = sheetEl?.querySelector('.shdl');
+    if (d && cur) renderDlBox(d, cur);
+  };
   window.addEventListener('aru-dl', onDl);
 
   function centerOnCur() {
@@ -958,8 +964,6 @@ function buildPlayer(el, route, season, opts) {
     introIdx = -1; $('.pl-intro').classList.remove('on');
     seekTo((to + 400) / 1000);
   });
-  $('.hq').addEventListener('click', openQuality);
-  $('.hqc').addEventListener('click', openQuality);
   $('.fsbtn').addEventListener('click', () => setFs(true));
   $('.fsexit').addEventListener('click', () => setFs(false));
   $('.fsback').addEventListener('click', () => setFs(false));
@@ -1016,38 +1020,95 @@ function buildPlayer(el, route, season, opts) {
       else if (id === 'sleep') { closePanels(); openSleep(); }
     }));
   }
-  $('.pl-more').addEventListener('click', () => {
-    if (pMenu.classList.contains('on')) { closePanels(); return; }
-    bindSettings(pMenu);
-    const r = $('.pl-more').getBoundingClientRect();
-    pMenu.style.top = `${r.bottom + 6}px`;
-    pMenu.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
-    pMenu.classList.add('on'); scrim.classList.add('on'); clearTimeout(hideT);
-  });
-  $('.gear').addEventListener('click', () => { bindSettings(pSet); pSet.classList.add('on'); scrim.classList.add('on'); clearTimeout(hideT); });
-  $('.speed').addEventListener('click', () => {
-    pSpeed.innerHTML = SPEEDS.map((s) => `<div class="${s === rate ? 'sel' : ''}" data-s="${s}">${s}×</div>`).join('');
-    pSpeed.querySelectorAll('div').forEach((d) => d.addEventListener('click', () => {
-      rate = +d.dataset.s; video.playbackRate = rate; $('.sl').textContent = `${rate}x`; closePanels();
-    }));
-    pSpeed.classList.add('on'); scrim.classList.add('on'); clearTimeout(hideT);
-  });
-  $('.eplist').addEventListener('click', () => {
-    const list = ordered();
-    pEps.innerHTML = `<div class="hd"><span class="n">${esc(sStr('nomi'))} · ${bolim()}-bo'lim</span><span class="c">${list.length} qism</span></div>
-      <div class="pl-hr"></div>${list.map((e) => {
-    const c = cur && epKey(e) === epKey(cur);
-    const en = `${e.epizod_name ?? ''}`;
-    return `<div class="it${c ? ' cur' : ''}" data-k="${esc(epKey(e))}">${c ? icon('play_arrow', { size: 20, color: '#C2410C' }) : ''}${epNum(e)}-qism${en ? `<span class="en">${esc(en)}</span>` : ''}</div>`;
-  }).join('')}`;
-    pEps.querySelectorAll('.it').forEach((n) => n.addEventListener('click', () => {
-      const e = list.find((x) => epKey(x) === n.dataset.k);
-      closePanels();
-      if (e && !(cur && epKey(e) === epKey(cur))) playEpisode(e, { resumeMs: savedPosMs(e), playing: intended });
-    }));
-    pEps.classList.add('on'); scrim.classList.add('on'); clearTimeout(hideT);
-    const c = pEps.querySelector('.it.cur'); if (c) pEps.scrollTop = c.offsetTop - 90;
-  });
+  // ── Sozlamalar va qismlar ro'yxati oynalari (Android `PlayerSheetHost`: tik — pastki oyna, to'liq ekranda — o'ngdagi panel) ──
+  let sheetEl = null;
+  function closeSheet() {
+    if (!sheetEl) return;
+    const n = sheetEl; sheetEl = null; n.classList.remove('in');
+    setTimeout(() => n.remove(), 240);
+    if (!locked) scheduleHide();
+  }
+  function openSheet(title, build) {
+    closePanels(); closeSheet(); holdShown();
+    const host = fs ? box : el;
+    const n = document.createElement('div');
+    n.className = `plsh${fs ? ' fs' : ''}`;
+    n.innerHTML = `<div class="shp"><div class="sht"><span>${esc(title)}</span><b class="shx">\u2715</b></div><div class="shb"></div></div>`;
+    n.addEventListener('click', (e) => { if (e.target === n) closeSheet(); });
+    n.querySelector('.shx').addEventListener('click', closeSheet);
+    host.appendChild(n);
+    sheetEl = n;
+    const body = n.querySelector('.shb');
+    build(body);
+    requestAnimationFrame(() => n.classList.add('in'));
+  }
+  const chip = (t, on, attrs = '') => `<button class="shc${on ? ' on' : ''}" ${attrs}>${esc(t)}</button>`;
+  const toggle = (id, label, on) => `<div class="sht2" data-id="${id}"><span>${label}</span><label class="switch"><input type="checkbox"${on ? ' checked' : ''}><span class="tr"></span><span class="th"></span></label></div>`;
+  const SPEED_OPTS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  function openSettings() {
+    openSheet('Sozlamalar', (body) => {
+      const paint = () => {
+        const have = cur ? qualitiesOf(cur) : [];
+        const sel = cur ? pickQuality(cur) : '';
+        body.innerHTML = `${have.length ? `<div class="shl">SIFAT</div><div class="shg">${have.map((x) => {
+          const sz = toI(cur[`size_${x}`]);
+          return chip(`${x}${sz > 0 ? ` \u00B7 ${formatBytes(sz)}` : ''}`, x === sel, `data-q="${x}"`);
+        }).join('')}</div>
+        <div class="shl">YUKLAB OLISH</div><div class="shdl"></div>` : ''}
+        <div class="shl">TEZLIK</div><div class="shg">${SPEED_OPTS.map((v) => chip(v === 1 ? 'Oddiy' : `${v}x`, rate === v, `data-s="${v}"`)).join('')}</div>
+        <div class="shl">AVTOMATIK</div>
+        ${toggle('next', 'Keyingi qismni avto ochish', playerSettings.autoNextEpisode)}
+        ${toggle('skip', "Introni avto o'tkazish", playerSettings.autoSkipIntro)}
+        <div class="shl">UYQU TAYMERI${sleepMin > 0 ? ` \u00B7 ${Math.floor(sleepLeft / 60) + 1} daqiqa qoldi` : ''}</div>
+        <div class="shg">${chip("O'chiq", sleepMin <= 0, 'data-m="0"')}${[15, 30, 45, 60, 90].map((m) => chip(`${m} daqiqa`, false, `data-m="${m}"`)).join('')}</div>
+        <div class="shl">TASVIRNI YAXSHILASH</div>
+        <div class="shg">${ENH_LABEL.map((l, i) => chip(l, playerSettings.enhance === i, `data-e="${i}"`)).join('')}</div>`;
+        const dl = body.querySelector('.shdl');
+        if (dl && cur) renderDlBox(dl, cur);
+        body.querySelectorAll('[data-q]').forEach((b) => b.addEventListener('click', () => {
+          const q = b.dataset.q; closeSheet();
+          if (!cur || q === pickQuality(cur)) return;
+          selQ = q; userChose = true;
+          playEpisode(cur, { resumeMs: video.currentTime * 1000, playing: intended, recovery: true });
+        }));
+        body.querySelectorAll('[data-s]').forEach((b) => b.addEventListener('click', () => { rate = +b.dataset.s; video.playbackRate = rate; paint(); }));
+        body.querySelectorAll('[data-m]').forEach((b) => b.addEventListener('click', () => { const m = +b.dataset.m; setSleep(m); if (m > 0) closeSheet(); else paint(); }));
+        body.querySelectorAll('[data-e]').forEach((b) => b.addEventListener('click', () => { playerSettings.setEnhance(+b.dataset.e); applyEnhance(); paint(); }));
+        body.querySelectorAll('.sht2').forEach((r) => r.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          const id = r.dataset.id;
+          if (id === 'next') playerSettings.setAutoNextEpisode(!playerSettings.autoNextEpisode);
+          else {
+            const on = !playerSettings.autoSkipIntro;
+            playerSettings.setAutoSkipIntro(on);
+            if (on) { introTries = {}; lastSkip = 0; if (introIdx >= 0) { introTries[introIdx] = 1; lastSkip = Date.now(); seekTo((ranges[introIdx][1] + 400) / 1000); $('.pl-intro').classList.remove('on'); } }
+          }
+          paint();
+        }));
+      };
+      paint();
+      body._repaint = paint;
+    });
+  }
+  function openEpisodeSheet() {
+    openSheet('Qismlar', (body) => {
+      const list = ordered();
+      body.innerHTML = `<div class="shep">${list.map((e) => {
+        const c = cur && epKey(e) === epKey(cur);
+        const en = `${e.epizod_name ?? ''}`;
+        return `<div class="it${c ? ' cur' : ''}" data-k="${esc(epKey(e))}"><b>${epNum(e)}-qism</b>${en ? `<span>${esc(en)}</span>` : ''}</div>`;
+      }).join('')}</div>`;
+      body.querySelectorAll('.it').forEach((n) => n.addEventListener('click', () => {
+        const e = list.find((x) => epKey(x) === n.dataset.k);
+        closeSheet();
+        if (e && !(cur && epKey(e) === epKey(cur))) playEpisode(e, { resumeMs: savedPosMs(e), playing: intended });
+      }));
+      const c = body.querySelector('.it.cur'); if (c) body.scrollTop = Math.max(0, c.offsetTop - 70);
+    });
+  }
+  $('.gear').addEventListener('click', openSettings);
+  $('.gearn').addEventListener('click', openSettings);
+  $('.eplist').addEventListener('click', openEpisodeSheet);
 
   // Uxlash vaqti
   const sleepEl = $('.pl-sleep');
