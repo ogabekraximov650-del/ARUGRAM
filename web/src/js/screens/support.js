@@ -534,7 +534,7 @@ function buildChat(el, opts = {}) {
   const rows = new Map(); // id -> {sig, el}
 
   const isMine = (m) => (chat.isAdminView ? m.fromAdmin : !m.fromAdmin);
-  const nameOf = (m) => (isMine(m) ? 'Siz' : title);
+  const nameOf = (m) => (isMine(m) ? 'Siz' : (title || 'Admin'));
 
   function snippet(m) {
     const body = tgSplitReply(m.body)[1];
