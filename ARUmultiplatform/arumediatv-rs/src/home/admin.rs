@@ -17,16 +17,20 @@ const AD_CHEVRON: &str = "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z";
 const AD_SEARCH: &str = "M15.5,14h-0.79l-0.28,-0.27C15.41,12.59 16,11.11 16,9.5 16,5.91 13.09,3 9.5,3S3,5.91 3,9.5 5.91,16 9.5,16c1.61,0 3.09,-0.59 4.23,-1.57l0.27,0.28v0.79l5,4.99L20.49,19l-4.99,-5zM9.5,14C7.01,14 5,11.99 5,9.5S7.01,5 9.5,5 14,7.01 14,9.5 11.99,14 9.5,14z";
 
 /// Admin bo'limlari: (nom, izoh, belgi).
-const SECTIONS: [(&str, &str, &str); 8] = [
+const SECTIONS: [(&str, &str, &str); 11] = [
     ("Animelarni boshqarish", "Qo'shish, tahrirlash, o'chirish", AD_MOVIE),
     ("Foydalanuvchilar", "Balans, obuna, bloklash", AD_PEOPLE),
     ("Suhbatlar", "Foydalanuvchilar yozishmalari", AD_CHAT),
     ("Shikoyatlar", "Izohlarga kelgan shikoyatlar", AD_FLAG),
+    ("Emoji, GIF va stikerlar", "Yuklangan rasmlarni ko'rib chiqish", AD_EMOJI),
     ("Majburiy obunalar", "Kanallar, limit va statistika", AD_CAMPAIGN),
     ("Umumiy statistika", "Kontent, foydalanuvchilar, ko'rishlar, trafik", AD_INSIGHTS),
     ("Kodlash navbati", "Kodlanayotgan va navbatdagi qismlar, log", AD_MOVIE),
+    ("Ma'lumotlar bazasi", "Jurnallar, ustunlar va yozuvlarni ko'rish (faqat o'qish)", AD_INSIGHTS),
     ("Ilova va xavfsizlik", "Eng past versiya, ulanish kaliti", AD_SECURITY),
+    ("Brauzer", "Istalgan saytni nom yoki havola bilan oching, kiring va cookies.txt oling (yuklash boti uchun)", AD_SECURITY),
 ];
+const AD_EMOJI: &str = "M11.99,2C6.47,2 2,6.48 2,12s4.47,10 9.99,10C17.52,22 22,17.52 22,12S17.52,2 11.99,2zM12,20c-4.42,0 -8,-3.58 -8,-8s3.58,-8 8,-8 8,3.58 8,8 -3.58,8 -8,8zM15.5,11c0.83,0 1.5,-0.67 1.5,-1.5S16.33,8 15.5,8 14,8.67 14,9.5s0.67,1.5 1.5,1.5zM8.5,11c0.83,0 1.5,-0.67 1.5,-1.5S9.33,8 8.5,8 7,8.67 7,9.5 7.67,11 8.5,11zM12,17.5c2.33,0 4.31,-1.46 5.11,-3.5H6.89c0.8,2.04 2.78,3.5 5.11,3.5z";
 
 fn num(v: &Value) -> i64 {
     v.as_i64().or_else(|| v.as_f64().map(|f| f as i64)).or_else(|| v.as_str().and_then(|s| s.parse().ok())).unwrap_or(0)
@@ -137,24 +141,25 @@ impl Home {
         let mut kids: Vec<Element> = Vec::new();
         for (i, (title, hint, ic)) in SECTIONS.iter().enumerate() {
             let me = self.clone();
+            // Kotlin `AdminHubScreen`: karta 20 dp, belgi qutisi 14 dp (`ACCENT2` 14%), nom 16 sp, izoh 12 sp (oq 55%), strelka (oq 38%).
             kids.push(
-                Self::pglass(
-                    row(vec![
-                        column(vec![icon(ic, 26.0).color(ACCENT2)]).center().width(52.0).height(52.0).radius(16.0).bg(ACCENT.with_opacity(0.2)),
-                        column(vec![tx(*title, 16.0, Color::WHITE).bold(), tx(*hint, 12.0, Color::WHITE)]).weight(1.0),
-                        icon(AD_CHEVRON, 24.0).color(Color::WHITE),
-                    ])
-                    .gap(16.0)
-                    .align(Align::Center)
-                    .padding_xy(18.0, 14.0),
-                )
-                .radius(26.0)
+                row(vec![
+                    column(vec![icon(ic, 26.0).color(ACCENT2)]).padding(12.0).radius(14.0).bg(ACCENT2.with_opacity(0.14)),
+                    gap_box(16.0, 0.0),
+                    column(vec![tx(*title, 16.0, Color::WHITE).bold(), gap_box(0.0, 3.0), tx(*hint, 12.0, Color::rgba(255, 255, 255, 140))]).weight(1.0),
+                    icon(AD_CHEVRON, 24.0).color(Color::rgba(255, 255, 255, 97)),
+                ])
+                .align(Align::Center)
+                .bg(CARD)
+                .border(1.0, BORDER)
+                .radius(20.0)
+                .padding_xy(20.0, 18.0)
                 .margin_each(0.0, 0.0, 0.0, 12.0)
                 .on_click(move || me.open_admin_section(i)),
             );
         }
         kids.push(gap_box(0.0, 32.0));
-        self.scaffold("Admin paneli", scroll_column(&self.settings_scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0))
+        self.scaffold("Admin paneli", scroll_column(&self.settings_scroll, kids).padding_each(16.0, 8.0, 16.0, 0.0))
     }
 
     fn open_admin_section(self: &Rc<Self>, i: usize) {
@@ -164,10 +169,10 @@ impl Home {
             1 => self.open_admin_users(),
             2 => self.open_admin_list(0),
             3 => self.open_admin_list(1),
-            4 => self.open_admin_channels(),
-            5 => self.open_admin_stats(),
-            6 => self.open_admin_encode(),
-            7 => self.open_admin_app(),
+            5 => self.open_admin_channels(),
+            6 => self.open_admin_stats(),
+            7 => self.open_admin_encode(),
+            9 => self.open_admin_app(),
             _ => {
                 self.dlg_msg.set(format!("«{}» bo'limi Rust ilovada hali tayyor emas — Kotlin ilovada mavjud.", SECTIONS[i].0));
                 self.dlg.set(5);
@@ -293,31 +298,31 @@ impl Home {
         if !p.loading.get() && *p.last_q.borrow() != p.query.get().trim() {
             self.users_load(p, 0);
         }
-        let search = Self::pglass(
-            row(vec![
-                icon(AD_SEARCH, 22.0).color(Color::WHITE),
-                field(&p.query).color(Color::WHITE).size(16.0).hint("ID yoki username").hint_color(Color::rgba(255, 255, 255, 120)).accent(ACCENT2).padding_xy(0.0, 10.0).no_border().weight(1.0),
-            ])
-            .gap(10.0)
-            .align(Align::Center)
-            .padding_xy(16.0, 4.0),
-        )
-        .radius(26.0);
+        let search = row(vec![
+            icon(AD_SEARCH, 22.0).color(Color::rgba(255, 255, 255, 179)),
+            field(&p.query).color(Color::WHITE).size(16.0).hint("ID yoki username").hint_color(Color::rgba(255, 255, 255, 120)).accent(ACCENT2).padding_xy(0.0, 10.0).no_border().weight(1.0),
+        ])
+        .gap(10.0)
+        .align(Align::Center)
+        .bg(CARD)
+        .border(1.0, BORDER_BRIGHT)
+        .radius(14.0)
+        .padding_xy(16.0, 4.0);
         let sorts: Vec<Element> = ["Yangi qo'shilgan", "Oxirgi onlayn"]
             .iter()
             .enumerate()
             .map(|(i, l)| {
                 let (ps, pl, me) = (p.sort.clone(), p.clone(), self.clone());
                 let on = p.sort.get() as usize == i;
-                let e = column(vec![tx(*l, 12.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 170) }).bold()]).center().padding_xy(14.0, 8.0).radius(18.0).on_click(move || {
+                let e = column(vec![tx(*l, 12.0, if on { Color::WHITE } else { TEXT_DIM }).bold()]).center().padding_xy(12.0, 7.0).radius(10.0).on_click(move || {
                     ps.set(i as u8);
                     me.users_load(&pl, 0);
                 });
-                if on { e.gradient(ACCENT, ACCENT2) } else { e.bg(Color::rgba(255, 255, 255, 18)) }
+                if on { e.bg(ACCENT) } else { e.bg(CARD) }
             })
             .collect();
         let items = p.items.get();
-        let mut head = vec![search, gap_box(0.0, 10.0), row(sorts.into_iter().chain([spacer(), tx(format!("{} ta", p.total.get()), 12.0, Color::WHITE)]).collect()).gap(8.0).align(Align::Center), gap_box(0.0, 10.0)];
+        let mut head = vec![search, gap_box(0.0, 10.0), row(sorts.into_iter().chain([spacer(), tx(format!("{} ta", p.total.get()), 12.0, TEXT_FAINT)]).collect()).gap(8.0).align(Align::Center), gap_box(0.0, 10.0)];
         if !p.msg.get().is_empty() {
             let pm = p.clone();
             head.push(tx(p.msg.get(), 13.0, Color::WHITE).bg(Color::rgba(0, 0, 0, 120)).radius(14.0).padding_xy(14.0, 8.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pm.msg.set(String::new())));
@@ -337,18 +342,18 @@ impl Home {
                 }
                 let letter: String = u.name.trim_start_matches('@').chars().take(1).flat_map(|c| c.to_uppercase()).collect();
                 let mut r = vec![
-                    column(vec![tx(letter, 16.0, ACCENT2).bold()]).center().width(44.0).height(44.0).radius(22.0).bg(ACCENT.with_opacity(0.22)),
+                    column(vec![tx(letter, 16.0, ACCENT2).bold()]).center().width(44.0).height(44.0).radius(22.0).bg(ACCENT_TINT),
                     column(vec![
                         tx(u.name.clone(), 14.0, Color::WHITE).bold(),
-                        tx(format!("ID {}{}", u.id, if u.username.is_empty() { String::new() } else { format!(" · @{}", u.username) }), 12.0, Color::WHITE),
-                        tx(sub.join(" · "), 11.0, Color::WHITE),
+                        tx(format!("ID {}{}", u.id, if u.username.is_empty() { String::new() } else { format!(" · @{}", u.username) }), 12.0, TEXT_DIM),
+                        tx(sub.join(" · "), 11.0, TEXT_FAINT),
                     ])
                     .weight(1.0),
                 ];
                 if u.banned {
                     r.push(tx("BLOK", 10.0, ERROR).black().bg(ERROR.with_opacity(0.18)).radius(8.0).padding_xy(8.0, 4.0));
                 }
-                kids.push(Self::pglass(row(r).gap(12.0).align(Align::Center).padding(12.0)).radius(22.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pc.modal.set(Modal::Menu(uc.clone()))));
+                kids.push(row(r).gap(12.0).align(Align::Center).bg(CARD).border(1.0, BORDER).radius(16.0).padding(12.0).margin_each(0.0, 0.0, 0.0, 8.0).on_click(move || pc.modal.set(Modal::Menu(uc.clone()))));
             }
             if p.has_more.get() {
                 let (pc, me) = (p.clone(), self.clone());
@@ -543,23 +548,23 @@ impl Home {
                 let from_admin = t["last_from_admin"].as_bool().unwrap_or(false);
                 let unread = num(&t["unread"]);
                 let letter: String = name.trim_start_matches('@').chars().take(1).flat_map(|c| c.to_uppercase()).collect();
-                let mut right = vec![tx(ago(num(&t["last_at"])), 10.0, Color::WHITE)];
+                let mut right = vec![tx(ago(num(&t["last_at"])), 10.0, TEXT_FAINT)];
                 if unread > 0 {
                     right.push(tx(unread.to_string(), 11.0, Color::WHITE).bold().bg(ACCENT).radius(10.0).padding_xy(8.0, 2.0).margin_each(0.0, 4.0, 0.0, 0.0));
                 }
                 let (me, pc, t2) = (self.clone(), p.clone(), t.clone());
                 kids.push(
-                    Self::pglass(
-                        row(vec![
-                            column(vec![tx(letter, 16.0, ACCENT2).bold()]).center().width(44.0).height(44.0).radius(22.0).bg(ACCENT.with_opacity(0.22)),
-                            column(vec![tx(name, 14.0, Color::WHITE).bold(), tx(format!("{}{}", if from_admin { "Siz: " } else { "" }, if last.is_empty() { "Fayl" } else { last }), 12.0, Color::WHITE)]).weight(1.0),
-                            column(right).align(Align::End),
-                        ])
-                        .gap(12.0)
-                        .align(Align::Center)
-                        .padding(12.0),
-                    )
-                    .radius(22.0)
+                    row(vec![
+                        column(vec![tx(letter, 16.0, ACCENT2).bold()]).center().width(44.0).height(44.0).radius(22.0).bg(ACCENT_TINT),
+                        column(vec![tx(name, 14.0, Color::WHITE).bold(), tx(format!("{}{}", if from_admin { "Siz: " } else { "" }, if last.is_empty() { "Fayl" } else { last }), 12.0, TEXT_DIM)]).weight(1.0),
+                        column(right).align(Align::End),
+                    ])
+                    .gap(12.0)
+                    .align(Align::Center)
+                    .bg(CARD)
+                    .border(1.0, BORDER)
+                    .radius(16.0)
+                    .padding(12.0)
                     .margin_each(0.0, 0.0, 0.0, 8.0)
                     .on_click(move || {
                         let _ = (&pc, &t2);
