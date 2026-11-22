@@ -220,9 +220,11 @@ async fn main() {
     let tg = match (env("TG_BOT_TOKEN"), env("TG_CHANNEL_ID")) { (Some(t), Some(c)) => Some(tg::Tg::new(t, c)), _ => None };
     let key = env("JR_KEY").and_then(|k| crypto::key32(&k).ok());
 
+    let recover_only = env("RECOVER_OUT").is_some();
     let store = if !cfg.dir.join("main.db").exists() && tg.is_some() && key.is_some() {
         match store::recover(cfg.clone(), tg.as_ref().unwrap(), key.as_ref().unwrap()).await {
             Ok((s, n)) => { log(&format!("Telegram'dan tiklandi, seq {} qayta o'ynaldi {}", s.seq, n)); s }
+            Err(e) if recover_only => { log(&format!("TIKLAB BO'LMADI (bo'sh baza ochilmaydi): {}", e)); std::process::exit(2); }
             Err(e) => { log(&format!("tiklab bo'lmadi (yangi bo'sh baza ochiladi): {}", e)); let _ = std::fs::remove_dir_all(&cfg.dir); store::Store::open(cfg.clone()).await.expect("baza ochilmadi") }
         }
     } else { store::Store::open(cfg.clone()).await.expect("baza ochilmadi") };
