@@ -358,11 +358,12 @@ impl Home {
             .map(|(i, t)| {
                 let st = p.tab.clone();
                 let on = i == tab;
-                let e = column(vec![tx(*t, 13.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 140) }).bold()]).center().weight(1.0).padding_xy(4.0, 8.0).radius(11.0).on_click(move || st.set(i));
+                let label = if on { tx(*t, 13.0, Color::WHITE).bold() } else { tx(*t, 13.0, Color::rgba(255, 255, 255, 138)) };
+                let e = column(vec![label]).center().weight(1.0).height(32.0).radius(11.0).on_click(move || st.set(i));
                 if on { e.bg(ACCENT) } else { e }
             })
             .collect();
-        let tab_bar = Self::card_box(row(tabs).gap(2.0).padding_xy(3.0, 3.0)).radius(14.0).margin_each(16.0, 10.0, 16.0, 6.0);
+        let tab_bar = Self::card_box(row(tabs).padding_xy(3.0, 3.0)).radius(14.0).margin_each(16.0, 8.0, 16.0, 6.0);
 
         let body = match tab {
             0 => self.season_info_tab(p, &info),
@@ -377,7 +378,7 @@ impl Home {
         let mut layers = vec![
             Self::glass_backdrop(),
             column(vec![body.padding_add(0.0, top_h, 0.0, ins.bottom).grow(1.0)]),
-            column(vec![cover, tab_bar]),
+            column(vec![cover, tab_bar]).bg(BG),
         ];
         if p.rating_open.get() {
             layers.push(self.rating_dialog(p, &info));

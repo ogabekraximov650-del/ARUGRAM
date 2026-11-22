@@ -31,7 +31,7 @@ const BELL: &str = "M12,22c1.1,0 2,-0.9 2,-2h-4c0,1.1 0.89,2 2,2zM18,16v-5c0,-3.
 const REFRESH: &str = "M17.65,6.35C16.2,4.9 14.21,4 12,4c-4.42,0 -7.99,3.58 -7.99,8s3.57,8 7.99,8c3.73,0 6.84,-2.55 7.73,-6h-2.08c-0.82,2.33 -3.04,4 -5.65,4 -3.31,0 -6,-2.69 -6,-6s2.69,-6 6,-6c1.66,0 3.14,0.69 4.22,1.78L13,11h7V4l-2.35,2.35z";
 const CLOSE: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
 const MENU: &str = "M3,18h18v-2L3,16v2zM3,13h18v-2L3,11v2zM3,6v2h18L21,6L3,6z";
-const CAT_TABS: [&str; 7] = ["Barchasi", "Reytingi baland", "Eng ko'p ko'rilgan", "Ongoing", "Tugallangan", "Filmlar", "OVA"];
+const CAT_TABS: [&str; 7] = ["Barchasi", "Reytingi baland", "Eng ko'p ko'rilgan", "Ongoing", "Tugallangan", "Filmlar", "OVA qismlar"];
 const LIB_TABS: [&str; 3] = ["Tarix", "Yuklanmalar", "Sevimlilar"];
 const PLAY: &str = "M8,5v14l11,-7z";
 const HEART: &str = "M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z";
@@ -539,18 +539,20 @@ impl Home {
         .padding_each(16.0, top, 16.0, bottom)
     }
 
-    /// Filtr tanlov tugmasi: matn kengligiga qarab cho'ziladigan yarim aylana (kapsula).
+    /// Kotlin `Chip` (filtr oynasi): 12 dp burchak, tanlangan — `ACCENT` fon va `ACCENT2` chegara, aks holda karta fon.
     fn chip(&self, label: &str, on: bool, f: impl Fn() + 'static) -> Element {
-        let e = column(vec![tx(label, 13.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 200) }).bold()])
+        let e = column(vec![tx(label, 13.0, if on { Color::WHITE } else { TEXT_DIM })])
             .center()
-            .padding_xy(16.0, 9.0)
-            .radius(19.0)
+            .padding_xy(14.0, 8.0)
+            .radius(12.0)
             .on_click(f);
-        if on {
-            e.gradient(ACCENT, ACCENT2)
-        } else {
-            e.bg(Color::rgba(255, 255, 255, 16)).border(1.0, Color::rgba(255, 255, 255, 40))
-        }
+        if on { e.bg(ACCENT).border(1.0, ACCENT2) } else { e.bg(CARD).border(1.0, BORDER) }
+    }
+
+    /// Kotlin `ActionButton` (Tozalash / Qo'llash): 14 dp burchak, to'ldirilgan — `ACCENT`.
+    fn action_btn(label: &str, filled: bool, f: impl Fn() + 'static) -> Element {
+        let e = column(vec![tx(label, 14.0, Color::WHITE).bold()]).center().padding_xy(0.0, 14.0).radius(14.0).on_click(f);
+        if filled { e.bg(ACCENT).border(1.0, ACCENT2) } else { e.bg(CARD).border(1.0, BORDER_BRIGHT) }
     }
 
     /// Kapsulaning taxminiy kengligi (dp): qatorlarga joylash uchun.
@@ -558,7 +560,7 @@ impl Home {
         thread_local! {
             static BOLD: Font = Font::parse(include_bytes!("../assets/fonts/Roboto-Bold.ttf")).expect("Roboto Bold");
         }
-        BOLD.with(|f| f.text_width(label, 13.0)).ceil() + 34.0
+        BOLD.with(|f| f.text_width(label, 13.0)).ceil() + 28.0
     }
 
     /// Kalit o'zgarmasa oldingi natija qaytadi (Rc nusxasi — arzon); o'zgarsa `build` qayta hisoblaydi.
@@ -608,45 +610,47 @@ impl Home {
         let sel = self.cat_tab.get();
         let n = self.genres.with(|g| g.len()) + self.years.with(|y| y.len());
         let fo = self.filter_open.clone();
-        let glass = |e: Element| e.flat_lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
-        let filter = glass(
-            row(vec![icon(MENU, 18.0).color(if n > 0 { ACCENT2 } else { Color::WHITE }), tx(if n > 0 { format!("Filtr · {n}") } else { "Filtr".into() }, 14.0, Color::WHITE).bold()])
-                .gap(6.0)
-                .align(Align::Center)
-                .padding_xy(18.0, 14.0),
-        )
-        .radius(26.0)
-        .on_click(move || fo.set(true));
-        let title = glass(column(vec![tx("Katalog", 24.0, Color::WHITE).black()]).padding_xy(22.0, 8.0)).radius(26.0);
+        // Kotlin `FilterButton`.
+        let filter = row(vec![icon(MENU, 18.0).color(if n > 0 { ACCENT2 } else { Color::rgba(255, 255, 255, 179) }), tx(if n > 0 { format!("Filtr \u{b7} {n}") } else { "Filtr".into() }, 13.0, Color::WHITE).bold()])
+            .gap(6.0)
+            .align(Align::Center)
+            .bg(if n > 0 { ACCENT_TINT } else { CARD })
+            .border(1.0, if n > 0 { ACCENT.with_opacity(0.5) } else { BORDER })
+            .radius(14.0)
+            .padding_xy(14.0, 10.0)
+            .on_click(move || fo.set(true));
+        let head = row(vec![
+            column(vec![
+                row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
+                gap_box(0.0, 2.0),
+                tx("Katalog", 13.0, Color::rgba(255, 255, 255, 115)),
+            ])
+            .weight(1.0),
+            filter,
+        ])
+        .align(Align::Center)
+        .padding_each(20.0, 16.0, 20.0, 4.0);
+        // Material `ScrollableTabRow`: matn 14 sp, tanlangani qalin va `ACCENT2`, tagida 2 dp chiziq; chetlari 16 dp.
         let tabs: Vec<Element> = CAT_TABS
             .iter()
             .enumerate()
             .map(|(i, name)| {
                 let (t, sc) = (self.cat_tab.clone(), self.cat_scroll.clone());
                 let on = i == sel;
-                let e = column(vec![tx(*name, 13.5, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 190) }).bold()])
-                    .center()
-                    .padding_xy(16.0, 9.0)
-                    .radius(20.0)
-                    .on_click(move || {
-                        t.set(i);
-                        sc.scroll_to_top();
-                    });
-                if on {
-                    e.gradient(ACCENT, ACCENT2)
-                } else {
-                    e
-                }
+                let label = if on { tx(*name, 14.0, ACCENT2).bold() } else { tx(*name, 14.0, TEXT_DIM) };
+                column(vec![
+                    column(vec![label]).center().padding_xy(16.0, 14.0),
+                    column(vec![]).height(2.0).bg(if on { ACCENT2 } else { Color::TRANSPARENT }),
+                ])
+                .on_click(move || {
+                    t.set(i);
+                    sc.scroll_to_top();
+                })
             })
             .collect();
-        let tab_bar = glass(column(vec![row(tabs).gap(4.0).scroll(&self.cat_tabs)]).padding_xy(6.0, 6.0)).radius(28.0);
-        column(vec![
-            row(vec![title, spacer(), filter]).align(Align::Center),
-            gap_box(0.0, 8.0),
-            tab_bar,
-            spacer(),
-        ])
-        .padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
+        let tab_bar = row(tabs).scroll(&self.cat_tabs).padding_each(16.0, 0.0, 16.0, 0.0);
+        let bar = column(vec![head, tab_bar]).bg(BG).padding_each(0.0, top_inset, 0.0, 0.0);
+        column(vec![bar, spacer()])
     }
 
     /// Filtr oynasi: janr va yil kapsulalari matn kengligiga qarab qatorlarga joylanadi (shisha panel).
@@ -672,7 +676,7 @@ impl Home {
         };
         let (gs, ys) = (self.genres.get(), self.years.get());
         let (w, h) = window_dp();
-        let avail = w - 24.0 - 36.0;
+        let avail = w - 40.0;
         let gap = 8.0;
         let flow = |names: &[String], sel: &[String], st: &State<Vec<String>>| -> Vec<Element> {
             let mut rows: Vec<Vec<Element>> = vec![Vec::new()];
@@ -688,37 +692,37 @@ impl Home {
             }
             rows.into_iter().filter(|r| !r.is_empty()).map(|r| row(r).gap(gap).padding_each(0.0, 0.0, 0.0, 8.0)).collect()
         };
-        let mut kids = vec![tx("Janr", 17.0, Color::WHITE).bold(), gap_box(0.0, 10.0)];
+        let mut kids = vec![tx("Janr", 16.0, Color::WHITE).bold(), gap_box(0.0, 10.0)];
         kids.extend(flow(&genres, &gs, &self.genres));
-        kids.push(gap_box(0.0, 14.0));
-        kids.push(tx("Yil", 17.0, Color::WHITE).bold());
+        kids.push(gap_box(0.0, 12.0));
+        kids.push(tx("Yil", 16.0, Color::WHITE).bold());
         kids.push(gap_box(0.0, 10.0));
         kids.extend(flow(&years, &ys, &self.years));
         let (g2, y2, fo) = (self.genres.clone(), self.years.clone(), self.filter_open.clone());
         let sc = self.cat_scroll.clone();
         let buttons = row(vec![
-            self.chip("Tozalash", false, move || {
+            Self::action_btn("Tozalash", false, move || {
                 g2.set(Vec::new());
                 y2.set(Vec::new());
             })
             .weight(1.0),
-            self.chip("Qo'llash", true, move || {
+            Self::action_btn("Qo'llash", true, move || {
                 fo.set(false);
                 sc.scroll_to_top();
             })
             .weight(1.0),
         ])
-        .gap(10.0);
-        column(vec![
-            spacer(),
-            column(vec![scroll_column(&self.filter_scroll, kids).grow(1.0), gap_box(0.0, 10.0), buttons])
-                .flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM)
-                .radius(32.0)
-                .padding_xy(18.0, 18.0)
-                .height(h * 0.62)
-                .margin_each(12.0, 0.0, 12.0, 12.0 + bottom_inset),
+        .gap(12.0);
+        let sheet = column(vec![scroll_column(&self.filter_scroll, kids).grow(1.0), gap_box(0.0, 16.0), buttons, gap_box(0.0, 20.0 + bottom_inset)])
+            .bg(SURFACE)
+            .radius(28.0)
+            .padding_each(20.0, 20.0, 20.0, 0.0)
+            .height(h * 0.62);
+        let fo2 = self.filter_open.clone();
+        stack(vec![
+            column(vec![]).bg(Color::rgba(0, 0, 0, 82)).on_click(move || fo2.set(false)),
+            column(vec![spacer(), sheet]),
         ])
-        .padding_each(0.0, top_inset, 0.0, 0.0)
     }
 
     /// Sevimlilar va tarix (bir marta, fonda): lib_state 0 — yuklanmoqda, 1 — tayyor, 2 — xato.
@@ -766,29 +770,30 @@ impl Home {
     /// Kutubxona sarlavhasi: nom va 3 ta bo'lim — shaffof lupali shisha kapsulalarda.
     fn library_bar(self: &Rc<Self>, top_inset: f32) -> Element {
         let sel = self.lib_tab.get();
-        let glass = |e: Element| e.flat_lens(Color::rgba(255, 255, 255, 5), GLASS_ZOOM);
-        let title = glass(column(vec![tx("Kutubxona", 24.0, Color::WHITE).black()]).padding_xy(22.0, 8.0)).radius(26.0);
+        // Kotlin `TabButton`: 14 dp burchak, faol — apelsin gradient, aks holda karta; yozuv 12 sp.
         let tabs: Vec<Element> = LIB_TABS
             .iter()
             .enumerate()
             .map(|(i, name)| {
                 let t = self.lib_tab.clone();
                 let on = i == sel;
-                let e = column(vec![tx(*name, 13.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 190) }).bold()])
+                let e = column(vec![tx(*name, 12.0, if on { Color::WHITE } else { Color::rgba(255, 255, 255, 153) }).bold()])
                     .center()
                     .weight(1.0)
-                    .padding_xy(8.0, 11.0)
-                    .radius(20.0)
+                    .padding_xy(0.0, 11.0)
+                    .radius(14.0)
                     .on_click(move || t.set(i));
-                if on {
-                    e.gradient(ACCENT, ACCENT2)
-                } else {
-                    e
-                }
+                if on { e.gradient(ACCENT, ACCENT2) } else { e.bg(CARD).border(1.0, BORDER) }
             })
             .collect();
-        let tab_bar = glass(row(tabs).gap(4.0).padding_xy(6.0, 6.0)).radius(28.0);
-        column(vec![row(vec![title, spacer()]), gap_box(0.0, 8.0), tab_bar, spacer()]).padding_each(16.0, 8.0 + top_inset, 16.0, 0.0)
+        let head = column(vec![
+            row(vec![tx("ARU", 24.0, Color::WHITE).black(), tx("MEDIATV", 24.0, ACCENT2).black()]),
+            gap_box(0.0, 2.0),
+            tx("Kutubxona", 13.0, Color::rgba(255, 255, 255, 115)),
+        ])
+        .padding_each(20.0, 16.0, 20.0, 4.0);
+        let bar = column(vec![head, gap_box(0.0, 8.0), row(tabs).gap(8.0).padding_each(16.0, 0.0, 16.0, 12.0)]).bg(BG).padding_each(0.0, top_inset, 0.0, 0.0);
+        column(vec![bar, spacer()])
     }
 
     /// Tarix kartasi uchun to'xtagan joydagi kadr; tayyor bo'lmasa fonda yasaladi (poster ko'rsatilib turadi).
@@ -829,7 +834,7 @@ impl Home {
             let h = &items[i];
             let hf = me.history_frame_img(h);
             let pic = match hf.or_else(|| me.frame(&h.photo_url)) {
-                Some(f) => image_fill(&f),
+                Some(f) => image_fill(&f).radius(12.0),
                 None => {
                     let (a, b) = name_colors(&h.title);
                     column(vec![]).gradient(a, b).radius(14.0)
@@ -837,17 +842,17 @@ impl Home {
             };
             let title: String = if h.title.chars().count() > 36 { h.title.chars().take(35).collect::<String>() + "…" } else { h.title.clone() };
             column(vec![
-                stack(vec![pic]).height(img_h),
+                stack(vec![pic]).bg(CARD_ALT).radius(12.0).height(img_h),
                 gap_box(0.0, 10.0),
                 tx(title, 15.5, Color::WHITE).bold(),
                 gap_box(0.0, 6.0),
-                tx(format!("Oxirgi marta {}-bo'lim {}-qismni ko'rdingiz", h.section_no, h.episode_no), 12.5, Color::WHITE),
+                tx(format!("Oxirgi marta {}-bo'lim {}-qismni ko'rdingiz", h.section_no, h.episode_no), 12.5, Color::rgba(255, 255, 255, 173)),
                 gap_box(0.0, 2.0),
-                tx(format!("Sana: {}", fmt_date(h.updated_at)), 12.0, Color::WHITE),
+                tx(format!("Sana: {}", fmt_date(h.updated_at)), 12.0, Color::rgba(255, 255, 255, 133)),
             ])
-            .flat_glass(Color::rgba(255, 255, 255, 20))
-            .border(1.0, Color::rgba(255, 255, 255, 36))
-            .radius(22.0)
+            .bg(CARD)
+            .border(1.0, BORDER)
+            .radius(18.0)
             .padding(10.0)
             .height(card_h)
             .margin_each(0.0, 0.0, 0.0, 12.0)
@@ -1037,11 +1042,11 @@ impl Home {
                 let msg = if self.genres.with(|g| !g.is_empty()) || self.years.with(|y| !y.is_empty()) { "Filtr bo'yicha hech narsa topilmadi" } else { "Bu bo'limda hozircha anime yo'q" };
                 column(vec![tx(msg, 15.0, TEXT_DIM)]).center()
             } else {
-                self.poster_grid(items, &self.cat_scroll, card_h, 8.0 + 112.0 + ins.top, 90.0 + ins.bottom)
+                self.poster_grid(items, &self.cat_scroll, card_h, 66.0 + 50.0 + 12.0 + ins.top, 90.0 + ins.bottom)
             };
             body
         } else if tab == 3 {
-            let top = 8.0 + 112.0 + ins.top;
+            let top = 66.0 + 8.0 + 38.0 + 12.0 + 4.0 + ins.top;
             let bottom = 90.0 + ins.bottom;
             match self.lib_tab.get() {
                 0 => self.history_view(w, top, bottom),
@@ -1340,6 +1345,7 @@ mod tests {
             c.execute(&cmds);
             std::fs::write(format!("{dir}/14_settings.png"), c.to_png()).unwrap();
             home.pop();
+            home.tab.set(2);
             for (n, name) in [(0, "8_catalog"), (1, "9_filter")] {
                 home.filter_open.set(n == 1);
                 let cmds = ui.frame(size);
