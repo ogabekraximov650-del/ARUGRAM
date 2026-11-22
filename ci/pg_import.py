@@ -102,6 +102,7 @@ tables = sorted(os.path.basename(f)[:-11] for f in glob.glob(D + "/*.schema.sql"
 print("jadvallar:", len(tables))
 cur.execute("select tablename from pg_tables where schemaname='arumediatv'")
 for (t,) in cur.fetchall():
+    if t.startswith("aru_"): continue  # gateway jadvallari (aru_auth, aru_errlog) saqlanadi
     cur.execute(f"drop table if exists arumediatv.{q(t)} cascade")
 meta = {}
 for t in tables:

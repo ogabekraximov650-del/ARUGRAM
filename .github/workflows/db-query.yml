@@ -93,8 +93,13 @@ jobs:
       - name: Supabase'ga import
         run: |
           if ! git diff --name-only HEAD~1 HEAD | grep -q '^ci/DB_IMPORT$'; then echo "ci/DB_IMPORT o'zgarmagan — o'tkazildi"; exit 0; fi
-          if [ -z "${DUMP_DIR:-}" ] || [ ! -d "$DUMP_DIR" ]; then echo "::error::tiklangan nusxa yo'q (DB_RECOVER ham o'zgarishi kerak)"; exit 1; fi
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          # To'liq nusxa qo'lda tiklangan bo'lsa (Telegram fayllaridan, `tool/migrate/dump_full.enc`) — shu ishlatiladi.
+          if [ -f tool/migrate/dump_full.enc ]; then
+            mkdir -p "$RUNNER_TEMP/full" && K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/migrate/dump_full.enc | tar xz -C "$RUNNER_TEMP/full"
+            DUMP_DIR="$RUNNER_TEMP/full/dump"; export DUMP_DIR
+          fi
+          if [ -z "${DUMP_DIR:-}" ] || [ ! -d "$DUMP_DIR" ]; then echo "::error::tiklangan nusxa yo'q (DB_RECOVER ham o'zgarishi kerak)"; exit 1; fi
           PG=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/migrate/supabase_pg.enc)
           echo "::add-mask::$(printf '%s' "$PG" | python3 -c 'import json,sys;print(json.load(sys.stdin)["password"])')"
           pip install --quiet psycopg2-binary
