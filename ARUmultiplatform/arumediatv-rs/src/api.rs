@@ -97,6 +97,21 @@ pub fn request_bytes(method: &str, path: &str, query: &str, body: &[u8], bearer:
     }
 }
 
+/// Uzoq kutiladigan imzolangan so'rov (masalan oyna isitish): javob matni; HTTP kodi >= 400 bo'lsa ham matn qaytadi.
+pub fn request_long(method: &str, path: &str, query: &str, secs: u64) -> Result<String, String> {
+    let url = format!("{BASE}{path}{query}");
+    let mut req = agent(secs).request(method, &url).set("X-App-Version", APP_VERSION);
+    let sig = sign(method, path);
+    if !sig.is_empty() {
+        req = req.set("X-App-Sig", &sig);
+    }
+    match req.call() {
+        Ok(r) => r.into_string().map_err(|e| e.to_string()),
+        Err(ureq::Error::Status(_, r)) => r.into_string().map_err(|e| e.to_string()),
+        Err(e) => Err(format!("{e}")),
+    }
+}
+
 /// Imzolangan GET, javob baytlari (rasm/bo'lak). Xato bo'lsa `Err`.
 pub fn get_bytes(path: &str, query: &str, bearer: Option<&str>) -> Result<Vec<u8>, String> {
     let url = format!("{BASE}{path}{query}");

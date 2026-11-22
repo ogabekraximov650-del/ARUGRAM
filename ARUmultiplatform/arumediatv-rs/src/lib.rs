@@ -14,6 +14,7 @@ mod secure;
 mod tgmedia;
 mod tganim;
 mod vd;
+mod vdsrv;
 mod emojifont;
 mod webp;
 

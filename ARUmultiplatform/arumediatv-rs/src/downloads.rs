@@ -224,21 +224,12 @@ pub fn resolve(session: &str, url: &str) -> Result<(crate::player::Source, bool)
     if complete {
         return Ok((Source::Aru(name), false));
     }
-    HOLDS.fetch_add(1, Ordering::SeqCst);
-    // Telegram ishlamasa (fayl kanalda yo'q / hisob ulanmagan) — zaxira: server manzili (Kotlin ilovadagi kabi).
-    let fallback = |msg: String| -> Result<(crate::player::Source, bool), String> {
-        if url.starts_with("http") { Ok((Source::Http(url.to_string()), false)) } else { Err(msg) }
-    };
-    match tg_deliver(session, &[name.clone()]) {
-        Ok(ok) if ok.contains(&name) => Ok((Source::Aru(name), true)),
-        Ok(_) => {
-            HOLDS.fetch_sub(1, Ordering::SeqCst);
-            fallback("Fayl Telegram'da topilmadi".into())
-        }
-        Err(e) => {
-            HOLDS.fetch_sub(1, Ordering::SeqCst);
-            fallback(if e.contains("Serverga ulanib") { "Bu qism yuklab olinmagan — internetga ulaning".to_string() } else { e })
-        }
+    // Internetdan: worker `vd` videosi mahalliy ochuvchi server (`vdsrv`) orqali shifrdan ochilib HTTP manba sifatida beriladi.
+    let _ = session;
+    match crate::vdsrv::url(&name) {
+        Some(u) => Ok((Source::Http(u), false)),
+        None if url.starts_with("http") => Ok((Source::Http(url.to_string()), false)),
+        None => Err("Video ochuvchi server ishga tushmagan".into()),
     }
 }
 
@@ -301,34 +292,9 @@ pub fn history_frame_r(session: &str, video_url: &str, thumb_url: &str, pos_ms: 
     if !ensure_cache() {
         return Err("video kesh ishga tushmadi".into());
     }
-    let complete = stats(&[src.to_string()]).get(src).map(|s| s.complete()).unwrap_or(false);
-    let u = if complete {
-        src.to_string()
-    } else {
-        let ok = tg_deliver(session, &[name.clone()]).map_err(|e| format!("deliver: {e}"))?;
-        if !ok.contains(&name) {
-            return Err("server faylni Telegram'da topmadi".into());
-        }
-        let port = crate::data::tg_port();
-        if port <= 0 {
-            return Err("Telegram porti yo'q".into());
-        }
-        // Kadr uchun "yumshoq" yo'l (`/tg/t/`): bu o'qish xatosi faylni 2 daqiqaga Telegram'dan chetlatmaydi (yadro `soft`).
-        let u = format!("http://127.0.0.1:{port}/tg/t/{name}");
-        // Nusxa bot chatida paydo bo'lishi bir necha soniya olishi mumkin — tayyor bo'lguncha (25 s gacha) kutiladi.
-        let mut ready = false;
-        for _ in 0..25 {
-            if ureq::get(&u).set("Range", "bytes=0-0").timeout(std::time::Duration::from_secs(10)).call().is_ok() {
-                ready = true;
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_secs(1));
-        }
-        if !ready {
-            return Err("fayl bot chatida paydo bo'lmadi".into());
-        }
-        u
-    };
+    // Manba: worker `vd` videosi, mahalliy ochuvchi server (`vdsrv`) orqali shifrdan ochilib HTTP Range bilan beriladi.
+    let _ = session;
+    let u = crate::vdsrv::url(&name).ok_or_else(|| "video ochuvchi server ishga tushmagan".to_string())?;
     // `/thumb` — video KESH serverida (Kotlin `cache.ensureStarted()`), manba (`u`) esa Telegram serveri manzili.
     let port = cache_port();
     if port <= 0 {

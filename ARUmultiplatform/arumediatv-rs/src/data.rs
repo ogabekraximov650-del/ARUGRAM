@@ -190,8 +190,9 @@ pub fn tg_deliver(_session: &str, _names: &[String]) -> Result<Vec<String>, Stri
 }
 
 /// Bot chatidagi faylni mahalliy Telegram serveri orqali ochiladigan manzilga aylantiradi (tashqi pleyer/brauzer uchun).
-pub fn tg_play_url(_session: &str, _url: &str) -> Result<String, String> {
-    Err("Telegram yadrosi o'chirilgan: video worker orqali ochiladi".into())
+pub fn tg_play_url(_session: &str, url: &str) -> Result<String, String> {
+    let name = file_name_of(url);
+    crate::vdsrv::url(&name).ok_or_else(|| "Video ochuvchi server ishga tushmagan".to_string())
 }
 
 /// Yuklab olish ketayotgan paytda bot chati tozalanmasin (yuklangan nusxa o'chib ketmasin).

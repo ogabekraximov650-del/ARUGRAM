@@ -280,6 +280,7 @@ impl Home {
                 }
             });
         }
+        crate::vdsrv::start(&h.session);
         h.reload();
         h.load_library();
         h.load_profile();
