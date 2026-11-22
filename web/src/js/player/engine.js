@@ -127,7 +127,7 @@ export function engineSupported() {
  * `info` — `vdInfo` natijasi (`{name, size, key}`).
  * `ahead` — oldindan yuklanadigan oyna (soniya): 20 s (ilova buferi 15..30 s).
  */
-export function createEngine(video, { info, ahead: aheadOpt = 60, behind = 10, startAt = 0, onState = () => {}, onError = () => {}, onStall = () => {}, shouldPlay = () => true }) {
+export function createEngine(video, { info, noAhead = false, ahead: aheadOpt = 60, behind = 10, startAt = 0, onState = () => {}, onError = () => {}, onStall = () => {}, shouldPlay = () => true }) {
   const MS = window.ManagedMediaSource || window.MediaSource;
   let file = null;
   let ms = null;
@@ -295,7 +295,7 @@ export function createEngine(video, { info, ahead: aheadOpt = 60, behind = 10, s
   let aheadAt = 0;
   /** Ijro joyidagi bo'lakning fayldagi boshlanishi -> `file.ahead` (10 MiB zaxira qoidasi). */
   function aheadTick() {
-    if (!file?.ahead || !segs.length || destroyed) return;
+    if (noAhead || !file?.ahead || !segs.length || destroyed) return;
     const now = Date.now();
     if (now - aheadAt < 700) return;
     aheadAt = now;

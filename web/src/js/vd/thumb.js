@@ -30,10 +30,17 @@ function db() {
 }
 const rq = (r) => new Promise((res) => { r.onsuccess = () => res(r.result); r.onerror = () => res(undefined); });
 
+const FAIL_MS = 7 * 24 * 3600 * 1000;
+/** Saqlangan kadr (`Blob`), `'fail'` (yaqinda yasab bo'lmagan: qayta urinib trafik sarflanmasin) yoki `null`. */
 async function readStored(name) {
   const d = await db(); if (!d) return null;
   const v = await rq(d.transaction('t').objectStore('t').get(name));
+  if (v?.fail) return Date.now() - (v.at || 0) < FAIL_MS ? 'fail' : null;
   return v?.blob || null;
+}
+async function markFail(name) {
+  const d = await db(); if (!d) return;
+  try { d.transaction('t', 'readwrite').objectStore('t').put({ fail: true, at: Date.now() }, name); } catch (_) { /* */ }
 }
 async function store(name, blob) {
   const d = await db(); if (!d) return;
@@ -60,7 +67,7 @@ async function make(name) {
   video.muted = true; video.playsInline = true; video.preload = 'auto';
   let eng = null;
   try {
-    eng = createEngine(video, { info, ahead: 3, shouldPlay: () => false });
+    eng = createEngine(video, { info, noAhead: true, ahead: 2, shouldPlay: () => false });
     await new Promise((res, rej) => {
       const t = setTimeout(() => rej(new Error('timeout')), 25000);
       video.addEventListener('loadedmetadata', () => { clearTimeout(t); res(); }, { once: true });
@@ -96,17 +103,17 @@ export function thumbOfFile(name) {
   if (p) return p;
   p = (async () => {
     const saved = await readStored(name);
+    if (saved === 'fail') return null;
     if (saved) return URL.createObjectURL(saved);
     // Navbat: bir vaqtda bitta (telefon qotmasin, trafik kam bo'lsin).
     const run = chain.then(() => make(name));
     chain = run.catch(() => {});
     const blob = await run;
-    if (!blob) return null;
+    if (!blob) { markFail(name); return null; }
     store(name, blob);
     return URL.createObjectURL(blob);
   })();
   urls.set(name, p);
-  p.then((u) => { if (!u) urls.delete(name); }); // muvaffaqiyatsiz bo'lsa keyinroq qayta uriniladi
   return p;
 }
 
@@ -122,6 +129,7 @@ export async function thumbOfEpisode(ep, { exclude = '' } = {}) {
     if (bytes > most) { most = bytes; best = n; }
   }
   // Allaqachon saqlangan kadr bo'lsa o'sha.
-  for (const n of names) { const s = await readStored(n); if (s) return URL.createObjectURL(s); }
+  for (const n of names) { const s = await readStored(n); if (s && s !== 'fail') return URL.createObjectURL(s); }
+  if ((await Promise.all(names.map(readStored))).some((x) => x === 'fail')) return null;
   return thumbOfFile(best);
 }
