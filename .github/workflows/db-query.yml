@@ -4,7 +4,7 @@ name: Baza so'rovi (faqat o'qish)
 on:
   push:
     branches: [main]
-    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED', 'ci/REPOST', 'ci/DB_RECOVER', 'ci/DB_IMPORT']
+    paths: ['ci/DB_QUERY.sql', 'ci/UPLOAD_SPEED', 'ci/REPOST', 'ci/DB_RECOVER', 'ci/DB_IMPORT', 'ci/DB_VALIDATE']
 
 permissions:
   contents: read
@@ -99,6 +99,15 @@ jobs:
           echo "::add-mask::$(printf '%s' "$PG" | python3 -c 'import json,sys;print(json.load(sys.stdin)["password"])')"
           pip install --quiet psycopg2-binary
           PG_JSON="$PG" python3 ci/pg_import.py
+      # TEKSHIRUV: worker'dagi SQL buyruqlari Supabase'da Postgres'ga o'girilib EXPLAIN qilinadi (yozuv yo'q). Faqat `ci/DB_VALIDATE` o'zgarganda.
+      - name: SQL moslik tekshiruvi (Supabase)
+        run: |
+          if ! git diff --name-only HEAD~1 HEAD | grep -q '^ci/DB_VALIDATE$'; then echo "ci/DB_VALIDATE o'zgarmagan — o'tkazildi"; exit 0; fi
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          PG=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in tool/migrate/supabase_pg.enc)
+          echo "::add-mask::$(printf '%s' "$PG" | python3 -c 'import json,sys;print(json.load(sys.stdin)["password"])')"
+          pip install --quiet psycopg2-binary
+          PG_JSON="$PG" python3 ci/pg_validate.py
       # SINOV: telefon -> worker -> Telegram yuklash tezligi (R2'siz). Faqat `ci/UPLOAD_SPEED` o'zgarganda (har safar 4 x 18 MiB x 2).
       - name: Yuklash tezligi
         run: |

@@ -713,6 +713,8 @@ const EPIZOD_COL_NAMES: &[&str] = &[
 /// EN: picks the database. Only the post-encode and anibla job queues stay on Turso; everything else goes to Ample when AMPLE_URL/AMPLE_TOKEN are set (else all Turso).
 /// RU: vybor bazy: ocheredi post/anibla ostayutsya na Turso, ostalnoe — na Ample (esli zadany AMPLE_*).
 fn db_endpoint(env: &Env, sqls: &[&str]) -> Result<(String, String)> {
+    // UZ: Supabase berilgan bo'lsa HAMMA so'rov shu yerga ketadi (`pipeline_post` o'zi RPC chaqiradi). EN: Supabase wins when configured.
+    if supabase_cfg(env).is_some() { return Ok((String::new(), String::new())); }
     let turso_only = sqls.iter().any(|s| { let l = s.to_ascii_lowercase(); l.contains("post_jobs") || l.contains("anibla_jobs") });
     if !turso_only {
         let u = env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default();
@@ -744,7 +746,29 @@ fn brotli6(data: &[u8]) -> Vec<u8> {
 ///     Server `415` desa (siqilgan tanani ochmadi) — belgi o'chadi va shu so'rov siqilmasdan qayta yuboriladi (415 da yozuv bajarilmagan bo'ladi).
 /// EN: POSTs a pipeline request; bodies over 1 KB go to Ample Brotli-6 compressed (never to Turso); on 415 the flag is cleared and the request is resent plain.
 /// RU: POST pipeline; k Ample >1 KB otpravlyaetsya Brotli-6; pri 415 povtor bez szhatiya.
+/// UZ: Supabase (Postgres) sozlamasi: `SUPABASE_URL`, `SUPABASE_ANON` (ochiq apikey), `SUPABASE_DBK` (SQL funksiya kaliti). Uchalasi bo'lsa — baza Supabase'da.
+/// EN: Supabase config; when all three secrets exist the database is Supabase (SQL gateway `public.aru_pipeline`).
+fn supabase_cfg(env: &Env) -> Option<(String, String, String)> {
+    let g = |k: &str| env.secret(k).map(|v| v.to_string().trim().to_string()).unwrap_or_default();
+    let (u, a, k) = (g("SUPABASE_URL"), g("SUPABASE_ANON"), g("SUPABASE_DBK"));
+    if u.is_empty() || a.is_empty() || k.is_empty() { None } else { Some((u.trim_end_matches('/').to_string(), a, k)) }
+}
+
 async fn pipeline_post(env: &Env, url: &str, token: &str, body: String) -> Result<Response> {
+    if let Some((su, anon, key)) = supabase_cfg(env) {
+        // Supabase: bir so'rov = bitta RPC (`aru_pipeline`): SQLite SQL'ni funksiya o'zi Postgres'ga o'giradi, javob Hrana shaklida.
+        let req: Value = serde_json::from_str(&body).unwrap_or(json!({}));
+        let mut h = Headers::new();
+        h.set("apikey", &anon)?;
+        h.set("Authorization", &format!("Bearer {anon}"))?;
+        h.set("Content-Type", "application/json")?;
+        let payload = json!({"k": key, "req": req}).to_string();
+        let r = Request::new_with_init(
+            &format!("{su}/rest/v1/rpc/aru_pipeline"),
+            RequestInit::new().with_method(Method::Post).with_headers(h).with_body(Some(payload.into())),
+        )?;
+        return Ok(Fetch::Request(r).send().await?);
+    }
     let ample = env.secret("AMPLE_URL").map(|v| v.to_string()).unwrap_or_default();
     let is_ample = !ample.is_empty() && url.trim_end_matches('/') == ample.trim_end_matches('/');
     let mut br = is_ample && body.len() >= 1024 && AMPLE_BR.with(|f| f.get());
