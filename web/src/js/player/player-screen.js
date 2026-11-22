@@ -416,6 +416,15 @@ function buildPlayer(el, route, season, opts) {
     if (d && cur) renderDlBox(d, cur);
   };
   window.addEventListener('aru-dl', onDl);
+  // Ko'rish paytida ham keshga tushgan hajm (foiz, MB) jonli yangilanadi: ochiq sifat qatorlari sekundiga bir marta keshdan o'qiladi.
+  const dlPoll = setInterval(() => {
+    if (disposed) return;
+    const want = new Map();
+    const add = (e) => { if (e) qualitiesOf(e).forEach((x) => want.set(fileNameOf(e[`url_${x}`]), toI(e[`size_${x}`]))); };
+    if (sheetEl && cur) add(cur);
+    panes[1].querySelectorAll('.dlq:not([hidden])').forEach((b) => { const k = b.closest('.pl-ep')?.dataset.k; add(ordered().find((x) => epKey(x) === k)); });
+    want.forEach((t, n) => { if (n) dlRefresh(n, t); });
+  }, 1000);
 
   function centerOnCur() {
     requestAnimationFrame(() => {
@@ -1240,6 +1249,7 @@ function buildPlayer(el, route, season, opts) {
       window.removeEventListener('aru-packsound', onPackSound);
       window.removeEventListener('aru-enhance-failed', onEnhFail);
       window.removeEventListener('aru-dl', onDl);
+      clearInterval(dlPoll);
       enhancer.destroy();
       window.removeEventListener('resize', applyRot);
       document.removeEventListener('fullscreenchange', onFsChange);

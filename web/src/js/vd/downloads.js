@@ -2,8 +2,8 @@
 // qurilma keshiga (IndexedDB, `tg/chunk-cache.js`) yoziladi va kesh to'lganda ham o'chmaydi (`setPinned`).
 // Pleyer shu keshdan (internetsiz ham) o'qiydi. Ko'rilgan joy qayta yuklanmaydi (bo'lak keshda bo'lsa o'tkaziladi).
 
-import { vdInfo, openVdFile, BLOCK, WINDOW } from './store.js';
-import { cacheCountPrefix, cacheDeletePrefix, setPinned } from '../tg/chunk-cache.js';
+import { vdInfo, downloadRange, BLOCK, WINDOW } from './store.js';
+import { cacheCountPrefix, cacheDeletePrefix, cacheKeySet, setPinned } from '../tg/chunk-cache.js';
 
 const KEY = 'aru_dl_done';
 const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (_) { return {}; } };
@@ -14,7 +14,7 @@ const jobs = new Map(); // nom -> {abort}
 const queue = [];
 let active = 0;
 const MAX_FILES = 2;
-const PAR = 3; // bir faylda parallel oynalar (har biri <= 18 MiB, ichida 4 MiB so'rovlar)
+const PAR = 3; // bir faylda parallel oynalar (har biri BITTA <= 18 MiB so'rov)
 
 export const dlKey = (name) => `vd:${name}#`;
 const emit = (name) => window.dispatchEvent(new CustomEvent('aru-dl', { detail: { name } }));
@@ -43,7 +43,6 @@ async function run(name) {
   jobs.set(name, ac);
   Object.assign(st, { run: true, queued: false, retry: false, done: false });
   stats.set(name, st); emit(name);
-  let file = null;
   try {
     let info = null;
     for (let i = 0; i < 40 && !info && !ac.signal.aborted; i++) {
@@ -52,36 +51,45 @@ async function run(name) {
     }
     if (!info) throw new Error('no_info');
     st.total = info.size;
-    file = openVdFile(info);
-    // Ko'rilgan joyni o'tkazish: keshdagi bo'laklar sanaladi.
+    // Keshdagi (ko'rilgan yoki avval yuklangan) bo'laklar qayta olinmaydi: faqat yetishmaydigan ketma-ket joylar BITTA Range bilan.
+    const have = await cacheKeySet(dlKey(name));
     st.got = Math.min(info.size, (await cacheCountPrefix(dlKey(name))).bytes);
-    const n = Math.ceil(info.size / WINDOW);
-    let nextW = 0; let fail = 0;
+    const nBlocks = Math.ceil(info.size / BLOCK);
+    const perWin = WINDOW / BLOCK;
+    const n = Math.ceil(nBlocks / perWin);
+    let nextW = 0; let fail = 0; let lastEmit = 0;
     const t0 = Date.now(); const got0 = st.got;
+    const bump = (d) => {
+      st.got = Math.max(0, Math.min(st.total, st.got + d));
+      st.speed = Math.round((st.got - got0) / Math.max(1, (Date.now() - t0) / 1000));
+      const now = Date.now();
+      if (now - lastEmit > 250) { lastEmit = now; emit(name); }
+    };
     const worker = async () => {
       for (;;) {
         if (ac.signal.aborted) return;
         const w = nextW++;
         if (w >= n) return;
-        const pos = w * WINDOW; const len = Math.min(WINDOW, info.size - pos);
+        const b0 = w * perWin; const b1 = Math.min(nBlocks, b0 + perWin);
         for (let attempt = 0; ; attempt++) {
           if (ac.signal.aborted) return;
           try {
-            // Oyna 4 MiB bo'laklarda ketma-ket (har biri ichida worker parallel emas, 3 oyna parallel).
-            for (let o = 0; o < len; o += 4 * BLOCK) {
-              if (ac.signal.aborted) return;
-              const l = Math.min(4 * BLOCK, len - o);
-              await file.read(pos + o, l);
-              st.got = Math.min(st.total, st.got + l);
-              st.speed = Math.round(((st.got - got0) / Math.max(1, (Date.now() - t0) / 1000)));
-              emit(name);
+            let i = b0;
+            while (i < b1) {
+              while (i < b1 && have.has(`${dlKey(name)}${i}`)) i++;
+              if (i >= b1) break;
+              let e = i;
+              while (e + 1 < b1 && !have.has(`${dlKey(name)}${e + 1}`)) e++;
+              await downloadRange(info, i * BLOCK, Math.min(info.size, (e + 1) * BLOCK) - 1, { signal: ac.signal, onBytes: bump });
+              for (let k = i; k <= e; k++) have.add(`${dlKey(name)}${k}`);
+              i = e + 1;
             }
             st.retry = false;
             break;
-          } catch (e) {
+          } catch (er) {
             if (ac.signal.aborted) return;
             st.retry = true; emit(name); fail++;
-            if (attempt >= 5 || fail > 40) throw e;
+            if (attempt >= 5 || fail > 40) throw er;
             await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
           }
         }
@@ -96,7 +104,6 @@ async function run(name) {
     Object.assign(st, { run: false, retry: false, speed: 0 });
     if (`${e?.message}` !== 'paused') st.error = `${e?.message || e}`;
   } finally {
-    try { file?.close(); } catch (_) { /* */ }
     jobs.delete(name);
     emit(name);
   }
@@ -131,7 +138,10 @@ export async function dlRefresh(name, total = 0) {
   if (dlComplete(name) || jobs.has(name)) return dlStat(name);
   const { bytes } = await cacheCountPrefix(dlKey(name));
   const st = stats.get(name) || { total, got: 0, run: false, queued: false, retry: false, speed: 0, done: false };
-  st.total = total || st.total; st.got = Math.min(st.total || bytes, bytes);
-  stats.set(name, st); emit(name);
+  const got = Math.min(total || st.total || bytes, bytes);
+  const changed = got !== st.got || (total && total !== st.total);
+  st.total = total || st.total; st.got = got;
+  stats.set(name, st);
+  if (changed) emit(name); // faqat o'zgarganda (ro'yxat bekorga qayta chizilmasin)
   return st;
 }

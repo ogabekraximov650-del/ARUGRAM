@@ -97,7 +97,7 @@ async function warm(name, w, force = false, signal) {
 const STALL_MS = 20_000; // shuncha vaqt bitta bayt ham kelmasa so'rov uziladi va qayta uriniladi
 
 /** Javob tanasini oqim bilan o'qiydi: jarayon ekranda ko'rinadi, to'xtab qolsa (`STALL_MS`) uziladi. */
-async function readBody(r, expect, label, t0, touch) {
+async function readBody(r, expect, label, t0, touch, onBytes) {
   const reader = r.body.getReader();
   const out = new Uint8Array(expect);
   let got = 0;
@@ -106,7 +106,7 @@ async function readBody(r, expect, label, t0, touch) {
     if (done) break;
     if (got + value.length > expect) throw new Error('chunk_long');
     out.set(value, got); got += value.length;
-    touch();
+    touch(); onBytes?.(value.length);
     dbg(`${label}: ${(got / 1048576).toFixed(1)}/${(expect / 1048576).toFixed(1)} MB (${Math.round((Date.now() - t0) / 1000)} s)`);
   }
   if (got !== expect) throw new Error('chunk_short');
@@ -114,10 +114,12 @@ async function readBody(r, expect, label, t0, touch) {
 }
 
 /** Shifrlangan `[start, end]` (ikkala chegara ham kiradi) baytlar — bitta so'rov. */
-async function fetchRange(name, start, end, signal) {
+async function fetchRange(name, start, end, signal, onBytes) {
   const w = Math.floor(start / WINDOW);
   const label = `yuklanmoqda ${(start / 1048576).toFixed(0)}-${((end + 1) / 1048576).toFixed(0)} MB`;
+  let counted = 0;
   for (let attempt = 0; attempt < 3; attempt++) {
+    if (counted && onBytes) { onBytes(-counted); counted = 0; } // oldingi urinishda sanalgan baytlar qaytariladi
     const ac = new AbortController();
     const onAbort = () => ac.abort();
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -130,7 +132,8 @@ async function fetchRange(name, start, end, signal) {
       dbg(`${label}: so'ralmoqda`);
       const r = await api(`/api/play/vd~${encodeURIComponent(name)}`, { headers: { Range: `bytes=${start}-${end}` }, raw: true, signal: ac.signal });
       last = Date.now();
-      return await readBody(r, end - start + 1, label, t0, () => { last = Date.now(); });
+      counted = 0;
+      return await readBody(r, end - start + 1, label, t0, () => { last = Date.now(); }, onBytes ? (n) => { counted += n; onBytes(n); } : null);
     } catch (e) {
       if (signal?.aborted) throw new Error('cancelled');
       const why = stalled ? `javob ${STALL_MS / 1000} s kelmadi` : `${e?.status || ''} ${e?.message || e}`;
@@ -279,4 +282,18 @@ export async function vdImageBytes(info) {
   const enc = new Uint8Array(await r.arrayBuffer());
   if (info.size && enc.length !== info.size) throw new Error('img_size');
   return ctrApply(info.key, 0, enc);
+}
+
+/**
+ * Yuklab olish uchun: shifrlangan `[start, end]` (ikkala chegara ham kiradi, `start` 1 MiB chegarasida) BITTA so'rovda olinib,
+ * 1 MiB bo'laklarga bo'linib diskka yoziladi (shifrlangan holda — pleyer keyin shundan o'qiydi). `onBytes(n)` — kelgan sari.
+ */
+export async function downloadRange(info, start, end, { signal, onBytes } = {}) {
+  const enc = await fetchRange(info.name, start, end, signal, onBytes);
+  const first = Math.floor(start / BLOCK);
+  const jobs = [];
+  for (let o = 0, i = first; o < enc.length; o += BLOCK, i++) {
+    jobs.push(cachePut(`vd:${info.name}#${i}`, enc.subarray(o, Math.min(enc.length, o + BLOCK))));
+  }
+  await Promise.all(jobs);
 }

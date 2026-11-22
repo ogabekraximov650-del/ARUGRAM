@@ -85,6 +85,13 @@ export async function cacheDeletePrefix(prefix) {
   return freed;
 }
 
+/** `prefix` bilan boshlanadigan kalitlar to'plami (yuklab olishda mavjud bo'laklarni o'tkazib yuborish uchun). */
+export async function cacheKeySet(prefix) {
+  const m = await index(); const out = new Set();
+  for (const k of m.keys()) if (k.startsWith(prefix)) out.add(k);
+  return out;
+}
+
 /** Keshda `prefix` bo'laklaridan nechtasi va necha bayt borligi. */
 export async function cacheCountPrefix(prefix) {
   const m = await index(); let n = 0; let bytes = 0;
