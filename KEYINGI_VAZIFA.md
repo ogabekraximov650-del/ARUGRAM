@@ -7753,3 +7753,7 @@ Foydalanuvchi talabi: post qo'lda (ilova/veb admin tugmasi, `announce::repost`) 
 - `web/src/js/vd/downloads.js`: qism qatorida yuklash tugmasi (Android `EpisodeTile`/`QualityRow` kabi): sifat qatorlari, foiz, tezlik, pauza, tozalash. 18 MiB oynalar, 3 parallel, shifrlangan bo'laklar IndexedDB keshiga yoziladi va `chunk-cache.js setPinned` tufayli kesh to'lganda ham o'chmaydi. Brauzer fayliga saqlanmaydi (Telegram WebView buni bermaydi) — ilova ichida internetsiz ko'rish uchun.
 - `web/src/js/vd/upload.js` (Android `VdUpload.kt` nusxasi): <=18 MiB — `PUT /api/vd/small`; katta — brauzerda AES-128-CTR shifrlab R2 ga imzolangan havola bilan (`/api/vd/up/init`, `/complete`). Admin rasm va qism videolari endi Telegram hisobisiz. DIQQAT: R2 bucket CORS (PUT, origin arumediatv.pages.dev) sozlanmagan bo'lsa katta video brauzerdan yuklanmaydi.
 - Pleyer: tashxis matni (`dbg`) ko'rsatilmaydi va har bayt uchun DOM yangilanmaydi (qotishga sabab); bir so'rovda 8 MiB gacha, oldindan yuklash 24 MiB.
+
+## Yarim aylana qism boshqaruvi (dial) olib tashlandi (2026-11-22)
+
+Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashlandi: `ui/season/EpisodeDial.kt` (`DialPrefs`, `EpisodeDialTab`) o'chirildi, `SeasonScreen` doim oddiy `EpisodesTab` + pastdagi oldingi/keyingi tugmalarini ko'rsatadi, Sozlamalardagi "QISMLAR BOSHQARUVI" bo'limi olib tashlandi. Vebda u hech qachon bo'lmagan.
