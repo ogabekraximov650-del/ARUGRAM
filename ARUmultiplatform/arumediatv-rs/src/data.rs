@@ -376,6 +376,8 @@ pub struct Profile {
     pub hidden: Vec<String>,
     pub consent: bool,
     pub is_admin: bool,
+    /// Obuna tugash vaqti (ms); 0 — obuna yo'q.
+    pub sub_until: i64,
 }
 
 pub fn fetch_profile(session: &str) -> Result<Profile, String> {
@@ -407,6 +409,7 @@ pub fn fetch_profile(session: &str) -> Result<Profile, String> {
         hidden: u["hidden_stats"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
         consent: u["chan_consent"].as_bool().unwrap_or(false),
         is_admin: u["is_admin"].as_bool().unwrap_or(false),
+        sub_until: crate::api::get_json("/api/billing", "", Some(session)).map(|b| num(&b["subscription_until"])).unwrap_or(0),
     })
 }
 

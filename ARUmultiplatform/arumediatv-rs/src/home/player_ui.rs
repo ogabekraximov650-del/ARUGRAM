@@ -46,6 +46,7 @@ pub struct PlayerState {
     last_tap: Cell<Option<(bool, Instant)>>,
     pub(super) seek_acc: State<i32>,
     seek_gen: Cell<u32>,
+    seek_applied: Cell<i32>,
     sleep_at: Cell<Option<Instant>>,
     held: Cell<bool>,
     watched_ms: Cell<i64>,
@@ -81,6 +82,7 @@ impl PlayerState {
             last_tap: Cell::new(None),
             seek_acc: State::new(0),
             seek_gen: Cell::new(0),
+            seek_applied: Cell::new(0),
             sleep_at: Cell::new(None),
             held: Cell::new(false),
             watched_ms: Cell::new(0),
@@ -500,13 +502,39 @@ impl Home {
         column(vec![icon(icon_path, size).color(Color::WHITE)]).padding(pad).radius((size + pad * 2.0) / 2.0).on_click(f)
     }
 
-    /// Ikki marta bosib sek: ko'rsatkich (Kotlin `SeekBadge`): qora 55% doira, uchta uchburchak va "10s".
+    /// Ikki marta bosib sek ko'rsatkichi (Kotlin `SeekBadge`): qora 55% doira, uchta ketma-ket yonib-o'chuvchi uchburchak (900 ms, chiziqli,
+    /// har biri 0.15 kechikish bilan, shaffoflik 0.3..1) va "10s" yozuvi.
     fn pl_seek_badge(acc: i32) -> Element {
         let left = acc < 0;
         let secs = acc.abs();
-        let tri = if left { "M13.5,0L0,12L13.5,24z" } else { "M0,0L13.5,12L0,24z" };
-        let tris = row(vec![icon(tri, 16.0).color(Color::WHITE), icon(tri, 16.0).color(Color::WHITE), icon(tri, 16.0).color(Color::WHITE)]).align(Align::Center);
-        column(vec![tris, gap_box(0.0, 5.0), tx(format!("{secs}s"), 12.0, Color::WHITE).bold()]).center().width(76.0).height(76.0).radius(38.0).bg(Color::rgba(0, 0, 0, 140))
+        let t = SEEK_T0.with(|s| (s.elapsed().as_millis() % 900) as f32 / 900.0);
+        let order: [usize; 3] = if left { [2, 1, 0] } else { [0, 1, 2] };
+        let tris: Vec<Element> = (0..3)
+            .map(|i| {
+                let start = order[i] as f32 * 0.15;
+                let x = (((t - start) % 1.0) + 1.0) % 1.0;
+                let op = (if x < 0.5 { 0.3 + 0.7 * (x / 0.5) } else { 1.0 - 0.7 * ((x - 0.5) / 0.5) }).clamp(0.3, 1.0);
+                const L: [&str; 3] = ["M8,4.9L0,12L8,19.1z", "M16,4.9L8,12L16,19.1z", "M24,4.9L16,12L24,19.1z"];
+                const R: [&str; 3] = ["M0,4.9L8,12L0,19.1z", "M8,4.9L16,12L8,19.1z", "M16,4.9L24,12L16,19.1z"];
+                let path: &'static str = if left { L[i] } else { R[i] };
+                icon(path, 27.0).color(Color::rgba(255, 255, 255, (op * 255.0) as u8))
+            })
+            .collect();
+        column(vec![stack(tris).width(27.0).height(27.0), gap_box(0.0, 5.0), tx(format!("{secs}s"), 12.0, Color::WHITE).bold()]).center().width(76.0).height(76.0).radius(38.0).bg(Color::rgba(0, 0, 0, 140))
+    }
+
+    /// Ko'rsatkich ko'rinib turganda kadrlar ~60 Hz so'raladi (uchburchaklar animatsiyasi uchun).
+    fn pl_seek_anim_start() {
+        if SEEK_ANIM.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
+        SEEK_T0.with(|_| {});
+        std::thread::spawn(|| {
+            while SEEK_ANIM.load(std::sync::atomic::Ordering::SeqCst) {
+                uzcoders::core::request_frame();
+                std::thread::sleep(std::time::Duration::from_millis(16));
+            }
+        });
     }
 
     pub(super) fn pl_tap(self: &Rc<Self>, p: &Rc<SeasonPage>, left: bool) {
@@ -531,7 +559,8 @@ impl Home {
         let acc = p.pl.seek_acc.get();
         let same = (acc < 0) == left || acc == 0;
         let base = if same { acc } else { 0 };
-        let eff = pos + base as i64 * 1000;
+        let applied = if same { p.pl.seek_applied.get() } else { 0 };
+        let eff = pos + (base - applied) as i64 * 1000;
         let room = if left { (eff / 1000).max(0) } else if dur > 0 { ((dur - eff) / 1000).max(0) } else { 10 };
         let add = room.min(10) as i32;
         if add == 0 {
@@ -540,21 +569,32 @@ impl Home {
         p.pl.seek_acc.set(base + if left { -add } else { add });
         let gen = p.pl.seek_gen.get() + 1;
         p.pl.seek_gen.set(gen);
+        Self::pl_seek_anim_start();
         let (me, pc) = (self.clone(), p.clone());
-        spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(700)), move |_| {
+        // Kotlin: 350 ms tinchlikdan keyin sek bajariladi, yana 350 ms dan keyin ko'rsatkich yo'qoladi.
+        spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(350)), move |_| {
             if pc.pl.seek_gen.get() != gen {
                 return;
             }
             let acc = pc.pl.seek_acc.get();
-            pc.pl.seek_acc.set(0);
             if acc != 0 {
                 if let Some(pl) = pc.pl.player.borrow().as_ref() {
                     let s = pl.status();
-                    let target = (s.pos_ms + acc as i64 * 1000).clamp(0, if s.dur_ms > 0 { s.dur_ms } else { i64::MAX });
+                    let delta = (acc - pc.pl.seek_applied.get()) as i64;
+                    let target = (s.pos_ms + delta * 1000).clamp(0, if s.dur_ms > 0 { s.dur_ms } else { i64::MAX });
                     pl.seek_ms(target);
                 }
+                pc.pl.seek_applied.set(acc);
             }
             me.pl_touch(&pc);
+            let pc2 = pc.clone();
+            spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(350)), move |_| {
+                if pc2.pl.seek_gen.get() == gen {
+                    pc2.pl.seek_acc.set(0);
+                    pc2.pl.seek_applied.set(0);
+                    SEEK_ANIM.store(false, std::sync::atomic::Ordering::SeqCst);
+                }
+            });
         });
     }
 
@@ -853,6 +893,11 @@ impl Home {
             stack(vec![scrim, column(vec![spacer(), panel])])
         }
     }
+}
+
+static SEEK_ANIM: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+thread_local! {
+    static SEEK_T0: Instant = Instant::now();
 }
 
 fn err_is_empty(s: &State<String>) -> bool {

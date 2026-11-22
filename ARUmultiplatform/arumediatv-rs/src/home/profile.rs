@@ -21,6 +21,7 @@ const P_CHEVRON: &str = "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z";
 const P_COPY: &str = "M16,1H4c-1.1,0 -2,0.9 -2,2v14h2V3h12V1zM19,5H8c-1.1,0 -2,0.9 -2,2v14c0,1.1 0.9,2 2,2h11c1.1,0 2,-0.9 2,-2V7c0,-1.1 -0.9,-2 -2,-2zM19,21H8V7h11v14z";
 const P_EDIT: &str = "M3,17.25V21h3.75L17.81,9.94l-3.75,-3.75L3,17.25zM20.71,7.04c0.39,-0.39 0.39,-1.02 0,-1.41l-2.34,-2.34c-0.39,-0.39 -1.02,-0.39 -1.41,0l-1.83,1.83 3.75,3.75 1.83,-1.83z";
 const P_LOCK: &str = "M18,8h-1L17,6c0,-2.76 -2.24,-5 -5,-5S7,3.24 7,6v2H6c-1.1,0 -2,0.9 -2,2v10c0,1.1 0.9,2 2,2h12c1.1,0 2,-0.9 2,-2V10c0,-1.1 -0.9,-2 -2,-2zM12,17c-1.1,0 -2,-0.9 -2,-2s0.9,-2 2,-2 2,0.9 2,2 -0.9,2 -2,2zM15.1,8H8.9V6c0,-1.71 1.39,-3.1 3.1,-3.1 1.71,0 3.1,1.39 3.1,3.1v2z";
+const P_CAMERA: &str = "M12,12m-3.2,0a3.2,3.2 0 1,0 6.4,0a3.2,3.2 0 1,0 -6.4,0M9,2L7.17,4H4c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h16c1.1,0 2,-0.9 2,-2V6c0,-1.1 -0.9,-2 -2,-2h-3.17L15,2H9zM12,17c-2.76,0 -5,-2.24 -5,-5s2.24,-5 5,-5 5,2.24 5,5 -2.24,5 -5,5z";
 const P_CROWN: &str = "M5,16L3,5l5.5,5L12,4l3.5,6L21,5l-2,11H5zM19,19c0,0.6 -0.4,1 -1,1H6c-0.6,0 -1,-0.4 -1,-1v-1h14v1z";
 
 /// Dialog turlari (`dlg`): 0 — yo'q, 1 — chiqish, 2/3 — o'chirish (1- va 2-tasdiq), 4 — ilova haqida, 5 — xabar.
@@ -61,9 +62,26 @@ impl Home {
             return None;
         };
         // Poster 480x720 ga cho'zilgan (kvadrat rasm torayib ketgan) — butun rasm kvadratga qaytariladi, kesilmaydi.
-        let a = Rc::new(Image { w: img.w, h: img.h, rgba: img.rgba.clone() }.resized(256, 256).round_corners(128.0));
+        let a = Rc::new(squash(&img, 256).round_corners(128.0));
         *self.avatar.borrow_mut() = Some(a.clone());
         Some(a)
+    }
+
+    /// Matnni `max_w` (dp) ichiga sig'maganda oxiriga "…" qo'yib qisqartiradi (Kotlin `maxLines = 1, overflow = Ellipsis`).
+    fn ellipsize(s: &str, size: f32, max_w: f32) -> String {
+        thread_local! {
+            static BOLD: Font = Font::parse(include_bytes!("../../assets/fonts/Roboto-Bold.ttf")).expect("Roboto Bold");
+        }
+        BOLD.with(|f| {
+            if f.text_width(s, size) <= max_w {
+                return s.to_string();
+            }
+            let mut t: String = s.chars().collect();
+            while !t.is_empty() && f.text_width(&format!("{t}\u{2026}"), size) > max_w {
+                t.pop();
+            }
+            format!("{}\u{2026}", t.trim_end())
+        })
     }
 
     pub(super) fn pglass(e: Element) -> Element {
@@ -234,6 +252,7 @@ impl Home {
         let p = self.profile.get();
         let backdrop = Self::glass_backdrop();
 
+        let active = p.sub_until > crate::home::now_ms_ui() as i64;
         let avatar = {
             // Aniq o'lcham: o'lchamsiz stack/ustun kichrayib ketardi; rasm yo'q bo'lsa — ko'rinadigan harfli doira.
             let inner = match self.avatar_img(&p.photo_url) {
@@ -243,38 +262,50 @@ impl Home {
                     column(vec![tx(letter, 38.0, Color::WHITE).bold()]).center().width(96.0).height(96.0).radius(48.0).bg(ACCENT.with_opacity(0.85))
                 }
             };
+            let mut layers = vec![inner];
+            if active {
+                // Kotlin: tepada "PREMIUM" nishoni (Gold -> Accent2 gradient, AccentTint matn).
+                layers.push(column(vec![
+                    row(vec![spacer(), row(vec![icon(P_CROWN, 11.0).color(ACCENT_TINT), gap_box(2.0, 0.0), tx("PREMIUM", 8.0, ACCENT_TINT).black().letter_spacing(0.2)]).align(Align::Center).gradient(GOLD, ACCENT2).radius(20.0).padding_xy(6.0, 2.5), spacer()]).padding_each(0.0, 3.0, 0.0, 0.0),
+                ]));
+            }
+            // Kamera belgisi (pastki o'ng): Card halqa ichida ACCENT doira.
+            layers.push(column(vec![spacer(), row(vec![spacer(), column(vec![icon(P_CAMERA, 13.0).color(Color::WHITE)]).center().padding(5.0).radius(14.0).bg(ACCENT).border(2.0, CARD)])]));
             let me_a = self.clone();
-            column(vec![inner]).width(96.0).height(96.0).on_click(move || me_a.change_avatar())
+            stack(layers).width(96.0).height(96.0).on_click(move || me_a.change_avatar())
         };
-        let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.0, Color::WHITE).bold(), icon(P_COPY, 16.0).color(Color::WHITE)])
+        let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.5, Color::rgba(255, 255, 255, 199)).bold(), icon(P_COPY, 16.0).color(Color::rgba(255, 255, 255, 153))])
             .gap(9.0)
             .align(Align::Center)
-            .flat_glass(Color::rgba(255, 255, 255, 24))
-            .border(1.0, Color::rgba(255, 255, 255, 50))
+            .bg(Color::rgba(255, 255, 255, 20))
+            .border(1.0, Color::rgba(255, 255, 255, 51))
             .radius(22.0)
             .padding_xy(14.0, 7.0);
-        let hero = Self::pglass(
-            row(vec![
-                avatar,
-                column(vec![
-                    tx(p.name.clone(), 21.0, Color::WHITE).bold(),
-                    if p.username.is_empty() { gap_box(0.0, 0.0) } else { tx(format!("@{}", p.username), 15.0, Color::WHITE) },
-                    gap_box(0.0, 8.0),
-                    row(vec![id_pill]),
-                    gap_box(0.0, 6.0),
-                    tx(format!("Balans: {}", p.balance), 14.5, Color::WHITE).bold(),
-                ])
-                .weight(1.0),
+        let (sw, _) = window_dp();
+        // Matn ustuni kengligi: ekran - 32 (chekka) - 36 (ichki) - 96 (avatar) - 30 (oraliq) - 34 (o'ngdan joy).
+        let name_w = sw - 32.0 - 36.0 - 96.0 - 30.0 - 34.0;
+        let hero = column(vec![row(vec![
+            avatar,
+            gap_box(30.0, 0.0),
+            column(vec![
+                tx(Self::ellipsize(&p.name, 21.0, name_w), 21.0, Color::WHITE).bold(),
+                if p.username.is_empty() { gap_box(0.0, 0.0) } else { tx(Self::ellipsize(&format!("@{}", p.username), 15.0, name_w), 15.0, TEXT_DIM).margin_each(0.0, 4.0, 0.0, 0.0) },
+                gap_box(0.0, 8.0),
+                row(vec![id_pill]),
+                gap_box(0.0, 6.0),
+                tx(format!("Balans: {}", p.balance), 14.5, Color::rgba(255, 255, 255, 158)).bold(),
             ])
-            .gap(20.0)
-            .align(Align::Center)
-            .padding(18.0),
-        )
-        .radius(28.0);
+            .weight(1.0),
+        ])
+        .align(Align::Center)
+        .padding(18.0)])
+        .bg(CARD)
+        .border(1.0, BORDER)
+        .radius(20.0);
 
         let me_e = self.clone();
-        let edit_btn = column(vec![icon(P_EDIT, 17.0).color(Color::WHITE)]).center().width(36.0).height(36.0).radius(18.0).bg(Color::rgba(255, 255, 255, 26)).on_click(move || me_e.open_edit());
-        let hero = stack(vec![hero, column(vec![row(vec![spacer(), edit_btn])]).padding(14.0)]);
+        let edit_btn = column(vec![icon(P_EDIT, 17.0).color(Color::rgba(255, 255, 255, 217))]).center().padding(8.0).radius(21.0).bg(Color::rgba(255, 255, 255, 26)).border(1.0, Color::rgba(255, 255, 255, 46)).on_click(move || me_e.open_edit());
+        let hero = stack(vec![hero, column(vec![row(vec![spacer(), edit_btn])]).padding(18.0)]);
         let me_b = self.clone();
         let billing = column(vec![row(vec![
             icon(P_CROWN, 22.0).color(Color::WHITE),
@@ -389,3 +420,25 @@ impl Home {
 }
 
 const P_BELL: &str = super::BELL;
+
+/// Rasmni majburan `n`×`n` kvadratga (bilinear) keltiradi: poster 480x720 ga cho'zilgan kvadrat rasm edi, shuning uchun nisbat tiklanadi.
+fn squash(img: &Image, n: u32) -> Image {
+    let (w, h) = (img.w as f32, img.h as f32);
+    let mut out = vec![0u8; (n * n * 4) as usize];
+    for y in 0..n {
+        let sy = ((y as f32 + 0.5) * h / n as f32 - 0.5).clamp(0.0, h - 1.0);
+        let (y0, fy) = (sy.floor() as u32, sy.fract());
+        let y1 = (y0 + 1).min(img.h - 1);
+        for x in 0..n {
+            let sx = ((x as f32 + 0.5) * w / n as f32 - 0.5).clamp(0.0, w - 1.0);
+            let (x0, fx) = (sx.floor() as u32, sx.fract());
+            let x1 = (x0 + 1).min(img.w - 1);
+            for c in 0..4usize {
+                let g = |xx: u32, yy: u32| img.rgba[((yy * img.w + xx) * 4) as usize + c] as f32;
+                let v = g(x0, y0) * (1.0 - fx) * (1.0 - fy) + g(x1, y0) * fx * (1.0 - fy) + g(x0, y1) * (1.0 - fx) * fy + g(x1, y1) * fx * fy;
+                out[((y * n + x) * 4) as usize + c] = v as u8;
+            }
+        }
+    }
+    Image { w: n, h: n, rgba: out }
+}
