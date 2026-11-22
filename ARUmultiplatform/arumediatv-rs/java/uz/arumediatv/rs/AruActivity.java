@@ -214,7 +214,13 @@ public class AruActivity extends UzActivity {
                     .setContinueLoadingCheckIntervalBytes(256 * 1024);
             e.setMediaSource(f.createMediaSource(item), Math.max(0, start));
         } else {
-            e.setMediaItem(MediaItem.fromUri(uri), Math.max(0, start));
+            // UZ: mahalliy server bo'lakni Telegram'dan isitguncha (o'nlab soniya) javob bermasligi mumkin — standart 8 soniyalik
+            // o'qish muddati pleyerni cheksiz "yuklanmoqda" holatiga solardi; muddatlar uzaytirildi.
+            // EN: loopback server may need a while to warm a chunk; default 8 s read timeout stalled playback.
+            androidx.media3.datasource.DefaultHttpDataSource.Factory hf = new androidx.media3.datasource.DefaultHttpDataSource.Factory()
+                    .setConnectTimeoutMs(20_000).setReadTimeoutMs(150_000).setAllowCrossProtocolRedirects(true);
+            ProgressiveMediaSource.Factory f = new ProgressiveMediaSource.Factory(hf);
+            e.setMediaSource(f.createMediaSource(MediaItem.fromUri(uri)), Math.max(0, start));
         }
         e.setPlaybackParameters(new PlaybackParameters(speed / 100f));
         e.prepare();
