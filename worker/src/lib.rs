@@ -4580,6 +4580,11 @@ const GOOGLE_WEB_CLIENT_ID: &str = "818006812529-99ospcjp0u3jqhak0ka5m5mogl3lcl3
 
 /// ID tokenni tekshiradi; to'g'ri bo'lsa `(sub, email)`. Aks holda tushunarli xato matni.
 async fn google_verify(id_token: &str) -> std::result::Result<(String, String), String> {
+    google_verify_claims(id_token).await.map(|(sub, email, _)| (sub, email))
+}
+
+/// `google_verify`, lekin `nonce` ni ham qaytaradi (brauzer orqali kirishda token shu `nonce` ga bog'lanadi).
+async fn google_verify_claims(id_token: &str) -> std::result::Result<(String, String, String), String> {
     let t = id_token.trim();
     if t.len() < 100 || t.len() > 4096 || !t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.') {
         return Err("Google tokeni noto'g'ri".into());
@@ -4590,7 +4595,8 @@ async fn google_verify(id_token: &str) -> std::result::Result<(String, String), 
         return Err("Google tokeni yaroqsiz yoki muddati tugagan".into());
     }
     let c: Value = resp.json().await.map_err(|_| "Google javobi tushunarsiz".to_string())?;
-    google_claims_ok(&c, now_ms() / 1000)
+    let nonce = c["nonce"].as_str().unwrap_or("").to_string();
+    google_claims_ok(&c, now_ms() / 1000).map(|(sub, email)| (sub, email, nonce))
 }
 
 /// `tokeninfo` javobini tekshiradi (sof mantiq, test qilinadi).
@@ -10694,6 +10700,83 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             }))
         }
 
+        // ── GOOGLE BRAUZER ORQALI (Gradle'siz ilova uchun): token olinadi, brauzerda Google ochiladi, ilova holatni so'rab turadi ──
+        (Method::Post, "/api/auth/google/start") => {
+            let mut req = req;
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let now = now_ms();
+            let _ = turso_exec(env, "DELETE FROM login_tokens WHERE expires_at < ?", vec![TursoArg::int(now)]).await;
+            let token = random_hex(16);
+            turso_exec(env,
+                "INSERT INTO login_tokens (token,status,user_id,session_token,device,platform,app_version,created_at,expires_at)
+                 VALUES (?,'pending',0,'',?,?,?,?,?)",
+                vec![
+                    TursoArg::text(&token),
+                    TursoArg::text(b["device"].as_str().unwrap_or("")),
+                    TursoArg::text(b["platform"].as_str().unwrap_or("")),
+                    TursoArg::text(b["app_version"].as_str().unwrap_or("")),
+                    TursoArg::int(now),
+                    TursoArg::int(now + LOGIN_TOKEN_TTL_MS),
+                ]).await?;
+            let redirect = format!("{origin}/api/auth/google/cb");
+            let url = format!(
+                "https://accounts.google.com/o/oauth2/v2/auth?client_id={GOOGLE_WEB_CLIENT_ID}&redirect_uri={}&response_type=id_token&scope=openid%20email&nonce={token}&state={token}&prompt=select_account",
+                url_encode_simple(&redirect));
+            ok_nostore(json!({"token": token, "url": url, "redirect_uri": redirect, "expires_in": LOGIN_TOKEN_TTL_MS / 1000}))
+        }
+
+        // Google shu manzilga qaytaradi: ID token URL'ning `#` qismida — sahifadagi skript uni `complete` ga yuboradi.
+        (Method::Get, "/api/auth/google/cb") => {
+            let page = r#"<!doctype html><html lang="uz"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ARUMEDIATV</title>
+<style>body{margin:0;background:#0a0a0c;color:#f2f2f3;font-family:system-ui,sans-serif;display:flex;min-height:100vh;align-items:center;justify-content:center;text-align:center;padding:24px}
+.b{max-width:340px}.t{font-size:22px;font-weight:700;margin-bottom:10px}.m{color:#9a9aa0;font-size:15px;line-height:1.5}.e{color:#f87171}</style></head>
+<body><div class="b"><div class="t">ARU<span style="color:#e2620f">MEDIATV</span></div><div class="m" id="m">Tekshirilmoqda...</div></div>
+<script>(function(){var h=new URLSearchParams((location.hash||'').replace(/^#/,''));var t=h.get('id_token'),s=h.get('state'),m=document.getElementById('m');
+if(!t||!s){m.className='m e';m.textContent='Kirish bekor qilindi yoki Google javob bermadi. Ilovaga qaytib, qayta urinib ko\'ring.';return;}
+history.replaceState(null,'',location.pathname);
+fetch('/api/auth/google/complete',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id_token:t,state:s})})
+.then(function(r){return r.json().then(function(j){return[r.ok,j]})}).then(function(a){if(a[0]&&a[1].ok){m.textContent='Tayyor! ARUMEDIATV ilovasiga qaytishingiz mumkin.';}else{m.className='m e';m.textContent=(a[1]&&a[1].error)||'Kirib bo\'lmadi';}})
+.catch(function(){m.className='m e';m.textContent='Tarmoq xatosi — qayta urinib ko\'ring.';});})();</script></body></html>"#;
+            let mut r = Response::from_html(page)?;
+            r.headers_mut().set("Cache-Control", "no-store")?;
+            r.headers_mut().set("Referrer-Policy", "no-referrer")?;
+            Ok(r)
+        }
+
+        // Brauzer ID tokenni yuboradi: Google tekshiradi, `nonce` va `state` mos bo'lsa kirish tokeni tasdiqlanadi (ilova sessiyani status orqali oladi).
+        (Method::Post, "/api/auth/google/complete") => {
+            let mut req = req;
+            let b: Value = req.json().await.unwrap_or(json!({}));
+            let state = b["state"].as_str().unwrap_or("").trim().to_string();
+            if state.len() != 32 || !state.chars().all(|c| c.is_ascii_hexdigit()) {
+                return json_resp(&json!({"error": "Kirish so'rovi noto'g'ri"}), 400);
+            }
+            let res = turso_exec(env, "SELECT * FROM login_tokens WHERE token=?", vec![TursoArg::text(&state)]).await?;
+            let Some(row) = first_row(&res) else {
+                return json_resp(&json!({"error": "Kirish so'rovi topilmadi yoki muddati tugagan"}), 410);
+            };
+            if row["expires_at"].as_i64().unwrap_or(0) < now_ms() || row["status"].as_str() != Some("pending") {
+                return json_resp(&json!({"error": "Kirish so'rovi muddati tugagan — ilovada qayta urinib ko'ring"}), 410);
+            }
+            let (sub, email, nonce) = match google_verify_claims(b["id_token"].as_str().unwrap_or("")).await {
+                Ok(v) => v,
+                Err(e) => return json_resp(&json!({"error": e}), 401),
+            };
+            if !nonce.is_empty() && nonce != state {
+                return json_resp(&json!({"error": "Token bu kirish so'roviga tegishli emas"}), 401);
+            }
+            let user = google_user(env, &sub, &email).await?;
+            let now = now_ms();
+            if let Some((_, _)) = ban_state(&user, now) {
+                let _ = turso_exec(env, "UPDATE login_tokens SET status='banned', user_id=? WHERE token=?",
+                    vec![TursoArg::int(user["id"].as_i64().unwrap_or(0)), TursoArg::text(&state)]).await;
+                return ok_nostore(json!({"ok": true}));
+            }
+            let login = json!({"device": row["device"], "platform": row["platform"], "app_version": row["app_version"]});
+            create_session(env, &user, &login, &state).await?;
+            ok_nostore(json!({"ok": true}))
+        }
+
         // ── GOOGLE BILAN KIRISH: `{id_token, device, platform, app_version}` -> `{status, session, user}` ──
         (Method::Post, "/api/auth/google") => {
             let mut req = req;
@@ -11204,6 +11287,11 @@ fn needs_app_check(path: &str) -> bool {
     // Telegram webhook — Telegram serveridan keladi, unda bizning
     // kalitimiz yo'q. U o'z siri bilan himoyalangan.
     if path.starts_with("/api/telegram/") {
+        return false;
+    }
+    // Google brauzer kirishi: sahifani va natijani BRAUZER yuboradi (ilova imzosi yo'q). Himoya: bir martalik token (`state`) + Google ID token
+    // (imzoni Google tekshiradi, `aud`/`nonce` solishtiriladi).
+    if path == "/api/auth/google/cb" || path == "/api/auth/google/complete" {
         return false;
     }
     // ── TO'LOV WEBHOOK'I ─────────────────────────────────────
