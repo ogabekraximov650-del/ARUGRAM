@@ -71,6 +71,11 @@ bindings = [
 name = "arumediatv"
 workers_dev = true
 
+# UZ: baza Supabase'da (Tokio, ap-northeast-1). Har so'rovda bazaga ketma-ket o'nlab murojaat bo'ladi; worker bazaga YAQIN ishlasa har
+# murojaat ~250 ms o'rniga ~10 ms. EN: run the Worker next to the database (one client hop instead of dozens of DB hops).
+[env.production.placement]
+region = "aws:ap-northeast-1"
+
 # AI bog'lanishi ham muhitga meros bo'lmaydi.
 [env.production.ai]
 binding = "AI"

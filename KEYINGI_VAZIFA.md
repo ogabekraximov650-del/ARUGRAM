@@ -7781,3 +7781,6 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 **Kalitlar:** `tool/migrate/supabase_rpc.enc` ({url, anon, k}) — `deploy-worker.yml` ochib `SUPABASE_URL/ANON/DBK` qiladi; `tool/migrate/supabase_pg.enc` — CI'dan to'g'ridan-to'g'ri Postgres (`migrator`).
 **Turlar:** import matn qilib yuklagan raqamli ustunlar BIGINT'ga o'tkazildi (`done`, `progress` matn bo'lib qoldi); yetishmagan jadval/ustunlar (`translator_db`, `vd_queue`, `*_vd_*`, `collage_*` ...) qo'shildi.
 **Tekshiruv:** `ci/DB_VALIDATE` (`ci/pg_validate.py`) — worker'dagi statik SQL'larni tarjima + EXPLAIN qiladi. "permission denied" xatolari migrator roli uchun, gateway (definer) uchun emas.
+
+### Worker bazaga yaqin ishlaydi (2026-11-22)
+- Supabase Tokio'da (`ap-northeast-1`), har ilova so'rovi bazaga ketma-ket ko'p murojaat qiladi — masofa sekinlikning asosiy sababi (bazaning o'zi ~100 ms, tarjima 0,4 ms). `worker/wrangler.toml` `[env.production.placement] region = "aws:ap-northeast-1"`: worker Tokioda ishlaydi, bazaga murojaat tezlashadi. Sekin bo'lib qolsa: `placement` ni olib tashlash yoki Supabase regionini foydalanuvchilarga yaqinroqqa ko'chirish.
