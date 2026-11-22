@@ -83,7 +83,7 @@ jobs:
               i=$((i+1)); rm -rf "$RUNNER_TEMP/jr" "$RUNNER_TEMP/dump"
               echo "Urinish $i: bot=$F kalit=#$i"
               TG_BOT_TOKEN="$BOT" TG_CHANNEL_ID="$DB" JR_KEY="$KK" JR_DIR="$RUNNER_TEMP/jr" RECOVER_OUT="$RUNNER_TEMP/dump" \
-                ./ARUmultiplatform/ample-rs/target/release/tgstore-jr > "$RUNNER_TEMP/rec.log" 2>&1; rc=$?
+                ./ARUmultiplatform/ample-rs/target/release/tgstore-jr > "$RUNNER_TEMP/rec.log" 2>&1 && rc=0 || rc=$?
               tail -40 "$RUNNER_TEMP/rec.log"
               if [ $rc -eq 0 ] && grep -q "jadval " "$RUNNER_TEMP/rec.log"; then echo "✅ tiklandi (urinish $i)"; exit 0; fi
             done
