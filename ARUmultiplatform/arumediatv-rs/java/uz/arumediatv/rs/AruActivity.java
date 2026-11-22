@@ -1,5 +1,12 @@
 package uz.arumediatv.rs;
 
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
+import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
@@ -38,6 +45,65 @@ public class AruActivity extends UzActivity {
     private volatile String status = "0|0|0|0|0|0|0|0|";
 
     /** `spec` = "uri|boshlang'ich ms|play(0/1)|tezlik foizi". */
+    /** Telefonda o'rnatilgan Telegram ilovalari (`tg://` ni ochadiganlar): har qator `paket \t nom \t ikon.png yo'li` (Kotlin `TgClients.installed`). */
+    public String tgClients(String ignored) {
+        StringBuilder sb = new StringBuilder();
+        try {
+            PackageManager pm = getPackageManager();
+            Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=telegram"));
+            java.util.HashSet<String> seen = new java.util.HashSet<String>();
+            for (ResolveInfo ri : pm.queryIntentActivities(probe, 0)) {
+                if (ri.activityInfo == null) continue;
+                String pkg = ri.activityInfo.packageName;
+                if (pkg == null || pkg.equals(getPackageName()) || !seen.add(pkg)) continue;
+                String label = String.valueOf(ri.loadLabel(pm)).replace('\t', ' ').replace('\n', ' ');
+                String path = "";
+                try {
+                    Drawable d = ri.loadIcon(pm);
+                    Bitmap bmp = Bitmap.createBitmap(96, 96, Bitmap.Config.ARGB_8888);
+                    d.setBounds(0, 0, 96, 96);
+                    d.draw(new Canvas(bmp));
+                    java.io.File f = new java.io.File(getCacheDir(), "tgi_" + pkg + ".png");
+                    java.io.FileOutputStream o = new java.io.FileOutputStream(f);
+                    bmp.compress(Bitmap.CompressFormat.PNG, 100, o);
+                    o.close();
+                    path = f.getAbsolutePath();
+                } catch (Throwable e) {
+                    path = "";
+                }
+                sb.append(pkg).append('\t').append(label).append('\t').append(path).append('\n');
+            }
+        } catch (Throwable e) {
+            Log.w(TAG, "tgClients: " + e);
+        }
+        return sb.toString();
+    }
+
+    /** Bot havolasini TANLANGAN Telegram ilovasida ochadi: `spec` = "paket|https://t.me/<bot>?start=<token>" (paket bo'sh bo'lsa tizim tanlaydi). */
+    public void tgOpen(final String spec) {
+        runOnUiThread(new Runnable() {
+            public void run() {
+                int bar = spec.indexOf('|');
+                String pkg = bar > 0 ? spec.substring(0, bar) : "";
+                String link = bar >= 0 ? spec.substring(bar + 1) : spec;
+                Uri uri = Uri.parse(link);
+                String bot = uri.getPathSegments().isEmpty() ? "" : uri.getPathSegments().get(0);
+                String start = uri.getQueryParameter("start");
+                Uri tg = bot.isEmpty() ? uri : Uri.parse("tg://resolve?domain=" + bot + "&start=" + (start == null ? "" : start));
+                Uri[] tries = new Uri[] {tg, uri};
+                for (Uri u : tries) {
+                    try {
+                        Intent i = new Intent(Intent.ACTION_VIEW, u).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        if (!pkg.isEmpty()) i.setPackage(pkg);
+                        startActivity(i);
+                        return;
+                    } catch (Throwable e) {
+                    }
+                }
+            }
+        });
+    }
+
     public void exoOpen(final String spec) {
         runOnUiThread(new Runnable() {
             public void run() {

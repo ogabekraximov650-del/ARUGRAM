@@ -88,6 +88,10 @@ pub struct Login {
     until: Cell<Option<Instant>>,
     backend: Arc<dyn Backend>,
     on_done: Rc<dyn Fn(String)>,
+    /// «Qaysi Telegram orqali kirasiz?» oynasi ochiqmi.
+    picker: State<bool>,
+    /// O'rnatilgan Telegram ilovalari: (paket, nom, ikon).
+    clients: RefCell<Vec<(String, String, Option<Rc<Image>>)>>,
 }
 
 impl Login {
@@ -102,7 +106,63 @@ impl Login {
             until: Cell::new(None),
             backend,
             on_done,
+            picker: State::new(false),
+            clients: RefCell::new(Vec::new()),
         })
+    }
+
+    /// Telefondagi Telegram klientlarini o'qiydi (Java `tgClients`).
+    fn load_clients(&self) {
+        let raw = uzcoders::android::activity_call_ret("tgClients", "");
+        let list = raw
+            .lines()
+            .filter_map(|l| {
+                let mut p = l.split('\t');
+                let (pkg, label, icon) = (p.next()?.to_string(), p.next()?.to_string(), p.next().unwrap_or(""));
+                if pkg.is_empty() {
+                    return None;
+                }
+                let img = if icon.is_empty() { None } else { std::fs::read(icon).ok().and_then(|b| crate::webp::decode_any(&b)).map(Rc::new) };
+                Some((pkg, label, img))
+            })
+            .collect();
+        *self.clients.borrow_mut() = list;
+    }
+
+    /// Tanlangan Telegram ilovasida botni ochadi (`None` — tizim o'zi tanlaydi).
+    fn open_with(&self, pkg: Option<&str>) {
+        self.picker.set(false);
+        let link = self.link.borrow().clone();
+        uzcoders::android::activity_call("tgOpen", &format!("{}|{}", pkg.unwrap_or(""), link));
+    }
+
+    /// Kotlin `TgClientPicker` (Material `AlertDialog`).
+    fn picker_view(self: &Rc<Self>) -> Element {
+        let clients = self.clients.borrow().clone();
+        let mut kids = vec![tx("Qaysi Telegram orqali kirasiz?", 17.0, Color::WHITE), gap_box(0.0, 16.0)];
+        if clients.is_empty() {
+            kids.push(tx("Telegram ilovasi topilmadi. Havola brauzerda ochiladi.", 13.0, TEXT_DIM));
+            kids.push(gap_box(0.0, 12.0));
+            let me = self.clone();
+            kids.push(column(vec![tx("Brauzerda ochish", 14.0, ACCENT).bold()]).center().padding_xy(12.0, 10.0).on_click(move || {
+                me.picker.set(false);
+                uzcoders::android::open_url(&me.link.borrow());
+            }));
+        }
+        for (pkg, label, icon) in clients {
+            let me = self.clone();
+            let logo = match icon {
+                Some(img) => image(&img, 36.0, 36.0),
+                None => column(vec![]).width(36.0).height(36.0).radius(18.0).bg(Color::hex(0x229ED9)),
+            };
+            kids.push(row(vec![logo, gap_box(12.0, 0.0), tx(label, 15.0, Color::WHITE)]).align(Align::Center).padding_xy(0.0, 10.0).on_click(move || me.open_with(Some(&pkg))));
+        }
+        let me = self.clone();
+        kids.push(gap_box(0.0, 12.0));
+        kids.push(row(vec![spacer(), column(vec![tx("Bekor qilish", 14.0, TEXT_DIM).bold()]).center().padding_xy(12.0, 10.0).on_click(move || me.picker.set(false))]));
+        let panel = column(kids).bg(SURFACE).radius(28.0).padding(24.0).margin_each(24.0, 0.0, 24.0, 0.0);
+        let me = self.clone();
+        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 82)).on_click(move || me.picker.set(false))
     }
 
     /// "Orqaga": bot oynasidan usul tanlashga qaytadi; tanlash oynasida — ilovadan chiqish tizimga qoladi.
@@ -139,8 +199,9 @@ impl Login {
                     me.until.set(Some(Instant::now() + Duration::from_secs(l.expires.max(30))));
                     me.left.set(l.expires as i64);
                     me.stage.set(Stage::Waiting);
-                    // Telegram ilovasi (yoki tanlash oynasi) darhol ochiladi; foydalanuvchi botda «Start» bosadi.
-                    uzcoders::android::open_url(&l.link);
+                    // Kotlin: avval «Qaysi Telegram orqali kirasiz?» oynasi (o'rnatilgan klientlar), keyin botda «Start».
+                    me.load_clients();
+                    me.picker.set(true);
                     me.poll(g);
                 }
                 Err(e) => {
@@ -193,7 +254,11 @@ impl Login {
             Stage::Choose => self.choose_view(),
             _ => self.bot_view(),
         };
-        stack(vec![column(vec![]).bg(BG), content])
+        let mut layers = vec![column(vec![]).bg(BG), content];
+        if self.stage.get() == Stage::Waiting && self.picker.get() {
+            layers.push(self.picker_view());
+        }
+        stack(layers)
     }
 
     /// Kapsula tugma (Kotlin `Choice`): 58 dp balandlik, to'liq yumaloq, chapda dumaloq logotip, matn o'rtada.
@@ -269,7 +334,10 @@ impl Login {
                         .bg(ACCENT)
                         .radius(16.0)
                         .padding_xy(0.0, 15.0)
-                        .on_click(move || uzcoders::android::open_url(&me.link.borrow())),
+                        .on_click(move || {
+                            me.load_clients();
+                            me.picker.set(true);
+                        }),
                 );
                 kids.push(gap_box(0.0, 10.0));
                 kids.push(tx(format!("Havola muddati: {} s", self.left.get().max(0)), 12.0, TEXT_FAINT));
