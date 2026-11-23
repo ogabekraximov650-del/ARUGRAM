@@ -224,7 +224,7 @@ fn gfield(f: Element, label: &str) -> Element {
 
 fn modal(inner: Element, close: impl Fn() + 'static) -> Element {
     let panel = inner.flat_lens(Color::rgba(255, 255, 255, 14), GLASS_ZOOM).radius(28.0).padding(20.0).margin_each(20.0, 0.0, 20.0, 0.0);
-    column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(close)
+    column(vec![super::appear("modal4", panel, (0.5, 0.5))]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(close)
 }
 
 fn round_btn(path: &'static str, color: Color, f: impl Fn() + 'static) -> Element {

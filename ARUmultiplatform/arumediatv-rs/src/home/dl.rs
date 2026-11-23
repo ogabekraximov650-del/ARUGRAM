@@ -216,7 +216,7 @@ impl Home {
         .padding(22.0)
         .margin_each(24.0, 0.0, 24.0, 0.0);
         let me = self.clone();
-        Some(column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || {
+        Some(column(vec![super::appear("dldlg", panel, (0.5, 0.5))]).center().bg(Color::rgba(0, 0, 0, 45)).on_click(move || {
             me.del_confirm.set(None);
             me.dl_wipe_confirm.set(false);
         }))

@@ -8,6 +8,7 @@ mod scroll;
 
 pub mod emoji;
 use element::{Callback, FieldCfg, Kind};
+use std::collections::HashSet;
 use std::rc::Rc;
 use uzcoders_core::{
     global_revision, Color, EdgeInsets, Point, PointerEvent, PointerKind, Rect, Size,
@@ -17,6 +18,7 @@ use uzcoders_render::{Canvas, DrawCmd, Image, Path};
 use uzcoders_text::Font;
 
 pub use element::Hold;
+pub use element::Transform;
 pub use element::{sprite_frame,
     button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, lazy_column_var, row, scroll_column,
     spacer, sprite, spinner, stack, text, Element, KeyboardKind,
@@ -59,6 +61,18 @@ struct Item {
     /// EN: A row with `.scroll()`: horizontal scrolling.
     /// RU: Строка с `.scroll()`: горизонтальная прокрутка.
     hscroll: bool,
+    /// UZ: Elementning transformatsiyasi. EN: The element's transform. RU: Трансформация элемента.
+    xf: Option<Transform>,
+}
+
+/// UZ: Transformatsiya guruhi: ildiz tuguni, avlodlar to'plami va (ildiz chizilganda aniqlanadigan) markaz nuqtasi.
+/// EN: A transform group: the root node, the descendant set and the pivot point (known once the root is drawn).
+/// RU: Группа трансформации: корневой узел, множество потомков и точка опоры (известна после отрисовки корня).
+struct XGroup {
+    node: usize,
+    set: HashSet<usize>,
+    xf: Transform,
+    pivot: Option<(f32, f32)>,
 }
 
 struct Hit {
@@ -417,25 +431,34 @@ impl Ui {
         let mut clips: Vec<Rect> = Vec::new();
         let caret_on = self.blink_phase() % 2 == 0;
 
-        // UZ: Bosilgan elementning avlod tugunlari to'plami (bosish masshtabi shularga qo'llanadi).
-        // EN: Set of descendant nodes of the pressed element (the press scale applies to them).
-        // RU: Набор потомков нажатого элемента (масштаб нажатия применяется к ним).
+        // UZ: Transformatsiya guruhlari: elementning o'z `xf`i + bosilgan elementning bosish masshtabi.
+        // EN: Transform groups: each element's own `xf` + the press scale of the pressed element.
+        // RU: Группы трансформаций: собственный `xf` элемента + масштаб нажатия нажатого элемента.
         let press_scale = self.press_spring.value;
         let press_node: Option<usize> = self.pressed.and_then(|h| items.iter().find(|i| i.hit == Some(h)).map(|i| i.node));
-        let mut press_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        if let Some(pn) = press_node {
-            let r0 = tree.rect(pn);
-            // Faqat o'rtacha o'lchamdagi elementlar (butun ekranli parda yoki uzun ro'yxat qatori emas).
-            if (press_scale - 1.0).abs() > 0.0005 && r0.h <= size.h * 0.6 && r0.w * r0.h <= size.w * size.h * 0.5 {
-                let mut stack = vec![pn];
-                while let Some(n) = stack.pop() {
-                    press_set.insert(n);
-                    stack.extend(tree.children(n).iter().copied());
+        let mut groups: Vec<XGroup> = Vec::new();
+        for it in items.iter().filter(|i| !matches!(i.kind, ItemKind::ScrollEnd)) {
+            let mut xfs: Vec<Transform> = Vec::new();
+            if let Some(x) = it.xf.filter(|x| !x.is_identity()) {
+                xfs.push(x);
+            }
+            if Some(it.node) == press_node && (press_scale - 1.0).abs() > 0.0005 {
+                let r0 = tree.rect(it.node);
+                // Faqat o'rtacha o'lchamdagi elementlar (butun ekranli parda yoki uzun ro'yxat qatori emas).
+                if r0.h <= size.h * 0.6 && r0.w * r0.h <= size.w * size.h * 0.5 {
+                    xfs.push(Transform { scale_x: press_scale, scale_y: press_scale, ..Transform::default() });
                 }
             }
+            for xf in xfs {
+                let mut set = HashSet::new();
+                let mut stack = vec![it.node];
+                while let Some(n) = stack.pop() {
+                    set.insert(n);
+                    stack.extend(tree.children(n).iter().copied());
+                }
+                groups.push(XGroup { node: it.node, set, xf, pivot: None });
+            }
         }
-        let mut press_xf: Option<(f32, f32)> = None;
-
         for it in items {
             if let ItemKind::ScrollEnd = it.kind {
                 cmds.push(DrawCmd::PopClip);
@@ -443,41 +466,41 @@ impl Ui {
                 shift = shifts.pop().unwrap_or((0.0, 0.0));
                 continue;
             }
-            let mut r = tree.rect(it.node).translate(shift.0, shift.1);
-            if !press_set.is_empty() {
-                if Some(it.node) == press_node {
-                    press_xf = Some((r.x + r.w / 2.0, r.y + r.h / 2.0));
-                }
-                if let (Some((cx, cy)), true) = (press_xf, press_set.contains(&it.node)) {
-                    // UZ: Matn va maydon o'lchami O'ZGARMAYDI (aks holda qator torayib, so'zlar boshqa qatorga o'tib ketadi): faqat markazi siljiydi.
-                    // EN: Text and field size stays the same (otherwise the line narrows and words wrap): only the centre moves.
-                    // RU: Размер текста и поля не меняется (иначе строка сужается и слова переносятся): смещается только центр.
-                    if matches!(it.kind, ItemKind::Text(..) | ItemKind::Field(_)) {
-                        let (mx, my) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
-                        let (nx, ny) = (cx + (mx - cx) * press_scale, cy + (my - cy) * press_scale);
-                        r = Rect::new(nx - r.w / 2.0, ny - r.h / 2.0, r.w, r.h);
-                    } else {
-                        r = Rect::new(cx + (r.x - cx) * press_scale, cy + (r.y - cy) * press_scale, r.w * press_scale, r.h * press_scale);
-                    }
+            let cmd_start = cmds.len();
+            let r = tree.rect(it.node).translate(shift.0, shift.1);
+            for g in groups.iter_mut() {
+                if g.node == it.node && g.pivot.is_none() {
+                    g.pivot = Some((r.x + g.xf.pivot.0 * r.w, r.y + g.xf.pivot.1 * r.h));
                 }
             }
+            // Ushbu element tegishli guruhlar (tashqidan ichkariga).
+            let owning: Vec<usize> = groups
+                .iter()
+                .enumerate()
+                .filter(|(_, g)| g.pivot.is_some() && g.set.contains(&it.node))
+                .map(|(i, _)| i)
+                .collect();
             let clip = clips.last().copied();
             let eff = clip.map_or(r, |c| r.intersect(&c));
             let visible = !eff.is_empty();
+            let mut xeff = eff;
+            for &gi in owning.iter().rev() {
+                xeff = xf_rect(&groups[gi], xeff);
+            }
             if let Some(h) = it.hit {
                 self.hits.push(Hit {
-                    rect: eff,
+                    rect: xeff,
                     cb: cbs[h].clone(),
                 });
             }
             if let Some(cb) = &it.drag {
-                self.drags.push((eff, cb.clone()));
+                self.drags.push((xeff, cb.clone()));
             }
             if let Some(cb) = &it.swipe {
-                self.swipes.push((eff, cb.clone()));
+                self.swipes.push((xeff, cb.clone()));
             }
             if let Some((ms, cb)) = &it.hold {
-                self.holds.push((eff, *ms, cb.clone()));
+                self.holds.push((xeff, *ms, cb.clone()));
             }
             if visible {
                 if let Some(mut c) = it.bg {
@@ -763,7 +786,7 @@ impl Ui {
                         cmds.push(DrawCmd::PopClip);
                     }
                     self.fields.push(FieldInfo {
-                        rect: eff,
+                        rect: xeff,
                         cfg,
                         shown,
                         text_x,
@@ -786,7 +809,7 @@ impl Ui {
                     self.dirty = true;
                 }
                 self.regions.push(Region {
-                    rect: eff,
+                    rect: xeff,
                     state: sc.clone(),
                     horizontal: it.hscroll,
                 });
@@ -800,6 +823,10 @@ impl Ui {
                 } else {
                     shift.1 -= off;
                 }
+            }
+            for &gi in owning.iter().rev() {
+                let g = &groups[gi];
+                xf_cmds(&mut cmds[cmd_start..], g);
             }
         }
         if let Some(id) = self.focus {
@@ -917,6 +944,11 @@ impl Ui {
             drag: el.on_drag.take(),
             hscroll: el.scroll.is_some() && el.style.direction == Axis::Row,
             scroll: el.scroll,
+            xf: el.xf.map(|mut x| {
+                x.dx *= self.scale;
+                x.dy *= self.scale;
+                x
+            }),
         });
         let node = match el.kind {
             Kind::Container => {
@@ -1019,6 +1051,7 @@ impl Ui {
                 drag: None,
                 hscroll: false,
                 scroll: None,
+                xf: None,
             });
         }
         node
@@ -1639,4 +1672,92 @@ fn field_width(font: &Font, cfg: &FieldCfg, chars: &[char]) -> f32 {
             }
         })
         .sum()
+}
+
+/// UZ: Nuqtani guruh transformatsiyasi bo'yicha ko'chiradi.
+/// EN: Maps a point through a group's transform.
+/// RU: Преобразует точку по трансформации группы.
+fn xf_pt(g: &XGroup, x: f32, y: f32) -> (f32, f32) {
+    let (px, py) = g.pivot.unwrap_or((0.0, 0.0));
+    (px + (x - px) * g.xf.scale_x + g.xf.dx, py + (y - py) * g.xf.scale_y + g.xf.dy)
+}
+
+fn xf_rect(g: &XGroup, r: Rect) -> Rect {
+    let (x, y) = xf_pt(g, r.x, r.y);
+    Rect::new(x, y, r.w * g.xf.scale_x, r.h * g.xf.scale_y)
+}
+
+/// UZ: Chizish buyruqlariga guruh transformatsiyasini qo'llaydi: joylashuv, o'lcham, burchak radiusi, qalinlik, matn o'lchami, shaffoflik.
+/// EN: Applies a group's transform to draw commands: position, size, corner radius, stroke width, text size, opacity.
+/// RU: Применяет трансформацию группы к командам рисования: позицию, размер, радиус углов, толщину, размер текста, прозрачность.
+fn xf_cmds(cmds: &mut [DrawCmd], g: &XGroup) {
+    let s = (g.xf.scale_x + g.xf.scale_y) * 0.5;
+    let a = g.xf.alpha;
+    let col = |c: Color| if a < 0.999 { c.with_opacity(a) } else { c };
+    for c in cmds.iter_mut() {
+        match c {
+            DrawCmd::RoundRect { rect, radius, color } => {
+                *rect = xf_rect(g, *rect);
+                *radius *= s;
+                *color = col(*color);
+            }
+            DrawCmd::RoundRectStroke { rect, radius, width, color } => {
+                *rect = xf_rect(g, *rect);
+                *radius *= s;
+                *width *= s;
+                *color = col(*color);
+            }
+            DrawCmd::Glass { rect, radius, tint } => {
+                *rect = xf_rect(g, *rect);
+                *radius *= s;
+                *tint = col(*tint);
+            }
+            DrawCmd::Gradient { rect, radius, top, bottom } => {
+                *rect = xf_rect(g, *rect);
+                *radius *= s;
+                *top = col(*top);
+                *bottom = col(*bottom);
+            }
+            DrawCmd::Backdrop { rect, radius, blur, tint, .. } => {
+                *rect = xf_rect(g, *rect);
+                *radius *= s;
+                *blur *= s;
+                *tint = col(*tint);
+            }
+            DrawCmd::Video { rect } => *rect = xf_rect(g, *rect),
+            DrawCmd::Arc { cx, cy, radius, width, color, .. } => {
+                let (x, y) = xf_pt(g, *cx, *cy);
+                *cx = x;
+                *cy = y;
+                *radius *= s;
+                *width *= s;
+                *color = col(*color);
+            }
+            DrawCmd::Glow { cx, cy, radius, color } => {
+                let (x, y) = xf_pt(g, *cx, *cy);
+                *cx = x;
+                *cy = y;
+                *radius *= s;
+                *color = col(*color);
+            }
+            DrawCmd::Text { x, baseline, size, color, spacing, .. } => {
+                let (nx, ny) = xf_pt(g, *x, *baseline);
+                *x = nx;
+                *baseline = ny;
+                *size *= s;
+                *spacing *= s;
+                *color = col(*color);
+            }
+            DrawCmd::Image { rect, opacity, .. } | DrawCmd::ImageRegion { rect, opacity, .. } => {
+                *rect = xf_rect(g, *rect);
+                *opacity *= a;
+            }
+            DrawCmd::Path { rect, color, .. } => {
+                *rect = xf_rect(g, *rect);
+                *color = col(*color);
+            }
+            DrawCmd::PushClip(r) => *r = xf_rect(g, *r),
+            DrawCmd::PopClip => {}
+        }
+    }
 }

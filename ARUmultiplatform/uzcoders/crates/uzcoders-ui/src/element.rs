@@ -138,7 +138,44 @@ pub struct Element {
     pub(crate) video: bool,
     pub(crate) on_drag: Option<Rc<dyn Fn(f32, bool)>>,
     pub(crate) scroll: Option<ScrollState>,
+    /// UZ: Transformatsiya (masshtab / siljish / shaffoflik): element va butun avlodlariga qo'llanadi.
+    /// EN: Transform (scale / translate / opacity): applies to the element and all its descendants.
+    /// RU: Трансформация (масштаб / сдвиг / прозрачность): применяется к элементу и всем потомкам.
+    pub(crate) xf: Option<Transform>,
     pub(crate) children: Vec<Element>,
+}
+
+/// UZ: Element transformatsiyasi. Joylashuv (layout) o'zgarmaydi — faqat chizish va bosish sohasi o'zgaradi.
+/// `dx`/`dy` dp'da; `pivot` — qutiga nisbatan (0.5, 0.5 = markaz).
+/// EN: An element transform. Layout does not change — only drawing and the hit area do.
+/// `dx`/`dy` are in dp; `pivot` is relative to the box (0.5, 0.5 = centre).
+/// RU: Трансформация элемента. Раскладка не меняется — меняются только отрисовка и область нажатия.
+/// `dx`/`dy` в dp; `pivot` — относительно рамки (0.5, 0.5 = центр).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Transform {
+    pub scale_x: f32,
+    pub scale_y: f32,
+    pub dx: f32,
+    pub dy: f32,
+    pub alpha: f32,
+    pub pivot: (f32, f32),
+}
+
+impl Default for Transform {
+    fn default() -> Self {
+        Transform { scale_x: 1.0, scale_y: 1.0, dx: 0.0, dy: 0.0, alpha: 1.0, pivot: (0.5, 0.5) }
+    }
+}
+
+impl Transform {
+    /// UZ: Hech narsani o'zgartirmaydimi. EN: Whether it changes nothing. RU: Ничего ли не меняет.
+    pub fn is_identity(&self) -> bool {
+        (self.scale_x - 1.0).abs() < 1e-4
+            && (self.scale_y - 1.0).abs() < 1e-4
+            && self.dx.abs() < 1e-3
+            && self.dy.abs() < 1e-3
+            && (self.alpha - 1.0).abs() < 1e-3
+    }
 }
 
 impl Element {
@@ -159,6 +196,7 @@ impl Element {
             video: false,
             on_drag: None,
             scroll: None,
+            xf: None,
             children,
         }
     }
@@ -243,6 +281,46 @@ impl Element {
     /// RU: Стекло-«лупа» (iOS Liquid Glass): почти прозрачное; изображение под панелью увеличено в `zoom` раз от её центра, у края — преломление.
     pub fn lens(mut self, tint: Color, zoom: f32) -> Self {
         self.backdrop = Some((tint, 0.0, zoom));
+        self
+    }
+    /// UZ: Elementni (va avlodlarini) tekis masshtablaydi; markaz atrofida. Joylashuv o'zgarmaydi.
+    /// EN: Scales the element (and descendants) uniformly around its centre. Layout does not change.
+    /// RU: Равномерно масштабирует элемент (и потомков) вокруг центра. Раскладка не меняется.
+    pub fn scale(mut self, s: f32) -> Self {
+        let mut x = self.xf.unwrap_or_default();
+        x.scale_x = s;
+        x.scale_y = s;
+        self.xf = Some(x);
+        self
+    }
+    /// UZ: Alohida X/Y masshtab. EN: Separate X/Y scale. RU: Отдельный масштаб по X/Y.
+    pub fn scale_xy(mut self, sx: f32, sy: f32) -> Self {
+        let mut x = self.xf.unwrap_or_default();
+        x.scale_x = sx;
+        x.scale_y = sy;
+        self.xf = Some(x);
+        self
+    }
+    /// UZ: Masshtab markazi: qutiga nisbatan (0..1). EN: Scale pivot relative to the box (0..1). RU: Центр масштаба относительно рамки (0..1).
+    pub fn pivot(mut self, px: f32, py: f32) -> Self {
+        let mut x = self.xf.unwrap_or_default();
+        x.pivot = (px, py);
+        self.xf = Some(x);
+        self
+    }
+    /// UZ: Chizishni dp'da siljitadi. EN: Shifts drawing by dp. RU: Сдвигает отрисовку на dp.
+    pub fn translate(mut self, dx: f32, dy: f32) -> Self {
+        let mut x = self.xf.unwrap_or_default();
+        x.dx = dx;
+        x.dy = dy;
+        self.xf = Some(x);
+        self
+    }
+    /// UZ: Shaffoflik (0..1) — elementga va barcha avlodlariga. EN: Opacity (0..1) for the element and all descendants. RU: Прозрачность (0..1) для элемента и потомков.
+    pub fn alpha(mut self, a: f32) -> Self {
+        let mut x = self.xf.unwrap_or_default();
+        x.alpha = a.clamp(0.0, 1.0);
+        self.xf = Some(x);
         self
     }
     /// UZ: Element orqasiga yumshoq yorug'lik dog'lari qo'yadi: `(x ulushi, y ulushi, radius dp, rang)`.

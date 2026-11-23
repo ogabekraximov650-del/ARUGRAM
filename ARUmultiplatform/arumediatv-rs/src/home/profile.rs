@@ -240,7 +240,7 @@ impl Home {
         }
         let scrim_close = close.clone();
         let panel = column(kids).bg(SURFACE).radius(28.0).padding(24.0).margin_each(24.0, 0.0, 24.0, 0.0);
-        let scrim = column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 82));
+        let scrim = column(vec![super::appear("pdlg", panel, (0.5, 0.5))]).center().bg(Color::rgba(0, 0, 0, 82));
         if kind == 6 { scrim } else { scrim.on_click(scrim_close) }
     }
 
@@ -506,7 +506,7 @@ impl Home {
         let panel = column(vec![self.acc_capsule(true), column(kids).padding_each(6.0, 0.0, 6.0, 8.0)]).width(290.0).bg(SURFACE).border(1.0, Color::rgba(255, 255, 255, 71)).radius(24.0);
         let scrim = column(vec![]).on_click(|| ACC_OPEN.with(|s| s.set(false)));
         let off = self.prof_scroll.offset() / density();
-        stack(vec![scrim, column(vec![row(vec![panel, spacer()]).margin_each(16.0, (top + 8.0 - off).max(0.0), 0.0, 0.0), spacer()])])
+        stack(vec![scrim, column(vec![row(vec![super::appear("accpanel", panel, (0.0, 0.0)), spacer()]).margin_each(16.0, (top + 8.0 - off).max(0.0), 0.0, 0.0), spacer()])])
     }
 
     fn acc_remove_dialog(self: &Rc<Self>, id: i64) -> Element {
@@ -528,7 +528,7 @@ impl Home {
         .radius(28.0)
         .padding(24.0)
         .margin_each(24.0, 0.0, 24.0, 0.0);
-        column(vec![panel]).center().bg(Color::rgba(0, 0, 0, 140)).on_click(close)
+        column(vec![super::appear("accrm", panel, (0.5, 0.5))]).center().bg(Color::rgba(0, 0, 0, 140)).on_click(close)
     }
 }
 

@@ -619,3 +619,27 @@ fn maydonda_emoji_rasm_bilan_chiziladi_va_butun_ochadi() {
     assert!(ui.key_backspace());
     assert_eq!(st.get(), "a");
 }
+
+// UZ: Transformatsiya: masshtab chizish va bosish sohasini markaz atrofida o'zgartiradi, alpha rangni xiralashtiradi.
+// EN: Transform: scale changes the drawn and hit rects around the centre; alpha fades colors.
+// RU: Трансформация: масштаб меняет рисуемую и нажимаемую области вокруг центра, alpha ослабляет цвета.
+#[test]
+fn transformatsiya_masshtab_va_alpha() {
+    let mut ui = Ui::new(font(), || {
+        column(vec![button("OK", || {}).width(100.0).height(40.0).scale(0.5).alpha(0.5)])
+    });
+    let cmds = ui.frame(SZ);
+    let r = ui.hits[0].rect;
+    assert!((r.w - 50.0).abs() < 0.01 && (r.h - 20.0).abs() < 0.01, "{r:?}");
+    let first = cmds
+        .iter()
+        .find_map(|c| match c {
+            DrawCmd::RoundRect { rect, color, .. } => Some((*rect, *color)),
+            _ => None,
+        })
+        .unwrap();
+    assert!((first.0.w - 50.0).abs() < 0.01);
+    // Markaz o'zgarmaydi / the centre stays put.
+    assert!(((first.0.x + first.0.w / 2.0) - 50.0).abs() < 0.01);
+    assert!(first.1.a < 255);
+}

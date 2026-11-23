@@ -57,6 +57,36 @@ fn trans_enabled() -> bool {
     !cfg!(test) || TEST_TRANS.with(|c| c.get())
 }
 
+thread_local! {
+    /// `appear` uchun: har bir joy bo'yicha (oxirgi ko'ringan vaqt, boshlangan vaqt).
+    static APPEAR: std::cell::RefCell<HashMap<&'static str, (std::time::Instant, std::time::Instant)>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// Oyna / panel paydo bo'lishi (HarmonyOS uslubi): 0.9 dan 1.0 gacha prujina bilan kattalashadi va xiraligi ketadi.
+/// `key` — chaqirilgan joy; u 200 ms ko'rinmay qolsa, keyingi ko'rinishda animatsiya qaytadan boshlanadi. `pivot` — masshtab markazi (0..1).
+pub(crate) fn appear(key: &'static str, el: Element, pivot: (f32, f32)) -> Element {
+    if !trans_enabled() {
+        return el;
+    }
+    let now = std::time::Instant::now();
+    let t = APPEAR.with(|m| {
+        let mut m = m.borrow_mut();
+        let e = m.entry(key).or_insert((now, now));
+        if now.duration_since(e.0).as_millis() > 200 {
+            e.1 = now;
+        }
+        e.0 = now;
+        now.duration_since(e.1).as_secs_f32()
+    });
+    if t >= 0.4 {
+        return el;
+    }
+    uzcoders::core::request_frame();
+    let k = 16.0;
+    let p = 1.0 - (1.0 + k * t) * (-k * t).exp();
+    el.pivot(pivot.0, pivot.1).scale(0.9 + 0.1 * p).alpha((p * 1.6).min(1.0))
+}
+
 /// Sahifa o'tishi: davomiyligi va prujina chastotasi.
 const TRANS_SECS: f32 = 0.55;
 const TRANS_W: f32 = 15.0;
@@ -1312,22 +1342,25 @@ impl Home {
                     // Karta kattalashib ochiladi: oyna kartaning joyidan butun ekrangacha o'sadi (yopilganda teskarisi), ichida sahifa ko'rinadi.
                     let q = k;
                     let r = (a.0 + (0.0 - a.0) * q, a.1 + (0.0 - a.1) * q, a.2 + (w - a.2) * q, a.3 + (h - a.3) * q);
-                    return stack(vec![back, column(vec![]).bg(dim), self.reveal(front, r, w, h)]);
+                    return stack(vec![back.scale(1.0 - 0.06 * q).alpha(1.0 - 0.25 * q), column(vec![]).bg(dim), self.reveal(front, r, w, h, q)]);
                 }
                 let fx = if push { (1.0 - p) * w } else { p * w };
-                return stack(vec![back, column(vec![]).bg(dim), row(vec![gap_box(fx, 0.0), front.width(w)]).height(h)]);
+                return stack(vec![back.translate(-0.22 * w * k, 0.0), column(vec![]).bg(dim), row(vec![gap_box(fx, 0.0), front.width(w)]).height(h)]);
             }
             *self.trans.borrow_mut() = None;
         }
         self.view_for(&cur)
     }
 
-    /// Sahifani `r` (dp: x, y, eni, bo'yi) oynasida ko'rsatadi: sahifa o'z joyida to'liq o'lchamda turadi, oyna esa uni "ochib" boradi (kesadi).
-    fn reveal(&self, page: Element, r: (f32, f32, f32, f32), w: f32, h: f32) -> Element {
-        let d = density();
-        self.rev_sx.force_offset(r.0.max(0.0) * d);
-        self.rev_sy.force_offset(r.1.max(0.0) * d);
-        let inner = column(vec![page.width(w).height(h)]).scroll(&self.rev_sy).width(w).height(r.3.max(1.0));
+    /// Sahifani `r` (dp: x, y, eni, bo'yi) oynasida ko'rsatadi: sahifa haqiqiy masshtablanadi (karta eniga sig'adi), oyna bilan birga
+    /// o'sib butun ekranga yetadi; ichida boshqa narsa ko'rinmasligi uchun oyna bilan qirqiladi. `q` — 0..1 jarayon.
+    fn reveal(&self, page: Element, r: (f32, f32, f32, f32), w: f32, h: f32, q: f32) -> Element {
+        self.rev_sx.force_offset(0.0);
+        self.rev_sy.force_offset(0.0);
+        let s = (r.2 / w.max(1.0)).clamp(0.05, 1.0);
+        // Sahifa chap-yuqori burchagidan masshtablanadi va oynaning chap-yuqori burchagiga tushadi; tez ochiladi (xira boshlanadi).
+        let page = page.width(w).height(h).pivot(0.0, 0.0).scale(s).alpha((0.3 + 2.4 * q).min(1.0));
+        let inner = column(vec![page]).scroll(&self.rev_sy).width(w).height(r.3.max(1.0));
         let outer = row(vec![inner]).scroll(&self.rev_sx).width(r.2.max(1.0)).height(r.3.max(1.0));
         column(vec![gap_box(0.0, r.1.max(0.0)), row(vec![gap_box(r.0.max(0.0), 0.0), outer]).align(Align::Start)]).align(Align::Start)
     }
