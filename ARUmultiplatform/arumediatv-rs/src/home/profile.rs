@@ -88,16 +88,16 @@ impl Home {
         e.flat_lens(Color::rgba(255, 255, 255, 8), GLASS_ZOOM)
     }
 
+    /// Kotlin `StatBox`: karta fon, 18 dp burchak, ichki joy 14 dp; matnlar 24 sp qator balandligiga ega (Material `bodyLarge`).
     fn stat(icon_path: &'static str, label: &str, value: String) -> Element {
-        Self::pglass(
-            column(vec![
-                row(vec![icon(icon_path, 16.0).color(ACCENT2), tx(label, 12.0, Color::WHITE)]).gap(6.0).align(Align::Center),
-                gap_box(0.0, 8.0),
-                tx(value, 17.0, Color::WHITE).black(),
-            ])
-            .padding_xy(14.0, 14.0),
-        )
-        .radius(20.0)
+        column(vec![
+            row(vec![icon(icon_path, 16.0).color(ACCENT), gap_box(6.0, 0.0), tx(label, 12.0, Color::rgba(255, 255, 255, 140)).line_height(24.0)]).align(Align::Center),
+            tx(value, 17.0, Color::WHITE).black().line_height(24.0).margin_each(0.0, 8.0, 0.0, 0.0),
+        ])
+        .padding_xy(14.0, 14.0)
+        .bg(CARD)
+        .border(1.0, BORDER)
+        .radius(18.0)
         .weight(1.0)
     }
 
@@ -266,7 +266,7 @@ impl Home {
             if active {
                 // Kotlin: tepada "PREMIUM" nishoni (Gold -> Accent2 gradient, AccentTint matn).
                 layers.push(column(vec![
-                    row(vec![spacer(), row(vec![icon(P_CROWN, 11.0).color(ACCENT_TINT), gap_box(2.0, 0.0), tx("PREMIUM", 8.0, ACCENT_TINT).black().letter_spacing(0.2)]).align(Align::Center).gradient(GOLD, ACCENT2).radius(20.0).padding_xy(6.0, 2.5), spacer()]).padding_each(0.0, 3.0, 0.0, 0.0),
+                    row(vec![spacer(), row(vec![icon(WORKSPACE_PREMIUM, 11.0).color(ACCENT_TINT), gap_box(2.0, 0.0), tx("PREMIUM", 8.0, ACCENT_TINT).black().letter_spacing(0.2).line_height(24.0)]).align(Align::Center).gradient(GOLD, ACCENT2).radius(20.0).padding_xy(6.0, 2.5), spacer()]).padding_each(0.0, 3.0, 0.0, 0.0),
                 ]));
             }
             // Kamera belgisi (pastki o'ng): Card halqa ichida ACCENT doira.
@@ -274,7 +274,7 @@ impl Home {
             let me_a = self.clone();
             stack(layers).width(96.0).height(96.0).on_click(move || me_a.change_avatar())
         };
-        let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.5, Color::rgba(255, 255, 255, 199)).bold(), icon(P_COPY, 16.0).color(Color::rgba(255, 255, 255, 153))])
+        let id_pill = row(vec![tx(format!("ID: {}", p.id), 14.5, Color::rgba(255, 255, 255, 199)).bold().line_height(24.0), icon(P_COPY, 16.0).color(Color::rgba(255, 255, 255, 153))])
             .gap(9.0)
             .align(Align::Center)
             .bg(Color::rgba(255, 255, 255, 20))
@@ -288,12 +288,12 @@ impl Home {
             avatar,
             gap_box(30.0, 0.0),
             column(vec![
-                tx(Self::ellipsize(&p.name, 21.0, name_w), 21.0, Color::WHITE).bold(),
-                if p.username.is_empty() { gap_box(0.0, 0.0) } else { tx(Self::ellipsize(&format!("@{}", p.username), 15.0, name_w), 15.0, TEXT_DIM).margin_each(0.0, 4.0, 0.0, 0.0) },
+                tx(Self::ellipsize(&p.name, 21.0, name_w), 21.0, Color::WHITE).bold().line_height(24.0),
+                if p.username.is_empty() { gap_box(0.0, 0.0) } else { tx(Self::ellipsize(&format!("@{}", p.username), 15.0, name_w), 15.0, TEXT_DIM).line_height(24.0).margin_each(0.0, 4.0, 0.0, 0.0) },
                 gap_box(0.0, 8.0),
                 row(vec![id_pill]),
                 gap_box(0.0, 6.0),
-                tx(format!("Balans: {}", p.balance), 14.5, Color::rgba(255, 255, 255, 158)).bold(),
+                tx(format!("Balans: {}", p.balance), 14.5, Color::rgba(255, 255, 255, 158)).bold().line_height(24.0),
             ])
             .weight(1.0),
         ])
