@@ -144,8 +144,8 @@ pub(crate) fn enter(id: i64, el: Element) -> Element {
 }
 
 /// Sahifa o'tishi: davomiyligi va prujina chastotasi.
-const TRANS_SECS: f32 = 0.4;
-const TRANS_W: f32 = 20.0;
+const TRANS_SECS: f32 = 0.2;
+const TRANS_W: f32 = 35.0;
 
 thread_local! {
     /// Sahifa o'tishi tugaguncha kechiktirilgan ishlar (pleyerni tayyorlash).
@@ -1782,7 +1782,7 @@ mod tests {
                 home.open_season(home.seasons.get()[0].clone());
                 TEST_TRANS.with(|c| c.set(true));
                 let _ = ui.frame(size); // qatlamlarni yozib olish kadri
-                for (i, ms) in [70u64, 150, 260].iter().enumerate() {
+                for (i, ms) in [40u64, 90, 150].iter().enumerate() {
                     if let Some(t) = home.trans.borrow_mut().as_mut() {
                         t.start = std::time::Instant::now() - std::time::Duration::from_millis(*ms);
                     }
