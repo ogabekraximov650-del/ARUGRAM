@@ -508,7 +508,20 @@ impl Ui {
                     xf: Transform { dx: rr.x - l.x, dy: rr.y - l.y, ..Transform::default() },
                     pivot: Some((0.0, 0.0)),
                 };
-                let mut v: Vec<DrawCmd> = l.cmds.iter().cloned().collect();
+                // UZ: Qotirilgan qatlamda shisha xiralashuvi (Backdrop) oddiy shishaga almashtiriladi: GPU'da Backdrop butun ekran
+                // sahna teksturasi + xiralashtirish o'tishlarini talab qiladi — animatsiya kadrlarini sekinlashtiradi.
+                // EN: In a frozen layer the glass blur (Backdrop) is replaced with plain glass: on the GPU a Backdrop needs a
+                // full-screen scene texture + blur passes, which slows animation frames down.
+                // RU: В замороженном слое размытие стекла (Backdrop) заменяется простым стеклом: на GPU Backdrop требует
+                // полноэкранной текстуры сцены и проходов размытия, что замедляет кадры анимации.
+                let mut v: Vec<DrawCmd> = l
+                    .cmds
+                    .iter()
+                    .map(|c| match c {
+                        DrawCmd::Backdrop { rect, radius, tint, .. } => DrawCmd::Glass { rect: *rect, radius: *radius, tint: *tint },
+                        o => o.clone(),
+                    })
+                    .collect();
                 xf_cmds(&mut v, &g);
                 cmds.extend(v);
             }

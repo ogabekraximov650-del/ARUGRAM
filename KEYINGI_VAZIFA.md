@@ -7823,3 +7823,5 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 
 Sabab: o'tish davomida har kadrda ikkala sahifa (pleyer, ro'yxatlar) qayta qurilib, o'lchanib, chizilardi — Redmi 9C'da kadrlar tushib, animatsiya "qotib" ko'rinardi.
 Yechim: `Element::capture(&slot)` o'tishning 1-kadrida ikkala sahifaning chizish buyruqlarini saqlaydi; keyingi kadrlarda `uzcoders::ui::frozen(&layer)` ularni qayta qurmasdan faqat siljitib/masshtablab chizadi (`home.rs` `Trans`/`TransCap`). Animatsiya soati qatlamlar tayyor bo'lgach boshlanadi (og'ir 1-kadr animatsiyani yemaydi). O'tish paytida sahifa bosilmaydi (rasm).
+
+Qo'shimcha (o'tish FPS): GPU'da `Backdrop` (shisha xiralashuvi) bor kadr butun ekran sahna FBO'si + nusxalash + xiralashtirish o'tishlarini talab qiladi (`gl.rs` `render`: `first_blur`). Shuning uchun qotirilgan qatlam chizilganda `Backdrop` → `Glass` (faqat tint) almashtiriladi (`uzcoders-ui` `frozen`). Umumiy FPS uchun keyingi qadam: oddiy skroll paytida ham xiralashuvni arzonlashtirish.
