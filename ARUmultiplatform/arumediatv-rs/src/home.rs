@@ -283,6 +283,9 @@ impl Home {
                 }
             });
         }
+        if crate::accounts::take_stay_profile() {
+            h.tab.set(4);
+        }
         crate::vdsrv::start(&h.session);
         crate::vdsrv::dl_resume_all(&h.session);
         // Doimiy keshdan DARHOL ko'rsatiladi (kutish yo'q), so'ng tarmoqdan yangilanadi.

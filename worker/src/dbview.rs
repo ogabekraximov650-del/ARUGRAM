@@ -62,10 +62,27 @@ pub(crate) async fn route(req: &Request, env: &Env, path: &str) -> Result<Respon
         return json_resp(&json!({"error": "bunday jadval yo'q"}), 404);
     };
 
-    // Ustunlar (`PRAGMA table_info` — jadval nomi yuqorida tekshirilgan, qo'shtirnoq ichida).
-    let info = turso_exec(env, &format!("PRAGMA table_info(\"{table}\")"), vec![]).await?;
+    // Ustunlar: baza endi Postgres (Supabase) — `PRAGMA table_info` o'rniga `information_schema` (jadval nomi yuqorida tekshirilgan, parametr bilan beriladi).
+    let info = turso_exec(env,
+        "SELECT column_name AS name, data_type AS type FROM information_schema.columns WHERE table_schema='arumediatv' AND table_name=? ORDER BY ordinal_position",
+        vec![TursoArg::text(&table)]).await?;
+    let pkq = turso_exec(env,
+        "SELECT kcu.column_name AS name FROM information_schema.table_constraints tc JOIN information_schema.key_column_usage kcu ON kcu.constraint_name=tc.constraint_name AND kcu.table_schema=tc.table_schema AND kcu.table_name=tc.table_name WHERE tc.table_schema='arumediatv' AND tc.table_name=? AND tc.constraint_type='PRIMARY KEY'",
+        vec![TursoArg::text(&table)]).await?;
+    let pks: Vec<String> = rows_of(&pkq).into_iter().filter_map(|r| r["name"].as_str().map(str::to_string)).collect();
+    // Postgres turlari SQLite nomlariga (ilova ustun kengligini shu bo'yicha tanlaydi).
+    let ty = |t: &str| match t {
+        "bigint" | "integer" | "smallint" | "boolean" => "INTEGER".to_string(),
+        "double precision" | "real" | "numeric" => "REAL".to_string(),
+        "text" | "character varying" | "character" => "TEXT".to_string(),
+        o => o.to_uppercase(),
+    };
     let cols: Vec<(String, String, bool)> = rows_of(&info).into_iter()
-        .map(|r| (r["name"].as_str().unwrap_or("").to_string(), r["type"].as_str().unwrap_or("").to_string(), r["pk"].as_i64().unwrap_or(0) > 0))
+        .map(|r| {
+            let n = r["name"].as_str().unwrap_or("").to_string();
+            let pk = pks.contains(&n);
+            (n, ty(r["type"].as_str().unwrap_or("")), pk)
+        })
         .filter(|(n, _, _)| !n.is_empty())
         .collect();
     if cols.is_empty() {

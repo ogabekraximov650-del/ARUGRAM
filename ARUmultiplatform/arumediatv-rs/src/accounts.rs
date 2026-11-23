@@ -153,6 +153,15 @@ fn hooks() -> Option<Hooks> {
 }
 
 thread_local! {
+    /// Hisob almashtirilgach yangi bosh sahifa PROFIL yorlig'ida ochiladi (bosh sahifaga o'tib ketmasin).
+    static STAY_PROFILE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+pub fn take_stay_profile() -> bool {
+    STAY_PROFILE.with(|c| c.replace(false))
+}
+
+thread_local! {
     /// Hisob almashtirish davomida butun ekran qoplamasi matni (Kotlin `AccountSwitcher.switching`).
     static SWITCHING: uzcoders::prelude::State<String> = uzcoders::prelude::State::new(String::new());
 }
@@ -189,6 +198,7 @@ pub fn switch_to(_from: i64, to: i64) {
         move_files(false, to);
         crate::data::reset_account_memory();
         crate::api::save_session(&t.session);
+        STAY_PROFILE.with(|c| c.set(true));
         if let Some(h) = hooks() {
             (h.activate)(t.session.clone());
         }
@@ -225,6 +235,7 @@ pub fn cancel_add() -> bool {
     crate::data::reset_account_memory();
     crate::api::save_session(&t.session);
     set_add_return(0);
+    STAY_PROFILE.with(|c| c.set(true));
     if let Some(h) = hooks() {
         (h.activate)(t.session.clone());
     }
