@@ -98,7 +98,7 @@ impl Home {
         }
         p.eps_loading.set(p.eps.get().is_empty());
         let (p2, me) = (p.clone(), self.clone());
-        spawn_bg(
+        self.after_trans(move || spawn_bg(
             move || {
                 let mut last = Err(String::new());
                 for i in 0..3 {
@@ -136,7 +136,7 @@ impl Home {
                     }
                 }
             },
-        );
+        ));
     }
 
     pub(super) fn open_season(self: &Rc<Self>, season: Season) {
@@ -166,7 +166,10 @@ impl Home {
             scroll: [ScrollState::new(), ScrollState::new(), ScrollState::new(), ScrollState::new()],
             pl: super::player_ui::PlayerState::new(),
         });
-        self.pl_open_gate(&p);
+        // Avval sahifa ochiladi (o'tish boshlanadi): shundan keyin tarmoq/dekodlash ishlari animatsiya tugaguncha kechiktiriladi.
+        self.push(Page::Season(p.clone()));
+        let (meg, pg) = (self.clone(), p.clone());
+        self.after_trans(move || meg.pl_open_gate(&pg));
         let (a, s) = (season.anime_id, season.season_id);
         let session = self.session.clone();
         // Doimiy keshdan darhol (ma'lumot va bo'limlar), so'ng yangilanadi.
@@ -188,14 +191,17 @@ impl Home {
             self.next_posters();
         }
         let (p1, s1) = (p.clone(), session.clone());
-        spawn_bg(move || fetch_info(a, s, &s1), move |r| {
-            if let Ok(i) = r {
-                p1.info.set(Rc::new(i));
-            }
+        self.after_trans(move || {
+            spawn_bg(move || fetch_info(a, s, &s1), move |r| {
+                if let Ok(i) = r {
+                    p1.info.set(Rc::new(i));
+                }
+            })
         });
         self.load_eps(&p);
         let (p3, me) = (p.clone(), self.clone());
-        spawn_bg(move || fetch_sections(a), move |r| {
+        let me2 = self.clone();
+        me2.after_trans(move || spawn_bg(move || fetch_sections(a), move |r| {
             if let Ok(list) = r {
                 {
                     let have = me.posters.borrow();
@@ -209,9 +215,9 @@ impl Home {
                 p3.sections.set(Rc::new(list));
                 me.next_posters();
             }
-        });
-        self.cm_load(&p);
-        self.push(Page::Season(p));
+        }));
+        let (me3, p4) = (self.clone(), p.clone());
+        self.after_trans(move || me3.cm_load(&p4));
     }
 
     pub(super) fn push(&self, page: Page) {

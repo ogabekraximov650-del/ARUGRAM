@@ -1785,12 +1785,16 @@ mod tests {
                 uzcoders::core::set_press_rect((17.0, 129.0, 156.0, 240.0));
                 home.open_season(home.seasons.get()[0].clone());
                 TEST_TRANS.with(|c| c.set(true));
-                let _ = ui.frame(size); // qatlamlarni yozib olish kadri
+                let tf0 = std::time::Instant::now();
+                let c0 = ui.frame(size); // qatlamlarni yozib olish kadri
+                if std::env::var("ARU_TIMING").is_ok() { eprintln!("TIMING capture frame: {:?}, cmds={}", tf0.elapsed(), c0.len()); }
                 for (i, ms) in [40u64, 90, 150].iter().enumerate() {
                     if let Some(t) = home.trans.borrow_mut().as_mut() {
                         t.start = std::time::Instant::now() - std::time::Duration::from_millis(*ms);
                     }
+                    let tf = std::time::Instant::now();
                     let cmds = ui.frame(size);
+                    if std::env::var("ARU_TIMING").is_ok() { eprintln!("TIMING frame {i}: {:?}, cmds={}", tf.elapsed(), cmds.len()); }
                     let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                     c.clear(Color::BLACK);
                     c.execute(&cmds);
