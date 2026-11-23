@@ -1,5 +1,10 @@
 package uz.arumediatv.com.ui.admin
 
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
+import kotlin.math.roundToInt
+import androidx.compose.ui.graphics.Brush
 import android.graphics.BitmapFactory
 import android.util.Base64
 import android.widget.Toast
@@ -378,13 +383,47 @@ private fun TrendChart(metric: String, fmt: (Long) -> String) {
             pts.isEmpty() -> Box(Modifier.fillMaxWidth().height(120.dp), contentAlignment = Alignment.Center) { Text("Ma'lumot yo'q", color = AruColors.TextFaint, fontSize = 12.sp) }
             else -> {
                 val max = (pts.maxOf { it.v }).coerceAtLeast(1)
+                // Silliq chiziqli grafik (Catmull-Rom egri chiziq) + ostida gradient to'ldirish; barmoq bilan surib/bosib nuqta tanlanadi.
                 Canvas(
-                    Modifier.fillMaxWidth().height(120.dp).padding(top = 10.dp).clickable { },
+                    Modifier.fillMaxWidth().height(140.dp).padding(top = 10.dp)
+                        .pointerInput(pts.size) {
+                            detectTapGestures { o -> touch = if (pts.size <= 1) 0 else ((o.x / size.width) * (pts.size - 1)).roundToInt().coerceIn(0, pts.size - 1) }
+                        }
+                        .pointerInput(pts.size) {
+                            detectDragGestures { ch, _ -> touch = if (pts.size <= 1) 0 else ((ch.position.x / size.width) * (pts.size - 1)).roundToInt().coerceIn(0, pts.size - 1) }
+                        },
                 ) {
-                    val bw = size.width / pts.size
-                    pts.forEachIndexed { i, p ->
-                        val h = size.height * (p.v.toFloat() / max)
-                        drawRect(if (i == touch) Color(0xFFFFC93C) else Color(0xFFE2620F), topLeft = Offset(i * bw + bw * 0.12f, size.height - h), size = Size(bw * 0.76f, h.coerceAtLeast(1f)))
+                    val w = size.width
+                    val h = size.height
+                    val padT = 8.dp.toPx()
+                    val padB = 4.dp.toPx()
+                    val n = pts.size
+                    fun px(i: Int) = if (n == 1) w / 2 else w * i / (n - 1)
+                    fun py(i: Int) = padT + (h - padT - padB) * (1f - pts[i].v.toFloat() / max)
+                    val line = androidx.compose.ui.graphics.Path()
+                    line.moveTo(px(0), py(0))
+                    for (i in 0 until n - 1) {
+                        val p0 = if (i > 0) i - 1 else i
+                        val p3 = if (i + 2 < n) i + 2 else i + 1
+                        val c1x = px(i) + (px(i + 1) - px(p0)) / 6f
+                        val c1y = py(i) + (py(i + 1) - py(p0)) / 6f
+                        val c2x = px(i + 1) - (px(p3) - px(i)) / 6f
+                        val c2y = py(i + 1) - (py(p3) - py(i)) / 6f
+                        line.cubicTo(c1x, c1y.coerceIn(padT, h - padB), c2x, c2y.coerceIn(padT, h - padB), px(i + 1), py(i + 1))
+                    }
+                    val area = androidx.compose.ui.graphics.Path()
+                    area.addPath(line)
+                    area.lineTo(px(n - 1), h)
+                    area.lineTo(px(0), h)
+                    area.close()
+                    drawPath(area, Brush.verticalGradient(listOf(Color(0x66E2620F), Color(0x00E2620F)), startY = padT, endY = h))
+                    drawPath(line, Color(0xFFE2620F), style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.4.dp.toPx(), cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+                    if (touch in 0 until n) {
+                        val x = px(touch)
+                        val y = py(touch)
+                        drawLine(Color(0x55FFFFFF), Offset(x, padT), Offset(x, h), strokeWidth = 1.dp.toPx())
+                        drawCircle(Color(0xFF0A0A0C), 6.dp.toPx(), Offset(x, y))
+                        drawCircle(Color(0xFFFFC93C), 4.dp.toPx(), Offset(x, y))
                     }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(8.dp)).clickable { touch = if (touch >= 0 && touch < pts.size - 1) touch + 1 else 0 }.padding(vertical = 4.dp)) {

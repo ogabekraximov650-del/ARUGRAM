@@ -716,10 +716,18 @@ impl Home {
                     None => col.push(column(vec![spinner(24.0, 2.0, ACCENT2)]).center().height(120.0)),
                     Some(pts) if pts.is_empty() => col.push(column(vec![tx("Ma'lumot yo'q", 12.0, Color::WHITE)]).center().height(120.0)),
                     Some(pts) => {
-                        let max = pts.iter().map(|x| x.1).max().unwrap_or(1).max(1) as f32;
-                        let bars: Vec<Element> = pts.iter().map(|(_, v)| column(vec![spacer(), column(vec![]).height((100.0 * *v as f32 / max).max(1.0)).bg(ACCENT2).radius(2.0)]).weight(1.0).height(100.0).padding_each(1.0, 0.0, 1.0, 0.0)).collect();
-                        col.push(row(bars).height(100.0).padding_each(0.0, 10.0, 0.0, 0.0));
-                        col.push(tx(format!("Eng yuqori: {}", fmt(max as i64)), 11.0, Color::WHITE).padding_each(0.0, 6.0, 0.0, 0.0));
+                        let max = pts.iter().map(|x| x.1).max().unwrap_or(1).max(1);
+                        let (sw, _) = window_dp();
+                        let vals: Vec<i64> = pts.iter().map(|x| x.1).collect();
+                        let sel = STAT_SEL.with(|s| s.get());
+                        col.push(line_chart(&vals, sw - 64.0, 140.0, sel).margin_each(0.0, 10.0, 0.0, 0.0));
+                        let n = pts.len() as i32;
+                        let label = match pts.get(sel.max(0) as usize).filter(|_| sel >= 0) {
+                            Some(pt) => format!("{} \u{2192} {}", pt.0.replace('T', " "), fmt(pt.1)),
+                            None => format!("Eng yuqori: {} \u{b7} bosing: nuqtalar bo'ylab", fmt(max)),
+                        };
+                        // Matn qatori bosilsa keyingi nuqta tanlanadi (Kotlin bilan bir xil).
+                        col.push(tx(label, 11.0, Color::rgba(255, 255, 255, 150)).padding_xy(0.0, 6.0).on_click(move || STAT_SEL.with(|s| s.set(if s.get() >= 0 && s.get() < n - 1 { s.get() + 1 } else { 0 }))));
                     }
                 }
             }
@@ -736,5 +744,113 @@ impl Home {
         }
         kids.push(tx("Vaqt mintaqasi: UTC+5 (Toshkent)", 11.0, Color::WHITE).padding_each(4.0, 0.0, 0.0, 32.0));
         self.scaffold("Umumiy statistika", scroll_column(&p.scroll, kids).padding_each(16.0, 4.0, 16.0, 0.0))
+    }
+}
+
+thread_local! {
+    /// Grafikda tanlangan nuqta (-1 — tanlanmagan).
+    static STAT_SEL: State<i32> = State::new(-1);
+    static CHART_CACHE: std::cell::RefCell<std::collections::HashMap<u64, (&'static str, &'static str)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// Silliq chiziqli grafik (Catmull-Rom egri chiziq) + ostida to'ldirish; yo'llar 24x24 birlikda (element o'lchamiga cho'ziladi), bir marta yaratiladi va keshlanadi.
+fn chart_paths(vals: &[i64], w: f32, h: f32) -> (&'static str, &'static str) {
+    let key = vals.iter().fold(w.to_bits() as u64 ^ ((h.to_bits() as u64) << 32), |a, v| a.wrapping_mul(0x100000001b3) ^ (*v as u64));
+    if let Some(p) = CHART_CACHE.with(|c| c.borrow().get(&key).copied()) {
+        return p;
+    }
+    let n = vals.len();
+    let max = vals.iter().copied().max().unwrap_or(1).max(1) as f32;
+    let (pad_t, pad_b) = (8.0f32, 4.0f32);
+    let px = |i: usize| if n == 1 { w / 2.0 } else { w * i as f32 / (n - 1) as f32 };
+    let py = |i: usize| pad_t + (h - pad_t - pad_b) * (1.0 - vals[i] as f32 / max);
+    // Egri chiziq namunalari (piksel).
+    let mut s: Vec<(f32, f32)> = vec![(px(0), py(0))];
+    for i in 0..n.saturating_sub(1) {
+        let p0 = if i > 0 { i - 1 } else { i };
+        let p3 = if i + 2 < n { i + 2 } else { i + 1 };
+        let (x0, y0, x3, y3) = (px(i), py(i), px(i + 1), py(i + 1));
+        let c1 = (x0 + (px(i + 1) - px(p0)) / 6.0, (y0 + (py(i + 1) - py(p0)) / 6.0).clamp(pad_t, h - pad_b));
+        let c2 = (x3 - (px(p3) - px(i)) / 6.0, (y3 - (py(p3) - py(i)) / 6.0).clamp(pad_t, h - pad_b));
+        for k in 1..=10 {
+            let t = k as f32 / 10.0;
+            let u = 1.0 - t;
+            s.push((u * u * u * x0 + 3.0 * u * u * t * c1.0 + 3.0 * u * t * t * c2.0 + t * t * t * x3, u * u * u * y0 + 3.0 * u * u * t * c1.1 + 3.0 * u * t * t * c2.1 + t * t * t * y3));
+        }
+    }
+    let u = |p: (f32, f32)| format!("{:.2},{:.2}", p.0 / w * 24.0, p.1 / h * 24.0);
+    // To'ldirish: egri chiziq + pastki burchaklar.
+    let mut area = format!("M{}", u(s[0]));
+    for p in &s[1..] {
+        area.push_str(&format!("L{}", u(*p)));
+    }
+    area.push_str(&format!("L{}L{}Z", u((s[s.len() - 1].0, h)), u((s[0].0, h))));
+    // Chiziq: egri chiziq bo'ylab 2.4 px qalinlikdagi ko'pburchak.
+    let th = 1.2f32;
+    let mut left: Vec<(f32, f32)> = Vec::new();
+    let mut right: Vec<(f32, f32)> = Vec::new();
+    for k in 0..s.len() {
+        let (a, b) = (s[k.saturating_sub(1)], s[(k + 1).min(s.len() - 1)]);
+        let (tx_, ty_) = (b.0 - a.0, b.1 - a.1);
+        let l = (tx_ * tx_ + ty_ * ty_).sqrt().max(0.0001);
+        let (nx, ny) = (-ty_ / l, tx_ / l);
+        left.push((s[k].0 + nx * th, s[k].1 + ny * th));
+        right.push((s[k].0 - nx * th, s[k].1 - ny * th));
+    }
+    let mut line = format!("M{}", u(left[0]));
+    for p in &left[1..] {
+        line.push_str(&format!("L{}", u(*p)));
+    }
+    for p in right.iter().rev() {
+        line.push_str(&format!("L{}", u(*p)));
+    }
+    line.push('Z');
+    let out: (&'static str, &'static str) = (Box::leak(area.into_boxed_str()), Box::leak(line.into_boxed_str()));
+    CHART_CACHE.with(|c| c.borrow_mut().insert(key, out));
+    out
+}
+
+fn line_chart(vals: &[i64], w: f32, h: f32, sel: i32) -> Element {
+    let (area, line) = chart_paths(vals, w, h);
+    let n = vals.len();
+    let max = vals.iter().copied().max().unwrap_or(1).max(1) as f32;
+    let mut layers = vec![
+        icon(area, 24.0).width(w).height(h).color(Color::rgba(226, 98, 15, 120)),
+        // Pastga qarab so'nuvchi effekt: to'ldirish asta-sekin karta rangiga singadi.
+        column(vec![spacer(), column(vec![]).height(h * 0.75).gradient(Color::rgba(19, 19, 22, 0), Color::rgba(19, 19, 22, 255))]),
+        icon(line, 24.0).width(w).height(h).color(ACCENT2),
+    ];
+    if sel >= 0 && (sel as usize) < n {
+        let i = sel as usize;
+        let x = if n == 1 { w / 2.0 } else { w * i as f32 / (n - 1) as f32 };
+        let y = 8.0 + (h - 8.0 - 4.0) * (1.0 - vals[i] as f32 / max);
+        // Belgilar: stack bolalari cho'zilgani uchun qatorlar ichida aniq o'lchamda joylanadi.
+        let place = |x: f32, y: f32, e: Element| column(vec![gap_box(0.0, y), row(vec![gap_box(x, 0.0), e]).align(Align::Start)]).align(Align::Start);
+        layers.push(place(x, 8.0, column(vec![]).width(1.0).height(h - 8.0).bg(Color::rgba(255, 255, 255, 85))));
+        layers.push(place(x - 6.0, y - 6.0, column(vec![]).width(12.0).height(12.0).radius(6.0).bg(Color::rgb(0x0A, 0x0A, 0x0C))));
+        layers.push(place(x - 4.0, y - 4.0, column(vec![]).width(8.0).height(8.0).radius(4.0).bg(GOLD)));
+    }
+    stack(layers).width(w).height(h)
+}
+
+#[cfg(test)]
+mod chart_tests {
+    use super::*;
+
+    #[test]
+    fn grafik_chiziladi() {
+        let font = Rc::new(Font::parse(include_bytes!("../../assets/fonts/Roboto-Regular.ttf")).unwrap());
+        let vals = vec![0, 0, 0, 0, 3, 40, 160, 90, 70, 120, 100, 30];
+        let mut ui = Ui::new(font, move || column(vec![line_chart(&vals, 320.0, 140.0, 6)]).bg(Color::rgb(19, 19, 22)).padding(16.0));
+        let size = Size::new(360.0, 200.0);
+        let cmds = ui.frame(size);
+        let mut c = ui.canvas(360, 200);
+        c.clear(Color::BLACK);
+        c.execute(&cmds);
+        let png = c.to_png();
+        assert!(png.len() > 500);
+        if let Ok(d) = std::env::var("ARU_SNAPSHOT_DIR") {
+            std::fs::write(format!("{d}/grafik.png"), png).unwrap();
+        }
     }
 }
