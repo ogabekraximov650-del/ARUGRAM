@@ -1227,6 +1227,11 @@ impl Home {
                     if i == 3 && me.tab.get() != 3 {
                         me.dl_index.set(None);
                     }
+                    // Qidiruvdan boshqa yorliqqa o'tilganda yozilgan matn va natijalar tozalanadi (keyingi kirganda bo'sh qidiruv).
+                    if me.tab.get() == 1 && i != 1 {
+                        me.query.set(String::new());
+                        me.search_scroll.scroll_to_top();
+                    }
                     me.tab.set(i)
                 })
             })
