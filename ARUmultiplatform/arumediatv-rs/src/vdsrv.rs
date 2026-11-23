@@ -480,15 +480,9 @@ fn dl_run(name: &str, rt: &DlRt) -> Result<(), String> {
         if (w + 1) * CHUNK < total {
             prefetch(name, w + 1);
         }
-        // Shu oynaning (18 MiB) hozirdan oxirigacha, keshda bor bo'lakkacha.
+        // Bitta so'rov = shu oynaning (18 MiB) hozirdan oxirigacha: oraliqdagi bo'laklar keshda bo'lsa ham ortiqcha so'rov ketmaydi.
         let win_last = (((w + 1) * CHUNK / BLOCK).saturating_sub(1)).min(nb - 1);
-        let mut last = win_last;
-        for k in (b + 1)..=win_last {
-            if block_exists(name, k) {
-                last = k - 1;
-                break;
-            }
-        }
+        let last = win_last;
         let (rs, re) = (b * BLOCK, ((last + 1) * BLOCK).min(total) - 1);
         let resp = agent().get(&play_url(name)).set("Range", &format!("bytes={rs}-{re}")).timeout(Duration::from_secs(300)).call().map_err(|e| e.to_string())?;
         if !(resp.status() == 206 || (resp.status() == 200 && rs == 0 && re + 1 == total)) {
@@ -518,7 +512,9 @@ fn dl_run(name: &str, rt: &DlRt) -> Result<(), String> {
             }
             while cur < nb && blk.len() >= block_len(total, cur) {
                 let l = block_len(total, cur);
-                block_write(name, cur, &blk[..l]);
+                if !block_exists(name, cur) {
+                    block_write(name, cur, &blk[..l]);
+                }
                 blk.drain(..l);
                 cur += 1;
             }
