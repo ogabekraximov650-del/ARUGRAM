@@ -74,8 +74,22 @@ impl Home {
     /// Qismlar ro'yxati: xato bo'lsa 2 marta qayta uriniladi, so'ng sababi ko'rsatiladi (bosilsa qayta yuklanadi).
     pub(super) fn load_eps(self: &Rc<Self>, p: &Rc<SeasonPage>) {
         let (a, s) = (p.season.anime_id, p.season.season_id);
-        p.eps_loading.set(true);
         p.eps_err.set(String::new());
+        // Doimiy keshdan darhol: qismlar ro'yxati ko'rinadi va oxirgi qism tayyorlanadi, so'ng tarmoqdan yangilanadi.
+        if p.eps.get().is_empty() {
+            let c = crate::data::cached_episodes(a, s);
+            if !c.is_empty() {
+                p.eps.set(Rc::new(c));
+                if !p.want_play.get() && p.pl.cur.get().is_none() {
+                    let eps = p.eps.get();
+                    let pick = eps.iter().rev().find(|e| e.urls.iter().any(|(_, u)| crate::downloads::progress_get(u).is_some())).or_else(|| eps.first()).cloned();
+                    if let Some(e) = pick {
+                        self.play_episode(p, &e, None, None, false);
+                    }
+                }
+            }
+        }
+        p.eps_loading.set(p.eps.get().is_empty());
         let (p2, me) = (p.clone(), self.clone());
         spawn_bg(
             move || {
@@ -140,6 +154,24 @@ impl Home {
         self.pl_open_gate(&p);
         let (a, s) = (season.anime_id, season.season_id);
         let session = self.session.clone();
+        // Doimiy keshdan darhol (ma'lumot va bo'limlar), so'ng yangilanadi.
+        if let Some(i) = crate::data::cached_info(a, s, &session) {
+            p.info.set(Rc::new(i));
+        }
+        let cs = crate::data::cached_sections(a);
+        if !cs.is_empty() {
+            {
+                let have = self.posters.borrow();
+                let mut q = self.queue.borrow_mut();
+                for u in cs.iter().map(|x| &x.photo_url) {
+                    if !u.is_empty() && !have.contains_key(u) && !q.contains(u) {
+                        q.push(u.clone());
+                    }
+                }
+            }
+            p.sections.set(Rc::new(cs));
+            self.next_posters();
+        }
         let (p1, s1) = (p.clone(), session.clone());
         spawn_bg(move || fetch_info(a, s, &s1), move |r| {
             if let Ok(i) = r {

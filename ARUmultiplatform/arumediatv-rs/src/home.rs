@@ -285,6 +285,38 @@ impl Home {
         }
         crate::vdsrv::start(&h.session);
         crate::vdsrv::dl_resume_all(&h.session);
+        // Doimiy keshdan DARHOL ko'rsatiladi (kutish yo'q), so'ng tarmoqdan yangilanadi.
+        if let Some((favs, hist)) = crate::data::cached_library(&h.session) {
+            {
+                let mut q = h.queue.borrow_mut();
+                for u in favs.iter().map(|s| &s.photo_url).chain(hist.iter().map(|x| &x.photo_url)) {
+                    if !u.is_empty() && !q.contains(u) {
+                        q.push(u.clone());
+                    }
+                }
+            }
+            h.favs.set(Rc::new(favs));
+            h.hist.set(hist);
+            h.lib_state.set(1);
+        }
+        if let Some(p) = crate::data::cached_profile(&h.session) {
+            if !p.photo_url.is_empty() {
+                h.queue.borrow_mut().insert(0, p.photo_url.clone());
+            }
+            h.profile.set(Rc::new(p));
+        }
+        let ct = crate::data::cached_translators();
+        if !ct.is_empty() {
+            for t in &ct {
+                if !t.photo_url.is_empty() {
+                    h.queue.borrow_mut().push(t.photo_url.clone());
+                }
+            }
+            if let Ok(mut t) = TRANS.lock() {
+                *t = ct;
+            }
+        }
+        h.next_posters();
         h.reload();
         h.load_library();
         h.load_profile();
@@ -908,7 +940,12 @@ impl Home {
                 me.lib_state.set(1);
                 me.next_posters();
             }
-            Err(_) => me.lib_state.set(2),
+            // Keshdan ko'rsatilgan bo'lsa xato holatiga o'tilmaydi.
+            Err(_) => {
+                if me.favs.get().is_empty() && me.hist.get().is_empty() {
+                    me.lib_state.set(2)
+                }
+            }
         });
     }
 

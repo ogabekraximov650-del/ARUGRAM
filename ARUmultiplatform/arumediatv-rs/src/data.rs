@@ -60,7 +60,12 @@ fn parse_translator(o: &Value) -> Option<Translator> {
 /// `GET /api/translators`.
 pub fn fetch_translators() -> Result<Vec<Translator>, String> {
     let j = crate::api::get_json("/api/translators", "", None)?;
+    jc_put("", "translators", &j.to_string());
     Ok(j.as_array().map(|a| a.iter().filter_map(parse_translator).collect()).unwrap_or_default())
+}
+
+pub fn cached_translators() -> Vec<Translator> {
+    jc_get("", "translators").and_then(|j| j.as_array().map(|a| a.iter().filter_map(parse_translator).collect())).unwrap_or_default()
 }
 
 /// `GET /api/translators/<id>/page`.
@@ -76,6 +81,22 @@ pub fn fetch_translator_page(id: i64) -> Result<TranslatorPage, String> {
         rating: st["rating"].as_f64().unwrap_or(0.0),
         seasons: parse_seasons(&j["seasons"].to_string()),
     })
+}
+
+/// Hisobga xos doimiy JSON keshi (shifrlangan): ma'lumotlar darhol ko'rsatiladi, so'ng tarmoqdan yangilanadi.
+fn jc_path(session: &str, key: &str) -> String {
+    let h = session.bytes().fold(0xcbf29ce484222325u64, |a, b| (a ^ b as u64).wrapping_mul(0x100000001b3));
+    let dir = format!("{}/jc", uzcoders::android::files_dir());
+    let _ = std::fs::create_dir_all(&dir);
+    format!("{dir}/{}__{key}.json", if session.is_empty() { "pub".to_string() } else { format!("{h:016x}") })
+}
+
+pub fn jc_put(session: &str, key: &str, text: &str) {
+    let _ = crate::secure::write_text(&jc_path(session, key), "jc", text);
+}
+
+pub fn jc_get(session: &str, key: &str) -> Option<Value> {
+    serde_json::from_str(&crate::secure::read_text(&jc_path(session, key), "jc")?).ok()
 }
 
 fn num(v: &Value) -> i64 {
@@ -293,6 +314,16 @@ pub fn ep_progress(ep_id: i64) -> (i64, i64) {
 pub fn fetch_library(session: &str) -> Result<(Vec<Season>, Vec<HistoryItem>), String> {
     let fav = crate::api::get_json("/api/favorites", "", Some(session))?;
     let hist = crate::api::get_json("/api/history", "", Some(session))?;
+    jc_put(session, "library", &serde_json::json!({"fav": fav, "hist": hist}).to_string());
+    Ok(library_from(&fav, &hist))
+}
+
+pub fn cached_library(session: &str) -> Option<(Vec<Season>, Vec<HistoryItem>)> {
+    let j = jc_get(session, "library")?;
+    Some(library_from(&j["fav"], &j["hist"]))
+}
+
+fn library_from(fav: &Value, hist: &Value) -> (Vec<Season>, Vec<HistoryItem>) {
     let favs = parse_seasons(&fav["items"].to_string());
     // Qism darajasidagi tarix (Kotlin `lib.history.firstOrNull { it.epizodId == e.id }`): (epizod_id, joy ms, davomiylik ms).
     if let Some(a) = hist["items"].as_array() {
@@ -329,7 +360,7 @@ pub fn fetch_library(session: &str) -> Result<(Vec<Season>, Vec<HistoryItem>), S
     items.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
     let mut seen = std::collections::HashSet::new();
     items.retain(|h| seen.insert((h.anime_id, h.season_id)));
-    Ok((favs, items))
+    (favs, items)
 }
 
 /// Millisekund (epoch) -> "HH:mm/dd/MM/yyyy" (Toshkent, UTC+5).
@@ -384,8 +415,19 @@ pub struct Profile {
 
 pub fn fetch_profile(session: &str) -> Result<Profile, String> {
     let me = crate::api::get_json("/api/auth/me", "", Some(session))?;
-    let u = &me["user"];
     let st = crate::api::get_json("/api/me/stats", "", Some(session)).unwrap_or(Value::Null);
+    let sub = crate::api::get_json("/api/billing", "", Some(session)).map(|b| num(&b["subscription_until"])).unwrap_or(0);
+    jc_put(session, "profile", &serde_json::json!({"me": me, "st": st, "sub": sub}).to_string());
+    Ok(profile_from(&me, &st, sub))
+}
+
+pub fn cached_profile(session: &str) -> Option<Profile> {
+    let j = jc_get(session, "profile")?;
+    Some(profile_from(&j["me"], &j["st"], j["sub"].as_i64().unwrap_or(0)))
+}
+
+fn profile_from(me: &Value, st: &Value, sub_until: i64) -> Profile {
+    let u = &me["user"];
     let first = u["first_name"].as_str().unwrap_or("").trim();
     let last = u["last_name"].as_str().unwrap_or("").trim();
     let username = u["username"].as_str().unwrap_or("").to_string();
@@ -404,7 +446,7 @@ pub fn fetch_profile(session: &str) -> Result<Profile, String> {
     } else {
         format!("ID {}", num(&u["id"]))
     };
-    Ok(Profile {
+    Profile {
         ident,
         id: num(&u["id"]),
         name,
@@ -422,8 +464,8 @@ pub fn fetch_profile(session: &str) -> Result<Profile, String> {
         hidden: u["hidden_stats"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default(),
         consent: u["chan_consent"].as_bool().unwrap_or(false),
         is_admin: u["is_admin"].as_bool().unwrap_or(false),
-        sub_until: crate::api::get_json("/api/billing", "", Some(session)).map(|b| num(&b["subscription_until"])).unwrap_or(0),
-    })
+        sub_until,
+    }
 }
 
 /// Hisobni serverdan o'chiradi (`POST /api/auth/delete-account`).
@@ -579,9 +621,17 @@ pub fn fetch_sections(anime: i64) -> Result<Vec<Season>, String> {
     if code >= 400 {
         return Err(format!("Server xatosi ({code})"));
     }
+    jc_put("", &format!("sections_{anime}"), &serde_json::json!({"body": body}).to_string());
     let mut v = parse_seasons(&body);
     v.sort_by_key(|s| s.section_no);
     Ok(v)
+}
+
+pub fn cached_sections(anime: i64) -> Vec<Season> {
+    let Some(j) = jc_get("", &format!("sections_{anime}")) else { return Vec::new() };
+    let mut v = parse_seasons(j["body"].as_str().unwrap_or("[]"));
+    v.sort_by_key(|s| s.section_no);
+    v
 }
 
 /// Bo'lim ma'lumoti (`GET /api/season/:anime/:season`).
@@ -608,12 +658,21 @@ impl SeasonInfo {
 
 pub fn fetch_info(anime: i64, season: i64, session: &str) -> Result<SeasonInfo, String> {
     let j = crate::api::get_json(&format!("/api/season/{anime}/{season}"), "", Some(session))?;
-    Ok(SeasonInfo {
+    jc_put(session, &format!("info_{anime}_{season}"), &j.to_string());
+    Ok(info_from(&j))
+}
+
+pub fn cached_info(anime: i64, season: i64, session: &str) -> Option<SeasonInfo> {
+    jc_get(session, &format!("info_{anime}_{season}")).map(|j| info_from(&j))
+}
+
+fn info_from(j: &Value) -> SeasonInfo {
+    SeasonInfo {
         season: j["season"].clone(),
         rating: j["rating"].as_f64().filter(|r| !r.is_nan()).unwrap_or(0.0),
         my_stars: num(&j["my_stars"]),
         is_fav: j["is_fav"].as_bool().unwrap_or(false),
-    })
+    }
 }
 
 /// Izoh.
