@@ -56,6 +56,9 @@ pub(crate) struct TransCap {
     pub front: uzcoders::ui::LayerSlot,
     /// Animatsiya soati: qatlamlar tayyor bo'lgan paytdan boshlanadi (og'ir birinchi kadr animatsiyani yemaydi).
     pub t0: Cell<Option<std::time::Instant>>,
+    /// Animatsiya soati (soniya) va oxirgi kadr vaqti: har kadr qadami 33 ms bilan cheklanadi — og'ir kadr animatsiyani sakratib yubormaydi.
+    pub clock: Cell<f32>,
+    pub last: Cell<Option<std::time::Instant>>,
 }
 
 impl Trans {
@@ -145,9 +148,31 @@ pub(crate) fn enter(id: i64, el: Element) -> Element {
 
 /// Sahifa o'tishi: davomiyligi va prujina chastotasi.
 const TRANS_SECS: f32 = 0.2;
-const TRANS_W: f32 = 35.0;
+
+/// Tablar orasidagi o'tish (Bosh -> Profil kabi): yangi tab sahifasi ustiga sirpanib kiradi, eskisi biroz chapga suriladi.
+struct TabAnim {
+    shown: usize,
+    last: uzcoders::ui::LayerSlot,
+    old: Option<uzcoders::ui::Layer>,
+    fresh: uzcoders::ui::LayerSlot,
+    active: bool,
+    forward: bool,
+    clock: f32,
+    last_t: Option<std::time::Instant>,
+}
+const TAB_SECS: f32 = 0.25;
 
 thread_local! {
+    static TABANIM: RefCell<TabAnim> = RefCell::new(TabAnim {
+        shown: usize::MAX,
+        last: Default::default(),
+        old: None,
+        fresh: Default::default(),
+        active: false,
+        forward: true,
+        clock: 0.0,
+        last_t: None,
+    });
     /// Sahifa o'tishi tugaguncha kechiktirilgan ishlar (pleyerni tayyorlash).
     static DEFERRED: RefCell<Vec<Box<dyn FnOnce()>>> = const { RefCell::new(Vec::new()) };
 }
@@ -1411,7 +1436,17 @@ impl Home {
             if ready && cap.t0.get().is_none() {
                 cap.t0.set(Some(std::time::Instant::now()));
             }
-            let t = if cfg!(test) { start.elapsed().as_secs_f32() } else { cap.t0.get().map_or(0.0, |t0| t0.elapsed().as_secs_f32()) };
+            let t = if cfg!(test) {
+                start.elapsed().as_secs_f32()
+            } else if ready {
+                let now = std::time::Instant::now();
+                let dt = cap.last.get().map_or(0.0, |l| now.duration_since(l).as_secs_f32().min(0.033));
+                cap.last.set(Some(now));
+                cap.clock.set(cap.clock.get() + dt);
+                cap.clock.get()
+            } else {
+                0.0
+            };
             let involves_media = cur.iter().chain(prev.iter()).any(|p| matches!(p, pages::Page::Media(_)));
             if t < TRANS_SECS && start.elapsed().as_secs_f32() < 2.5 && !involves_media && trans_enabled() {
                 uzcoders::core::request_frame();
@@ -1432,7 +1467,9 @@ impl Home {
                 let lb = cap.back.borrow().clone().unwrap();
                 let lf = cap.front.borrow().clone().unwrap();
                 let (front, back) = (uzcoders::ui::frozen(&lf).width(w).height(h), uzcoders::ui::frozen(&lb).width(w).height(h));
-                let p = 1.0 - (1.0 + TRANS_W * t) * (-TRANS_W * t).exp(); // kritik so'nuvchi prujina: oshmasdan silliq to'xtaydi
+                // Ochilish va yopilish bir xil: tekis (ease-in-out) egri chiziq, o'rtada tezlik bir tekis.
+                let x = (t / TRANS_SECS).clamp(0.0, 1.0);
+                let p = x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
                 let k = if push { p } else { 1.0 - p };
                 // `k`: 0 — orqadagi sahifa to'liq ochiq, 1 — oldingi sahifa to'liq ochiq.
                 let dim = Color::rgba(0, 0, 0, (115.0 * k) as u8);
@@ -1451,7 +1488,75 @@ impl Home {
                 j();
             }
         }
+        if cur.is_empty() {
+            return self.tab_view(&cur);
+        }
+        TABANIM.with(|t| t.borrow_mut().active = false);
         self.view_for(&cur)
+    }
+
+    /// Bosh ekran: tab almashganda sahifalar bir-birining ustiga sirpanadi (qotirilgan qatlamlar bilan, qayta qurilmasdan).
+    fn tab_view(self: &Rc<Self>, cur: &[pages::Page]) -> Element {
+        let (w, h) = window_dp();
+        let tab = self.tab.get();
+        // Tab o'zgardimi? Eski qatlam — oxirgi barqaror kadr.
+        let (changed, fresh_ready) = TABANIM.with(|t| {
+            let mut s = t.borrow_mut();
+            if s.shown == usize::MAX {
+                s.shown = tab;
+            }
+            if tab != s.shown {
+                if trans_enabled() {
+                    let lastv = s.last.borrow().clone();
+                    s.old = lastv;
+                    if s.old.is_some() {
+                        s.active = true;
+                        s.forward = tab > s.shown;
+                        s.clock = 0.0;
+                        s.last_t = None;
+                        s.fresh = Default::default();
+                    }
+                }
+                s.shown = tab;
+            }
+            let ready = s.fresh.borrow().is_some();
+            (s.active, ready)
+        });
+        if !changed {
+            let last = TABANIM.with(|t| t.borrow().last.clone());
+            return column(vec![self.view_for(cur)]).width(w).height(h).capture(&last);
+        }
+        uzcoders::core::request_frame();
+        let (old, fresh, forward) = TABANIM.with(|t| {
+            let s = t.borrow();
+            (s.old.clone().unwrap(), s.fresh.clone(), s.forward)
+        });
+        if !fresh_ready {
+            // 1-kadr: yangi tab bir marta chiziladi (ekrandan tashqarida), eskisi joyida turadi.
+            let v = column(vec![self.view_for(cur)]).width(w).height(h).capture(&fresh);
+            return stack(vec![uzcoders::ui::frozen(&old).width(w).height(h), row(vec![gap_box(w, 0.0), v]).height(h)]);
+        }
+        let x = TABANIM.with(|t| {
+            let mut s = t.borrow_mut();
+            let now = std::time::Instant::now();
+            let dt = s.last_t.map_or(0.0, |l| now.duration_since(l).as_secs_f32().min(0.033));
+            s.last_t = Some(now);
+            s.clock += dt;
+            (s.clock / TAB_SECS).clamp(0.0, 1.0)
+        });
+        if x >= 1.0 {
+            TABANIM.with(|t| t.borrow_mut().active = false);
+            return column(vec![self.view_for(cur)]).width(w).height(h);
+        }
+        let p = x * x * x * (x * (x * 6.0 - 15.0) + 10.0);
+        let nl = fresh.borrow().clone().unwrap();
+        let sign = if forward { 1.0 } else { -1.0 };
+        let dim = Color::rgba(0, 0, 0, (115.0 * p) as u8);
+        stack(vec![
+            uzcoders::ui::frozen(&old).width(w).height(h).translate(-0.22 * w * p * sign, 0.0),
+            column(vec![]).bg(dim),
+            uzcoders::ui::frozen(&nl).width(w).height(h).translate(sign * (1.0 - p) * w, 0.0),
+        ])
     }
 
     /// Sahifani `r` (dp: x, y, eni, bo'yi) oynasida ko'rsatadi: sahifa haqiqiy masshtablanadi (karta eniga sig'adi), oyna bilan birga
