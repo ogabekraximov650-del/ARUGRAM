@@ -186,7 +186,7 @@ public class AruActivity extends UzActivity {
                 new DefaultRenderersFactory(getApplicationContext()).setEnableDecoderFallback(true))
                 .setLoadControl(new DefaultLoadControl.Builder()
                         // UZ: bufer imkon qadar katta: oldinga 40..180 s (xotira chegarasi 64 MB), orqaga 30 s — surilganda video kutdirmaydi.
-                        .setBufferDurationsMs(40_000, 180_000, 0, 250)
+                        .setBufferDurationsMs(40_000, 180_000, 800, 1_500)
                         .setBackBuffer(30_000, true)
                         .setTargetBufferBytes(64 * 1024 * 1024)
                         .setPrioritizeTimeOverSizeThresholds(false)

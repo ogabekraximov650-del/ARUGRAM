@@ -637,6 +637,24 @@ pub fn gc(max_bytes: u64) {
 
 static INFL: Mutex<Option<HashSet<(String, u64)>>> = Mutex::new(None);
 
+/// Ochilgan (shifri yechilgan) so'nggi bo'laklar xotirada: pleyer har o'qishda 1 MiB ni diskdan qayta ochmasin (har 16-64 KB uchun shifr ochish qotishga sabab edi).
+static MEM: Mutex<Vec<(String, u64, std::sync::Arc<Vec<u8>>)>> = Mutex::new(Vec::new());
+const MEM_CAP: usize = 8;
+
+fn mem_get(name: &str, idx: u64) -> Option<std::sync::Arc<Vec<u8>>> {
+    MEM.lock().ok()?.iter().find(|(n, i, _)| n == name && *i == idx).map(|(_, _, b)| b.clone())
+}
+
+fn mem_put(name: &str, idx: u64, b: std::sync::Arc<Vec<u8>>) {
+    if let Ok(mut g) = MEM.lock() {
+        g.retain(|(n, i, _)| !(n == name && *i == idx));
+        g.push((name.to_string(), idx, b));
+        while g.len() > MEM_CAP {
+            g.remove(0);
+        }
+    }
+}
+
 fn infl_claim(name: &str, idx: u64) -> bool {
     INFL.lock().ok().map(|mut g| g.get_or_insert_with(HashSet::new).insert((name.to_string(), idx))).unwrap_or(false)
 }
@@ -708,16 +726,23 @@ fn maybe_readahead(name: &str, idx: u64, total: u64) {
     }
 }
 
-fn get_block(name: &str, idx: u64, total: u64) -> Result<Vec<u8>, String> {
-    for _ in 0..2400 {
-        if let Some(b) = block_read(name, idx, total) {
+fn get_block(name: &str, idx: u64, total: u64) -> Result<std::sync::Arc<Vec<u8>>, String> {
+    for _ in 0..12000 {
+        if let Some(b) = mem_get(name, idx) {
             return Ok(b);
         }
+        if let Some(b) = block_read(name, idx, total) {
+            let a = std::sync::Arc::new(b);
+            mem_put(name, idx, a.clone());
+            return Ok(a);
+        }
         if infl_claim(name, idx) {
-            return start_run(name, idx, total);
+            let a = std::sync::Arc::new(start_run(name, idx, total)?);
+            mem_put(name, idx, a.clone());
+            return Ok(a);
         }
         // Boshqa so'rov shu bo'lakni olyapti — tugashini kutamiz.
-        std::thread::sleep(Duration::from_millis(50));
+        std::thread::sleep(Duration::from_millis(10));
     }
     Err("bo'lak kutish muddati tugadi".into())
 }
@@ -757,6 +782,7 @@ fn start_run(name: &str, idx: u64, total: u64) -> Result<Vec<u8>, String> {
             attempt += 1;
             let r = run_fetch(&n, &key, total, w, done_to, last, force, &mut |b, data| {
                 block_write(&n, b, &data);
+                mem_put(&n, b, std::sync::Arc::new(data.clone()));
                 infl_release(&n, b);
                 done_to = b + 1;
                 if b == idx && !sent {
