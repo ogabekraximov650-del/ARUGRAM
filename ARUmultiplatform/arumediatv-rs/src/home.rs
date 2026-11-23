@@ -1011,7 +1011,8 @@ impl Home {
         let (me, session, hh) = (self.clone(), self.session.clone(), h.clone());
         spawn_bg(move || crate::downloads::history_frame(&session, &hh.video_url, &hh.thumb_url, hh.position_ms, &key).map(|i| (key, i)), move |r| {
             if let Some((k, img)) = r {
-                me.hframes.borrow_mut().insert(k, Some(Rc::new(img)));
+                // Karta burchagi ~16 dp, kadr 960 px / ~327 dp: burchaklar rasmning o'zida yumaloqlanadi (uzcoders rasmni o'zi yumaloqlamaydi).
+                me.hframes.borrow_mut().insert(k, Some(Rc::new(img.round_corners(48.0))));
                 me.gate_rev.set(me.gate_rev.get() + 1);
             }
         });

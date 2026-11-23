@@ -216,7 +216,7 @@ impl Home {
             match r {
                 Ok((k, img)) => {
                     me.hframe_fail.borrow_mut().remove(&k);
-                    me.hframes.borrow_mut().insert(k, Some(Rc::new(img)));
+                    me.hframes.borrow_mut().insert(k, Some(Rc::new(img.round_corners(50.0))));
                 }
                 Err((k, why)) => {
                     me.hframes.borrow_mut().remove(&k);
