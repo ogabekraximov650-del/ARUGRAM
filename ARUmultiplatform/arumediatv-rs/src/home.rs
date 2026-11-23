@@ -144,8 +144,24 @@ pub(crate) fn enter(id: i64, el: Element) -> Element {
 }
 
 /// Sahifa o'tishi: davomiyligi va prujina chastotasi.
-const TRANS_SECS: f32 = 0.55;
-const TRANS_W: f32 = 15.0;
+const TRANS_SECS: f32 = 0.4;
+const TRANS_W: f32 = 20.0;
+
+thread_local! {
+    /// Sahifa o'tishi tugaguncha kechiktirilgan ishlar (pleyerni tayyorlash).
+    static DEFERRED: RefCell<Vec<Box<dyn FnOnce()>>> = const { RefCell::new(Vec::new()) };
+}
+
+impl Home {
+    /// `f` ni sahifa o'tishi (animatsiya) tugagach bajaradi; o'tish bo'lmasa darhol.
+    pub(crate) fn after_trans(&self, f: impl FnOnce() + 'static) {
+        if self.trans.borrow().is_some() {
+            DEFERRED.with(|d| d.borrow_mut().push(Box::new(f)));
+        } else {
+            f();
+        }
+    }
+}
 
 const HOME_HEADER_H: f32 = 128.0;
 
@@ -1426,6 +1442,10 @@ impl Home {
                 return stack(vec![back.translate(-0.22 * w * k, 0.0), column(vec![]).bg(dim), row(vec![gap_box(fx, 0.0), front]).height(h)]);
             }
             *self.trans.borrow_mut() = None;
+            let jobs: Vec<Box<dyn FnOnce()>> = DEFERRED.with(|d| d.borrow_mut().drain(..).collect());
+            for j in jobs {
+                j();
+            }
         }
         self.view_for(&cur)
     }

@@ -90,7 +90,8 @@ impl Home {
                     let eps = p.eps.get();
                     let pick = eps.iter().rev().find(|e| e.urls.iter().any(|(_, u)| crate::downloads::progress_get(u).is_some())).or_else(|| eps.first()).cloned();
                     if let Some(e) = pick {
-                        self.play_episode(p, &e, None, None, false);
+                        let (me, p) = (self.clone(), p.clone());
+                        self.after_trans(move || me.play_episode(&p, &e, None, None, false));
                     }
                 }
             }
@@ -121,7 +122,8 @@ impl Home {
                     let eps = p2.eps.get();
                     let pick = eps.iter().rev().find(|e| e.urls.iter().any(|(_, u)| crate::downloads::progress_get(u).is_some())).or_else(|| eps.first()).cloned();
                     if let Some(e) = pick {
-                        me.play_episode(&p2, &e, None, None, false);
+                        let (me2, p3) = (me.clone(), p2.clone());
+                        me.after_trans(move || me2.play_episode(&p3, &e, None, None, false));
                     }
                 }
                 if p2.want_play.get() {
