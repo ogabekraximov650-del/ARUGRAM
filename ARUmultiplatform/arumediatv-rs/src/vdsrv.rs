@@ -244,7 +244,7 @@ fn handle(mut s: TcpStream) -> std::io::Result<()> {
             }
         }
         let (rs, re) = (b * BLOCK, ((last_b + 1) * BLOCK).min(total) - 1);
-        let resp = match agent().get(&play_url(name)).set("Range", &format!("bytes={rs}-{re}")).timeout(Duration::from_secs(120)).call() {
+        let resp = match agent().get(&play_url(name)).set("Range", &format!("bytes={rs}-{re}")).call() {
             Ok(r) if r.status() == 206 || (r.status() == 200 && rs == 0 && re + 1 == total) => r,
             _ => return Ok(()),
         };
@@ -285,7 +285,7 @@ fn handle(mut s: TcpStream) -> std::io::Result<()> {
 /// Umumiy HTTP mijoz (ulanishlar qayta ishlatiladi: har bo'lak uchun yangi TLS qo'l siqish kerak emas).
 fn agent() -> &'static ureq::Agent {
     static A: OnceLock<ureq::Agent> = OnceLock::new();
-    A.get_or_init(|| ureq::AgentBuilder::new().max_idle_connections_per_host(8).build())
+    A.get_or_init(|| ureq::AgentBuilder::new().max_idle_connections_per_host(8).timeout_connect(Duration::from_secs(20)).timeout_read(Duration::from_secs(60)).build())
 }
 
 /// Keyingi oynani fonda isitadi (bir oyna uchun bitta oqim).
@@ -426,8 +426,9 @@ pub fn dl_start(session: &str, name: &str) {
     let n = name.to_string();
     std::thread::spawn(move || {
         let mut fails = 0;
+        let mut carry = DlCarry { cur: u64::MAX, blk: Vec::new() };
         loop {
-            match dl_run(&n, &rt) {
+            match dl_run(&n, &rt, &mut carry) {
                 Ok(()) => break,
                 Err(_) if rt.cancel.load(SeqCst) => break,
                 Err(_) => {
@@ -457,7 +458,13 @@ pub fn dl_start(session: &str, name: &str) {
     });
 }
 
-fn dl_run(name: &str, rt: &DlRt) -> Result<(), String> {
+/// Yuklash holati qayta urinishlar orasida saqlanadi: uzilgan joydagi chala bo'lak ham yo'qolmaydi, so'rov aynan shu baytdan davom etadi.
+struct DlCarry {
+    cur: u64,
+    blk: Vec<u8>,
+}
+
+fn dl_run(name: &str, rt: &DlRt, carry: &mut DlCarry) -> Result<(), String> {
     use std::sync::atomic::Ordering::SeqCst;
     let (total, key) = info(name).ok_or("video ma'lumoti yo'q")?;
     let nb = total.div_ceil(BLOCK);
@@ -469,7 +476,9 @@ fn dl_run(name: &str, rt: &DlRt) -> Result<(), String> {
         if rt.cancel.load(SeqCst) {
             return Ok(());
         }
-        if block_exists(name, b) {
+        // Chala qolgan bo'lak shu yerdan davom etadi.
+        let resume_here = carry.cur == b && !carry.blk.is_empty();
+        if !resume_here && block_exists(name, b) {
             b += 1;
             continue;
         }
@@ -480,44 +489,62 @@ fn dl_run(name: &str, rt: &DlRt) -> Result<(), String> {
         if (w + 1) * CHUNK < total {
             prefetch(name, w + 1);
         }
-        // Bitta so'rov = shu oynaning (18 MiB) hozirdan oxirigacha: oraliqdagi bo'laklar keshda bo'lsa ham ortiqcha so'rov ketmaydi.
-        let win_last = (((w + 1) * CHUNK / BLOCK).saturating_sub(1)).min(nb - 1);
-        let last = win_last;
-        let (rs, re) = (b * BLOCK, ((last + 1) * BLOCK).min(total) - 1);
-        let resp = agent().get(&play_url(name)).set("Range", &format!("bytes={rs}-{re}")).timeout(Duration::from_secs(300)).call().map_err(|e| e.to_string())?;
+        // Bitta so'rov = shu oynaning (18 MiB) hozirgi joydan oxirigacha.
+        let last = (((w + 1) * CHUNK / BLOCK).saturating_sub(1)).min(nb - 1);
+        let have = if resume_here { carry.blk.len() as u64 } else { 0 };
+        let (rs, re) = (b * BLOCK + have, ((last + 1) * BLOCK).min(total) - 1);
+        // Umumiy muddat YO'Q (sekin tarmoqda 18 MiB ko'p vaqt oladi): faqat ulanish va har o'qish uchun muddat.
+        let resp = agent()
+            .get(&play_url(name))
+            .set("Range", &format!("bytes={rs}-{re}"))
+            .call()
+            .map_err(|e| e.to_string())?;
         if !(resp.status() == 206 || (resp.status() == 200 && rs == 0 && re + 1 == total)) {
             return Err(format!("HTTP {}", resp.status()));
         }
         rt.retrying.store(false, SeqCst);
         let mut r = resp.into_reader();
-        let (mut pos, mut cur) = (rs, b);
-        let mut blk: Vec<u8> = Vec::with_capacity(BLOCK as usize);
-        while pos <= re {
-            if rt.cancel.load(SeqCst) {
-                return Ok(());
-            }
-            let want = ((re - pos + 1) as usize).min(buf.len());
-            let n = r.read(&mut buf[..want]).map_err(|e| e.to_string())?;
-            if n == 0 {
-                return Err("uzildi".into());
-            }
-            crate::vd::apply(&key, pos, &mut buf[..n]);
-            blk.extend_from_slice(&buf[..n]);
-            pos += n as u64;
-            win_bytes += n as u64;
-            if win_t.elapsed().as_millis() >= 1000 {
-                rt.speed.store((win_bytes as f64 / win_t.elapsed().as_secs_f64()) as i64, SeqCst);
-                win_bytes = 0;
-                win_t = std::time::Instant::now();
-            }
-            while cur < nb && blk.len() >= block_len(total, cur) {
-                let l = block_len(total, cur);
-                if !block_exists(name, cur) {
-                    block_write(name, cur, &blk[..l]);
+        let mut pos = rs;
+        let mut cur = b;
+        let mut blk: Vec<u8> = if resume_here { std::mem::take(&mut carry.blk) } else { Vec::with_capacity(BLOCK as usize) };
+        carry.cur = u64::MAX;
+        let res: Result<(), String> = (|| {
+            while pos <= re {
+                if rt.cancel.load(SeqCst) {
+                    return Ok(());
                 }
-                blk.drain(..l);
-                cur += 1;
+                let want = ((re - pos + 1) as usize).min(buf.len());
+                let n = r.read(&mut buf[..want]).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    return Err("uzildi".into());
+                }
+                crate::vd::apply(&key, pos, &mut buf[..n]);
+                blk.extend_from_slice(&buf[..n]);
+                pos += n as u64;
+                win_bytes += n as u64;
+                if win_t.elapsed().as_millis() >= 1000 {
+                    rt.speed.store((win_bytes as f64 / win_t.elapsed().as_secs_f64()) as i64, SeqCst);
+                    win_bytes = 0;
+                    win_t = std::time::Instant::now();
+                }
+                while cur < nb && blk.len() >= block_len(total, cur) {
+                    let l = block_len(total, cur);
+                    if !block_exists(name, cur) {
+                        block_write(name, cur, &blk[..l]);
+                    }
+                    blk.drain(..l);
+                    cur += 1;
+                }
             }
+            Ok(())
+        })();
+        if res.is_err() || rt.cancel.load(SeqCst) {
+            carry.cur = cur;
+            carry.blk = blk;
+        }
+        res?;
+        if rt.cancel.load(SeqCst) {
+            return Ok(());
         }
         b = last + 1;
     }
