@@ -47,6 +47,8 @@ pub struct PlayerState {
     pub(super) seek_acc: State<i32>,
     seek_gen: Cell<u32>,
     seek_applied: Cell<i32>,
+    pub(super) rot_at: Cell<Option<Instant>>,
+    pub(super) rot_rev: State<u32>,
     sleep_at: Cell<Option<Instant>>,
     held: Cell<bool>,
     watched_ms: Cell<i64>,
@@ -83,6 +85,8 @@ impl PlayerState {
             seek_acc: State::new(0),
             seek_gen: Cell::new(0),
             seek_applied: Cell::new(0),
+            rot_at: Cell::new(None),
+            rot_rev: State::new(0),
             sleep_at: Cell::new(None),
             held: Cell::new(false),
             watched_ms: Cell::new(0),
@@ -377,8 +381,14 @@ impl Home {
     }
 
     pub(super) fn pl_set_fullscreen(&self, p: &Rc<SeasonPage>, on: bool) {
+        p.pl.rot_at.set(Some(Instant::now()));
         p.pl.fullscreen.set(on);
         uzcoders::android::set_fullscreen(on);
+        // Aylanish tugagach (yoki 1.5 s o'tgach) sahifa qayta chiziladi.
+        for ms in [400u64, 900, 1600] {
+            let pc = p.clone();
+            spawn_bg(move || std::thread::sleep(std::time::Duration::from_millis(ms)), move |_| pc.pl.rot_rev.set(pc.pl.rot_rev.get().wrapping_add(1)));
+        }
     }
 
     /// Kotlin pleyerdagi markaziy tugma: qora 42% dumaloq, ichida belgi.

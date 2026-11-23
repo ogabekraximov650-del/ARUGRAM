@@ -355,6 +355,14 @@ impl Home {
             .align(Align::Center)
             .padding_each(16.0, 12.0 + ins.top, 16.0, 8.0);
         let cover = stack(vec![cover_img.radius(16.0)]).bg(Color::BLACK).radius(16.0);
+        // Ekran aylanayotganda (to'liq ekranga kirish/chiqish) tugmalar ko'rinmasin: oyna yo'nalishi holatga mos kelguncha qora ekran.
+        {
+            let (fw, fh) = window_dp();
+            let rotating = p.pl.rot_at.get().map(|t| t.elapsed().as_millis() < 1500).unwrap_or(false);
+            if rotating && p.pl.fullscreen.get() != (fw > fh) {
+                return column(vec![]).bg(Color::BLACK);
+            }
+        }
         if p.pl.fullscreen.get() {
             let (fw, fh) = window_dp();
             let v = self.player_view(p, column(vec![]), fw, fh, true);
