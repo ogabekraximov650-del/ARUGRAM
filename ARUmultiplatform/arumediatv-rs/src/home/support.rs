@@ -607,9 +607,17 @@ impl Home {
             }
             "video" | "round" => {
                 let round = m.media_type == "round";
-                let (bw, bh) = if round { (200.0, 200.0) } else { (230.0, 150.0) };
                 let mut layers: Vec<Element> = Vec::new();
                 let (frame, why) = self.chat_video_frame(&m.media_url);
+                // Rasmlar kabi: video o'z nisbatida (230 dp ga sig'adigan o'lchamda); kadr hali yo'q bo'lsa 230x150.
+                let (bw, bh) = match (&frame, round) {
+                    (_, true) => (200.0, 200.0),
+                    (Some(f), false) => {
+                        let k = (230.0 / f.w as f32).min(230.0 / f.h as f32);
+                        (f.w as f32 * k, f.h as f32 * k)
+                    }
+                    (None, false) => (230.0, 150.0),
+                };
                 if let Some(f) = frame {
                     layers.push(stack(vec![image_fill(&f)]));
                 }
