@@ -67,8 +67,8 @@ jobs:
           PLAT=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
           # ARU logotipi (ilova belgisi): resurslar aapt2 bilan kompilyatsiya qilinib APK ga qo'shiladi.
           "$BT/aapt2" compile --dir res -o res.zip
-          "$BT/aapt2" link -o base.apk -I "$PLAT/android.jar" -R res.zip --manifest AndroidManifest.xml \
-            --min-sdk-version 28 --target-sdk-version 34 --version-code ${{ github.run_number }}
+          "$BT/aapt2" link -o base.apk -I "$PLAT/android.jar" --manifest AndroidManifest.xml \
+            --min-sdk-version 28 --target-sdk-version 34 --version-code ${{ github.run_number }} res.zip
           # Java yelimi (klaviatura, ExoPlayer ko'prigi): javac + d8. Media3 jar'lari oldingi qadamda Maven bilan olingan.
           mkdir -p classes dex
           M3=$(ls media3/jars/*.jar | tr '\n' ':')
@@ -124,66 +124,4 @@ jobs:
         with:
           name: arumediatv-rs-${{ github.run_number }}
           path: ${{ steps.apk.outputs.dir }}
-          retention-days: 30
-
-  # Animatsiya videosi (HarmonyOS uslubidagi harakat prototipi): FAQAT `arumediatv-rs/video/` o'zgarganda ishlaydi.
-  # Haqiqiy ekranlar `cargo test` snapshotlaridan olinadi, video Python (Pillow) + ffmpeg bilan yig'iladi va Telegram'ga yuboriladi.
-  video:
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    environment: secret
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 100
-      - name: Video kerakmi?
-        id: need
-        run: |
-          B="${{ github.event.before }}"
-          if git cat-file -e "$B^{commit}" 2>/dev/null; then R="$B"; else R="HEAD~1"; fi
-          if git diff --name-only "$R" HEAD | grep -q '^ARUmultiplatform/arumediatv-rs/video/'; then echo "run=1" >> "$GITHUB_OUTPUT"; else echo "video o'zgarmagan — o'tkazib yuboriladi"; fi
-      - uses: dtolnay/rust-toolchain@stable
-        if: steps.need.outputs.run == '1'
-      - name: Haqiqiy ekranlar (snapshot, 2x)
-        if: steps.need.outputs.run == '1'
-        working-directory: ARUmultiplatform/arumediatv-rs
-        run: |
-          mkdir -p "$GITHUB_WORKSPACE/snap"
-          ARU_SNAPSHOT_SCALE=2 ARU_SNAPSHOT_DIR="$GITHUB_WORKSPACE/snap" cargo test bosh_sahifa
-          ls "$GITHUB_WORKSPACE/snap" | wc -l
-      - uses: actions/setup-python@v7
-        if: steps.need.outputs.run == '1'
-        with:
-          python-version: '3.11'
-      - name: Video yig'ish (ffmpeg)
-        if: steps.need.outputs.run == '1'
-        run: |
-          sudo apt-get install -y -qq ffmpeg
-          pip install --no-cache-dir -q pillow numpy
-          mkdir -p out
-          python ARUmultiplatform/arumediatv-rs/video/make_video.py "$GITHUB_WORKSPACE/snap" "out/arumediatvrs-animatsiya-${{ github.run_number }}.mp4"
-          ls -la out
-      - name: Videoni Telegram "Saqlangan xabarlar"ga yuborish
-        if: steps.need.outputs.run == '1'
-        continue-on-error: true
-        env:
-          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
-          TG_API_ID: ${{ secrets.TG_API_ID }}
-          TG_API_HASH: ${{ secrets.TG_API_HASH }}
-        run: |
-          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
-          S="$RUNNER_TEMP/notify_session"
-          K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
-            -in tool/encode/session.enc -out "$S.session"
-          head -c 16 "$S.session" | grep -q "SQLite format 3"
-          for V in out/*.mp4; do
-            python tool/notify/send_apk.py "$S" "$V" "ARUMEDIATVRS animatsiya prototipi (video) ${{ github.run_number }}"
-          done
-          rm -f "$S.session"
-      - uses: actions/upload-artifact@v7
-        if: steps.need.outputs.run == '1'
-        with:
-          name: arumediatvrs-animatsiya-${{ github.run_number }}
-          path: out
           retention-days: 30
