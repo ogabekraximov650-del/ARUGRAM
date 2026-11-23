@@ -378,6 +378,8 @@ pub struct Profile {
     pub is_admin: bool,
     /// Obuna tugash vaqti (ms); 0 — obuna yo'q.
     pub sub_until: i64,
+    /// Qanday kirilgani: `TG: @user` / `TG: 123456` / Google email.
+    pub ident: String,
 }
 
 pub fn fetch_profile(session: &str) -> Result<Profile, String> {
@@ -392,7 +394,18 @@ pub fn fetch_profile(session: &str) -> Result<Profile, String> {
         _ if !username.is_empty() => username.clone(),
         _ => "Foydalanuvchi".to_string(),
     };
+    let tg_id = num(&u["telegram_id"]);
+    let tg_user = u["tg_username"].as_str().unwrap_or("");
+    let email = u["email"].as_str().unwrap_or("");
+    let ident = if tg_id != 0 {
+        if tg_user.is_empty() { format!("TG: {tg_id}") } else { format!("TG: @{tg_user}") }
+    } else if !email.is_empty() {
+        email.to_string()
+    } else {
+        format!("ID {}", num(&u["id"]))
+    };
     Ok(Profile {
+        ident,
         id: num(&u["id"]),
         name,
         username,

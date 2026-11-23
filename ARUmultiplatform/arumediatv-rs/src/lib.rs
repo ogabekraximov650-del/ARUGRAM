@@ -1,5 +1,6 @@
 //! ARUMEDIATV — Rust + uzcoders versiyasi. Hozir: Telegram orqali kirish oynasi.
 
+mod accounts;
 mod api;
 mod backend;
 mod data;
@@ -60,10 +61,17 @@ pub fn make_ui(scale: f32) -> Ui {
     // Chiqish / hisobni o'chirish: sessiya va Telegram hisobi tozalanadi, kirish ekrani qaytadi.
     let (s3, h3, l3, b3) = (screen.clone(), home.clone(), login_slot.clone(), backend.clone());
     let on_logout: Rc<dyn Fn()> = Rc::new(move || {
+        let cur = api::load_session();
         api::clear_session();
         let b = b3.clone();
         std::thread::spawn(move || b.logout());
         *h3.borrow_mut() = None;
+        // Boshqa hisob qolgan bo'lsa unga ilova ichida o'tiladi (Kotlin `afterAccountGone`); aks holda kirish ekrani.
+        if let Some(t) = cur {
+            if accounts::after_logout(&t) {
+                return;
+            }
+        }
         if let Some(l) = l3.borrow().as_ref() {
             l.restart();
         }
@@ -74,6 +82,20 @@ pub fn make_ui(scale: f32) -> Ui {
         *h2.borrow_mut() = Some(Home::new(session, on_logout.clone()));
         s2.set(Screen::Home);
     });
+    // Ko'p hisob ulagichlari: hisob almashtirish / "hisob qo'shish" (kirish ekrani).
+    {
+        let (od, h4, l4, s4) = (on_done.clone(), home.clone(), login_slot.clone(), screen.clone());
+        accounts::set_hooks(accounts::Hooks {
+            activate: od,
+            add: Rc::new(move || {
+                *h4.borrow_mut() = None;
+                if let Some(l) = l4.borrow().as_ref() {
+                    l.restart();
+                }
+                s4.set(Screen::Login);
+            }),
+        });
+    }
     let login = Login::new(backend, on_done.clone());
     *login_slot.borrow_mut() = Some(login.clone());
     // Saqlangan sessiya bo'lsa to'g'ridan-to'g'ri bosh sahifa.
@@ -93,7 +115,7 @@ pub fn make_ui(scale: f32) -> Ui {
     ui.add_font(900, Rc::new(Font::parse(BLACK).expect("Roboto Black")));
     let (l, h, s) = (login.clone(), home.clone(), screen.clone());
     ui.set_back_handler(move || match s.get() {
-        Screen::Login => l.back(),
+        Screen::Login => l.back() || accounts::cancel_add(),
         Screen::Home => h.borrow().as_ref().is_some_and(|home| home.back()),
     });
     ui.set_scale(scale);

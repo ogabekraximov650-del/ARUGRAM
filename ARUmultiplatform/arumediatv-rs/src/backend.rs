@@ -28,6 +28,10 @@ pub enum Poll {
 pub trait Backend: Send + Sync {
     /// Bir martalik kirish tokenini oladi (`POST /api/auth/telegram/start`).
     fn start(&self) -> Result<BotLink, String>;
+    /// Google orqali kirish: token va brauzerda ochiladigan Google havolasi (`POST /api/auth/google/start`); holat shu `poll` bilan so'raladi.
+    fn google_start(&self) -> Result<BotLink, String> {
+        Err("Google orqali kirish bu yerda mavjud emas".into())
+    }
     /// Token holatini so'raydi (`GET /api/auth/telegram/status`).
     fn poll(&self, token: &str) -> Poll;
     /// Chiqish: mahalliy sessiya tozalanadi (Telegram hisobi yo'q).
@@ -51,6 +55,17 @@ impl Backend for WorkerBackend {
             return Err("Serverga ulanib bo'lmadi. Internetni tekshirib, qaytadan urinib ko'ring.".into());
         }
         Ok(BotLink { token, link, expires: j["expires_in"].as_u64().unwrap_or(300) })
+    }
+
+    fn google_start(&self) -> Result<BotLink, String> {
+        let (code, body) = crate::api::request("POST", "/api/auth/google/start", "", Some(&device_json()), None)?;
+        let j: Value = serde_json::from_str(&body).map_err(|_| "Server javobi noto'g'ri".to_string())?;
+        let token = j["token"].as_str().unwrap_or("").to_string();
+        let url = j["url"].as_str().unwrap_or("").to_string();
+        if code >= 400 || token.is_empty() || url.is_empty() {
+            return Err("Serverga ulanib bo'lmadi. Internetni tekshirib, qaytadan urinib ko'ring.".into());
+        }
+        Ok(BotLink { token, link: url, expires: j["expires_in"].as_u64().unwrap_or(300) })
     }
 
     fn poll(&self, token: &str) -> Poll {

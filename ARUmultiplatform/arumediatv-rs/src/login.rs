@@ -90,6 +90,8 @@ pub struct Login {
     on_done: Rc<dyn Fn(String)>,
     /// «Qaysi Telegram orqali kirasiz?» oynasi ochiqmi.
     picker: State<bool>,
+    /// Hozirgi urinish Google orqalimi (aks holda Telegram bot).
+    google: Cell<bool>,
     /// O'rnatilgan Telegram ilovalari: (paket, nom, ikon).
     clients: RefCell<Vec<(String, String, Option<Rc<Image>>)>>,
 }
@@ -107,6 +109,7 @@ impl Login {
             backend,
             on_done,
             picker: State::new(false),
+            google: Cell::new(false),
             clients: RefCell::new(Vec::new()),
         })
     }
@@ -176,13 +179,45 @@ impl Login {
 
     /// Boshidan (usul tanlash).
     pub fn restart(&self) {
+        self.google.set(false);
         self.gen.set(self.gen.get().wrapping_add(1));
         self.stage.set(Stage::Choose);
         self.message.set(String::new());
         self.until.set(None);
     }
 
+    /// Google orqali: worker havola beradi, u brauzerda ochiladi (Google akkaunt tanlanadi), ilova holatni so'rab turadi.
+    fn start_google(self: &Rc<Self>) {
+        self.google.set(true);
+        let g = self.gen.get().wrapping_add(1);
+        self.gen.set(g);
+        self.stage.set(Stage::Preparing);
+        self.message.set(String::new());
+        let (b, me) = (self.backend.clone(), self.clone());
+        spawn_bg(move || b.google_start(), move |r| {
+            if me.gen.get() != g {
+                return;
+            }
+            match r {
+                Ok(l) => {
+                    *me.link.borrow_mut() = l.link.clone();
+                    *me.token.borrow_mut() = l.token.clone();
+                    me.until.set(Some(Instant::now() + Duration::from_secs(l.expires.max(30))));
+                    me.left.set(l.expires as i64);
+                    me.stage.set(Stage::Waiting);
+                    uzcoders::android::open_url(&l.link);
+                    me.poll(g);
+                }
+                Err(e) => {
+                    me.message.set(e);
+                    me.stage.set(Stage::Error);
+                }
+            }
+        });
+    }
+
     fn start_bot(self: &Rc<Self>) {
+        self.google.set(false);
         let g = self.gen.get().wrapping_add(1);
         self.gen.set(g);
         self.stage.set(Stage::Preparing);
@@ -302,7 +337,7 @@ impl Login {
             gap_box(0.0, 28.0),
             Self::choice("Telegram orqali", tg, move || me.start_bot()),
             gap_box(0.0, 12.0),
-            Self::choice("Google orqali", google, move || m2.message.set("Google orqali kirish keyingi yangilanishda qo'shiladi".into())),
+            Self::choice("Google orqali", google, move || m2.start_google()),
         ];
         let msg = self.message.get();
         if !msg.is_empty() {
@@ -314,17 +349,28 @@ impl Login {
 
     fn retry_btn(self: &Rc<Self>) -> Element {
         let me = self.clone();
-        column(vec![tx("Qayta urinish", 15.0, Color::WHITE).bold()]).center().bg(ACCENT).radius(14.0).padding_xy(24.0, 12.0).on_click(move || me.start_bot())
+        column(vec![tx("Qayta urinish", 15.0, Color::WHITE).bold()]).center().bg(ACCENT).radius(14.0).padding_xy(24.0, 12.0).on_click(move || if me.google.get() { me.start_google() } else { me.start_bot() })
     }
 
     fn bot_view(self: &Rc<Self>) -> Element {
-        let mut kids = vec![tx("Telegram orqali kirish", 22.0, Color::WHITE).bold(), gap_box(0.0, 10.0)];
+        let google = self.google.get();
+        let mut kids = vec![tx(if google { "Google orqali kirish" } else { "Telegram orqali kirish" }, 22.0, Color::WHITE).bold(), gap_box(0.0, 10.0)];
         match self.stage.get() {
             Stage::Preparing | Stage::Choose => kids.push(spinner(32.0, 2.0, ACCENT)),
             Stage::Waiting => {
                 let me = self.clone();
                 let (w, _) = window_dp();
                 let cw = (w - 48.0).max(200.0);
+                if google {
+                    kids.push(tx("Brauzerda Google accountingizni tanlang. Tasdiqlangach ilova o'zi kiradi.", 14.0, TEXT_DIM).width(cw));
+                    kids.push(gap_box(0.0, 20.0));
+                    kids.push(column(vec![tx("Brauzerda qayta ochish", 15.0, Color::WHITE).bold()]).center().width(cw).bg(ACCENT).radius(16.0).padding_xy(0.0, 15.0).on_click(move || {
+                        let u = me.link.borrow().clone();
+                        uzcoders::android::open_url(&u);
+                    }));
+                    kids.push(gap_box(0.0, 10.0));
+                    kids.push(tx(format!("Havola muddati: {} s", self.left.get().max(0)), 12.0, TEXT_FAINT));
+                } else {
                 kids.push(tx("Telegram ilovasini tanlang, botda «Start» tugmasini bosib hisobingizni tasdiqlang. Tasdiqlangach ilova o'zi kiradi.", 14.0, TEXT_DIM).width(cw));
                 kids.push(gap_box(0.0, 20.0));
                 kids.push(
@@ -341,6 +387,7 @@ impl Login {
                 );
                 kids.push(gap_box(0.0, 10.0));
                 kids.push(tx(format!("Havola muddati: {} s", self.left.get().max(0)), 12.0, TEXT_FAINT));
+                }
             }
             Stage::Expired => {
                 kids.push(tx("Havola muddati tugadi", 14.0, TEXT_DIM));
