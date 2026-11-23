@@ -286,8 +286,8 @@ fn agent() -> &'static ureq::Agent {
     A.get_or_init(|| ureq::AgentBuilder::new().max_idle_connections_per_host(8).timeout_connect(Duration::from_secs(20)).timeout_read(Duration::from_secs(60)).build())
 }
 
-/// Joriy oynadan keyingi `AHEAD` oynani fonda ketma-ket isitadi (surilganda yoki davom etganda kutdirmasin). Bir fayl uchun bitta oqim.
-const AHEAD: u64 = 3;
+/// Joriy oynadan keyingi `AHEAD` (1) oynani fonda isitadi. Bir fayl uchun bitta oqim.
+const AHEAD: u64 = 1;
 
 fn prefetch_ahead(name: &str, cur_w: u64, total: u64) {
     static BUSY: Mutex<Option<HashSet<String>>> = Mutex::new(None);
