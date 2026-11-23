@@ -1376,6 +1376,11 @@ mod tests {
         Image { w, h, rgba }.round_corners(24.0)
     }
 
+    /// Snapshotlar masshtabi (video uchun 2.0: aniqroq rasm): `ARU_SNAPSHOT_SCALE`.
+    fn snap_scale() -> f32 {
+        std::env::var("ARU_SNAPSHOT_SCALE").ok().and_then(|v| v.parse().ok()).unwrap_or(1.0)
+    }
+
     #[test]
     fn bosh_sahifa_chiziladi() {
         let seasons: Vec<Season> = (0..6)
@@ -1464,20 +1469,20 @@ mod tests {
         let mut ui = Ui::new(font, move || h.view());
         ui.add_font(700, Rc::new(Font::parse(include_bytes!("../assets/fonts/Roboto-Bold.ttf")).unwrap()));
         ui.add_font(900, Rc::new(Font::parse(include_bytes!("../assets/fonts/Roboto-Black.ttf")).unwrap()));
-        ui.set_scale(1.0);
-        let size = Size::new(360.0, 640.0);
+        ui.set_scale(snap_scale());
+        let size = Size::new(360.0 * snap_scale(), 640.0 * snap_scale());
         let cmds = ui.frame(size);
         assert_eq!(crate::theme::GLASS_ON, cmds.iter().any(|c| matches!(c, DrawCmd::Backdrop { .. })));
         assert!(cmds.iter().filter(|c| matches!(c, DrawCmd::Image { .. })).count() >= 4);
         if let Ok(dir) = std::env::var("ARU_SNAPSHOT_DIR") {
-            let mut c = ui.canvas(360, 640);
+            let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
             c.clear(Color::BLACK);
             c.execute(&cmds);
             std::fs::write(format!("{dir}/6_home.png"), c.to_png()).unwrap();
             home.tab.set(1);
             home.query.set("a".into());
             let cmds = ui.frame(size);
-            let mut c = ui.canvas(360, 640);
+            let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
             c.clear(Color::BLACK);
             c.execute(&cmds);
             std::fs::write(format!("{dir}/7_search.png"), c.to_png()).unwrap();
@@ -1488,7 +1493,7 @@ mod tests {
                 let page = Rc::new(translator::TrPage { tr, data: State::new(Some(Rc::new(tp))), failed: State::new(false), scroll: ScrollState::new() });
                 home.push(pages::Page::Translator(page));
                 let cmds = ui.frame(size);
-                let mut c = ui.canvas(360, 640);
+                let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/17_translator.png"), c.to_png()).unwrap();
@@ -1501,7 +1506,7 @@ mod tests {
                 let mk = |id: &str, adm: bool, b: &str, t: i64| support::ChatMsg::test(id, adm, b, t);
                 p.items_set(vec![mk("1", false, "Salom, savolim bor edi", 1_792_497_600_000), mk("2", true, "Assalomu alaykum! Qanday yordam beray?", 1_792_497_700_000), mk("3", false, "Obuna to'lovi tushmadi", 1_792_584_000_000)]);
                 let cmds = ui.frame(size);
-                let mut c = ui.canvas(360, 640);
+                let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/16_support.png"), c.to_png()).unwrap();
@@ -1514,7 +1519,7 @@ mod tests {
                     _ => home.open_storage(),
                 }
                 let cmds = ui.frame(size);
-                let mut c = ui.canvas(360, 640);
+                let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/15_page{k}.png"), c.to_png()).unwrap();
@@ -1528,7 +1533,7 @@ mod tests {
             for (n, name) in [(0, "10_lib0"), (1, "10_lib1"), (2, "10_lib2")] {
                 home.lib_tab.set(n);
                 let cmds = ui.frame(size);
-                let mut c = ui.canvas(360, 640);
+                let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
@@ -1538,7 +1543,7 @@ mod tests {
             for (n, name) in [(0, "11_profile"), (1, "12_dialog")] {
                 home.dlg.set(n);
                 let cmds = ui.frame(size);
-                let mut c = ui.canvas(360, 640);
+                let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
@@ -1556,7 +1561,7 @@ mod tests {
                 for (n, name) in [(0, "13_season_info"), (1, "13_season_eps"), (2, "13_season_sec"), (3, "13_season_com")] {
                     p.tab.set(n);
                     let cmds = ui.frame(size);
-                    let mut c = ui.canvas(360, 640);
+                    let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                     c.clear(Color::BLACK);
                     c.execute(&cmds);
                     std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
@@ -1566,7 +1571,7 @@ mod tests {
             home.hidden.set(vec!["anime".into()]);
             home.push(pages::Page::Settings);
             let cmds = ui.frame(size);
-            let mut c = ui.canvas(360, 640);
+            let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
             c.clear(Color::BLACK);
             c.execute(&cmds);
             std::fs::write(format!("{dir}/14_settings.png"), c.to_png()).unwrap();
@@ -1575,7 +1580,7 @@ mod tests {
             for (n, name) in [(0, "8_catalog"), (1, "9_filter")] {
                 home.filter_open.set(n == 1);
                 let cmds = ui.frame(size);
-                let mut c = ui.canvas(360, 640);
+                let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/{name}.png"), c.to_png()).unwrap();
