@@ -19,6 +19,8 @@ serde_json = "1"
 aes = "0.9"
 ctr = "0.10"
 ureq = "2"
+# ExoPlayer manbasi (`VdDataSource`) bilan JNI orqali gaplashish.
+jni = { version = "0.21", default-features = false }
 # WebP (stiker/GIF to'plam kichik rasmlari, posterlar): sof Rust dekoder.
 image-webp = "0.2"
 

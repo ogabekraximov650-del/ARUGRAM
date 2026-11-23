@@ -210,7 +210,7 @@ public class AruActivity extends UzActivity {
             public void onPlayerError(PlaybackException ex) {
                 Throwable root = ex;
                 while (root.getCause() != null) root = root.getCause();
-                fail("Video ochilmadi [" + (uri.startsWith("aru://") ? "Telegram" : "server") + "] " + ex.getErrorCodeName()
+                fail("Video ochilmadi [" + (uri.startsWith("aru://") ? "Telegram" : uri.startsWith("vd://") ? "vd" : "server") + "] " + ex.getErrorCodeName()
                         + (root.getMessage() != null ? " - " + root.getMessage() : ""));
             }
 
@@ -224,7 +224,12 @@ public class AruActivity extends UzActivity {
                 }
             }
         });
-        if (uri.startsWith("aru://")) {
+        if (uri.startsWith("vd://")) {
+            // Worker `vd` videosi: mahalliy serversiz, baytlar Rust'dan JNI orqali (Kotlin `EncCacheDataSource` kabi).
+            MediaItem item = new MediaItem.Builder().setUri(uri).setMimeType(MimeTypes.VIDEO_MP4).build();
+            ProgressiveMediaSource.Factory f = new ProgressiveMediaSource.Factory(new VdDataSource.Factory());
+            e.setMediaSource(f.createMediaSource(item), Math.max(0, start));
+        } else if (uri.startsWith("aru://")) {
             MediaItem item = new MediaItem.Builder().setUri(uri).setMimeType(MimeTypes.VIDEO_MP4).build();
             ProgressiveMediaSource.Factory f = new ProgressiveMediaSource.Factory(new AruDataSource.Factory())
                     .setContinueLoadingCheckIntervalBytes(256 * 1024);

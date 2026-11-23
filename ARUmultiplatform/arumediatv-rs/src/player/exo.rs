@@ -18,6 +18,8 @@ extern "C" {
 pub enum Source {
     Aru(String),
     Http(String),
+    /// Worker `vd` videosi: mahalliy serversiz, JNI orqali (`VdDataSource`).
+    Vd(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -69,6 +71,7 @@ impl Player {
         let (name, uri) = match &source {
             Source::Aru(n) => (n.clone(), format!("aru://file/{n}")),
             Source::Http(u) => (String::new(), u.clone()),
+            Source::Vd(n) => (String::new(), format!("vd://{n}")),
         };
         uzcoders::android::activity_call("exoOpen", &format!("{uri}|{}|{}|100", start_ms.max(0), if auto_play { 1 } else { 0 }));
         let ticker = Arc::new(Ticker { closed: AtomicBool::new(false), playing: AtomicBool::new(auto_play), boost_until: AtomicU64::new(10_000) });

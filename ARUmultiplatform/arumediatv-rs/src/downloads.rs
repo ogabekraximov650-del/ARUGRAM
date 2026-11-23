@@ -183,12 +183,9 @@ pub fn resolve(session: &str, url: &str) -> Result<(crate::player::Source, bool)
         return if url.starts_with("http") { Ok((Source::Http(url.to_string()), false)) } else { Err("Video manzili noto'g'ri".into()) };
     }
     // Internetdan: worker `vd` videosi mahalliy ochuvchi server (`vdsrv`) orqali shifrdan ochilib HTTP manba sifatida beriladi.
-    let _ = session;
-    match crate::vdsrv::url(&name) {
-        Some(u) => Ok((Source::Http(u), false)),
-        None if url.starts_with("http") => Ok((Source::Http(url.to_string()), false)),
-        None => Err("Video ochuvchi server ishga tushmagan".into()),
-    }
+    // Pleyer mahalliy serversiz (Kotlin kabi): `VdDataSource` baytlarni JNI orqali oladi. Sessiya `vdsrv` ga beriladi (hajm/kalit so'rovi uchun).
+    crate::vdsrv::start(session);
+    Ok((Source::Vd(name), false))
 }
 
 /// Ushlab turish bo'shatiladi (pleyer yopildi).

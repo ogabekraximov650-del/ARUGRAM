@@ -16,6 +16,8 @@ mod tgmedia;
 mod tganim;
 mod vd;
 mod vdsrv;
+#[cfg(target_os = "android")]
+mod vdjni;
 mod emojifont;
 mod webp;
 

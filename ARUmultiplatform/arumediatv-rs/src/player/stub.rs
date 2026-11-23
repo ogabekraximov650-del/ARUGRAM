@@ -4,6 +4,8 @@
 pub enum Source {
     Aru(String),
     Http(String),
+    /// Worker `vd` videosi: mahalliy serversiz, JNI orqali (`VdDataSource`).
+    Vd(String),
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]

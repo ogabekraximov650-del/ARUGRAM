@@ -632,3 +632,159 @@ pub fn gc(max_bytes: u64) {
         }
     }
 }
+
+// ── Pleyer uchun serversiz o'qish (Kotlin `EncCacheDataSource` + `VdBlocks`): Java `VdDataSource` JNI orqali shu yerdan o'qiydi ──
+
+static INFL: Mutex<Option<HashSet<(String, u64)>>> = Mutex::new(None);
+
+fn infl_claim(name: &str, idx: u64) -> bool {
+    INFL.lock().ok().map(|mut g| g.get_or_insert_with(HashSet::new).insert((name.to_string(), idx))).unwrap_or(false)
+}
+
+fn infl_release(name: &str, idx: u64) {
+    if let Ok(mut g) = INFL.lock() {
+        if let Some(s) = g.as_mut() {
+            s.remove(&(name.to_string(), idx));
+        }
+    }
+}
+
+/// Fayl hajmi (pleyer ochilganda); tayyor bo'lmasa `None`.
+pub fn size_of(name: &str) -> Option<u64> {
+    if !valid_name(name) {
+        return None;
+    }
+    info(name).map(|(t, _)| t)
+}
+
+/// `pos` dan boshlab `out` ni to'ldiradi (ko'pi bilan bitta 1 MiB bo'lak ichidan). `Ok(0)` — fayl oxiri.
+pub fn read_at(name: &str, pos: u64, out: &mut [u8]) -> Result<usize, String> {
+    let (total, _) = info(name).ok_or("video ma'lumoti yo'q")?;
+    if pos >= total {
+        return Ok(0);
+    }
+    let idx = pos / BLOCK;
+    let blk = get_block(name, idx, total)?;
+    let off = (pos - idx * BLOCK) as usize;
+    if off >= blk.len() {
+        return Ok(0);
+    }
+    let n = out.len().min(blk.len() - off);
+    out[..n].copy_from_slice(&blk[off..off + n]);
+    Ok(n)
+}
+
+fn get_block(name: &str, idx: u64, total: u64) -> Result<Vec<u8>, String> {
+    for _ in 0..2400 {
+        if let Some(b) = block_read(name, idx, total) {
+            return Ok(b);
+        }
+        if infl_claim(name, idx) {
+            return start_run(name, idx, total);
+        }
+        // Boshqa so'rov shu bo'lakni olyapti — tugashini kutamiz.
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err("bo'lak kutish muddati tugadi".into())
+}
+
+/// `idx` dan boshlab shu oynaning oxirigacha (keshda yoki band bo'lakkacha) BITTA so'rov bilan oladi. Birinchi bo'lak tayyor bo'lishi bilan qaytadi,
+/// qolganlari fonda davom etadi (pleyer buferi to'lguncha oldindan olinadi; Kotlin `VdAhead`).
+fn start_run(name: &str, idx: u64, total: u64) -> Result<Vec<u8>, String> {
+    let nb = total.div_ceil(BLOCK);
+    let w = idx * BLOCK / CHUNK;
+    let win_last = (((w + 1) * CHUNK / BLOCK).saturating_sub(1)).min(nb - 1);
+    let mut last = idx;
+    while last < win_last {
+        let k = last + 1;
+        if block_exists(name, k) || !infl_claim(name, k) {
+            break;
+        }
+        last = k;
+    }
+    let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<u8>, String>>();
+    let n = name.to_string();
+    std::thread::spawn(move || {
+        let key = match info(&n) {
+            Some((_, k)) => k,
+            None => {
+                for b in idx..=last {
+                    infl_release(&n, b);
+                }
+                let _ = tx.send(Err("video ma'lumoti yo'q".into()));
+                return;
+            }
+        };
+        let mut sent = false;
+        let mut done_to = idx; // [idx, done_to) yozilgan
+        let mut force = false;
+        let mut attempt = 0;
+        let res: Result<(), String> = loop {
+            attempt += 1;
+            let r = run_fetch(&n, &key, total, w, done_to, last, force, &mut |b, data| {
+                block_write(&n, b, &data);
+                infl_release(&n, b);
+                done_to = b + 1;
+                if b == idx && !sent {
+                    sent = true;
+                    let _ = tx.send(Ok(data));
+                }
+            });
+            match r {
+                Ok(()) => break Ok(()),
+                Err(e) if attempt < 3 => {
+                    // 503 — Cloudflare keshida oyna yo'q: majburan qayta isitiladi.
+                    force = e.contains("503");
+                    std::thread::sleep(Duration::from_millis(500 * attempt));
+                }
+                Err(e) => break Err(e),
+            }
+        };
+        for b in done_to..=last {
+            infl_release(&n, b);
+        }
+        if let (Err(e), false) = (res, sent) {
+            let _ = tx.send(Err(e));
+        }
+        if (w + 1) * CHUNK < total {
+            prefetch_ahead(&n, w, total);
+        }
+    });
+    rx.recv_timeout(Duration::from_secs(240)).map_err(|_| "bo'lak olinmadi (muddat)".to_string())?
+}
+
+/// Oyna isitiladi va `[from_b, last]` bo'laklar bitta so'rov bilan olinadi; har tayyor bo'lak `on_block` ga beriladi.
+fn run_fetch(name: &str, key: &str, total: u64, w: u64, from_b: u64, last: u64, force: bool, on_block: &mut dyn FnMut(u64, Vec<u8>)) -> Result<(), String> {
+    if from_b > last {
+        return Ok(());
+    }
+    if !warm_opts(name, w, force) {
+        return Err("oyna isitilmadi".into());
+    }
+    let (rs, re) = (from_b * BLOCK, ((last + 1) * BLOCK).min(total) - 1);
+    let resp = agent().get(&play_url(name)).set("Range", &format!("bytes={rs}-{re}")).call().map_err(|e| e.to_string())?;
+    if !(resp.status() == 206 || (resp.status() == 200 && rs == 0 && re + 1 == total)) {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let mut r = resp.into_reader();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut blk: Vec<u8> = Vec::with_capacity(BLOCK as usize);
+    let (mut pos, mut cur) = (rs, from_b);
+    while pos <= re {
+        let want = ((re - pos + 1) as usize).min(buf.len());
+        let n = r.read(&mut buf[..want]).map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("uzildi".into());
+        }
+        crate::vd::apply(key, pos, &mut buf[..n]);
+        blk.extend_from_slice(&buf[..n]);
+        pos += n as u64;
+        while cur <= last && blk.len() >= block_len(total, cur) {
+            let l = block_len(total, cur);
+            let data: Vec<u8> = blk.drain(..l).collect();
+            on_block(cur, data);
+            cur += 1;
+        }
+    }
+    Ok(())
+}
