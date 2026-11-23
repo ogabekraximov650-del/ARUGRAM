@@ -16,6 +16,8 @@ pub struct Saved {
     pub username: String,
     /// Qanday kirilgani: `TG: @user` / `TG: 123456` / Google email.
     pub ident: String,
+    /// Profil rasmi manzili (bo'sh bo'lsa — harf).
+    pub photo: String,
     pub sub_until: i64,
 }
 
@@ -50,6 +52,7 @@ pub fn list() -> Vec<Saved> {
                 name: o["name"].as_str().unwrap_or("").into(),
                 username: o["username"].as_str().unwrap_or("").into(),
                 ident: o["ident"].as_str().unwrap_or("").into(),
+                photo: o["photo"].as_str().unwrap_or("").into(),
                 sub_until: o["sub"].as_i64().unwrap_or(0),
             })
         })
@@ -57,7 +60,7 @@ pub fn list() -> Vec<Saved> {
 }
 
 fn persist(v: &[Saved]) {
-    let a: Vec<Value> = v.iter().map(|s| json!({"id": s.id, "session": s.session, "name": s.name, "username": s.username, "ident": s.ident, "sub": s.sub_until})).collect();
+    let a: Vec<Value> = v.iter().map(|s| json!({"id": s.id, "session": s.session, "name": s.name, "username": s.username, "ident": s.ident, "photo": s.photo, "sub": s.sub_until})).collect();
     let _ = crate::secure::write_text(&file(), "accounts", &Value::Array(a).to_string());
 }
 
@@ -67,7 +70,7 @@ pub fn upsert(session: &str, p: &Profile) {
         return;
     }
     let mut v = list();
-    let s = Saved { id: p.id, session: session.to_string(), name: p.name.clone(), username: p.username.clone(), ident: p.ident.clone(), sub_until: p.sub_until };
+    let s = Saved { id: p.id, session: session.to_string(), name: p.name.clone(), username: p.username.clone(), ident: p.ident.clone(), photo: p.photo_url.clone(), sub_until: p.sub_until };
     match v.iter_mut().find(|a| a.id == p.id) {
         Some(o) => *o = s,
         None => v.push(s),

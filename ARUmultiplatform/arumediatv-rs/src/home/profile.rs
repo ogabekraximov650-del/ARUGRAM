@@ -444,32 +444,37 @@ impl Home {
         const CHECK: &str = "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z";
         let accs = crate::accounts::list();
         let now = crate::home::now_ms_ui() as i64;
-        let mut kids: Vec<Element> = vec![self.acc_capsule(true)];
+        const X: &str = "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z";
+        const PLUS: &str = "M19,13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z";
+        let mut kids: Vec<Element> = Vec::new();
         for a in accs.iter() {
             let active = a.id == p.id;
             let letter: String = a.name.trim().chars().take(1).flat_map(|c| c.to_uppercase()).collect();
-            let avatar = column(vec![tx(letter, 16.0, Color::WHITE).bold()]).center().width(40.0).height(40.0).radius(20.0).bg(ACCENT.with_opacity(0.85));
+            let avatar = match self.logo_img(&a.photo) {
+                Some(img) => column(vec![image(&img, 40.0, 40.0)]).width(40.0).height(40.0),
+                None => column(vec![tx(letter, 16.0, Color::WHITE).bold()]).center().width(40.0).height(40.0).radius(20.0).bg(ACCENT.with_opacity(0.85)),
+            };
             let own = if a.username.is_empty() { format!("ID {}", a.id) } else { format!("@{}", a.username) };
             let sub = if a.sub_until > now { " \u{b7} Obuna" } else { "" };
             let title = if a.ident.is_empty() { format!("ID {}", a.id) } else { a.ident.clone() };
+            // Matn ustuni kengligi: 290 - 12 (chekka) - 16 (ichki) - 40 (avatar) - 12 - 36 (o'ngdagi belgi).
+            let title = Self::ellipsize(&title, 15.0, 170.0);
             let right: Element = if active {
-                icon(CHECK, 20.0).color(ACCENT2)
+                icon(CHECK, 22.0).color(ACCENT2).margin(4.0)
             } else {
                 let id = a.id;
-                tx("\u{2715}", 16.0, Color::rgba(255, 255, 255, 115)).padding(8.0).on_click(move || ACC_REMOVE.with(|s| s.set(Some(id))))
+                column(vec![icon(X, 18.0).color(Color::rgba(255, 255, 255, 115))]).center().width(36.0).height(36.0).on_click(move || ACC_REMOVE.with(|s| s.set(Some(id))))
             };
-            let mut r = row(vec![avatar, gap_box(12.0, 0.0), column(vec![tx(title, 15.0, Color::WHITE).bold().line_height(20.0), tx(format!("{own}{sub}"), 12.0, Color::rgba(255, 255, 255, 128))]).weight(1.0), right])
+            let mut r = row(vec![avatar, gap_box(12.0, 0.0), column(vec![tx(title, 15.0, Color::WHITE).bold().line_height(24.0), tx(format!("{own}{sub}"), 12.0, Color::rgba(255, 255, 255, 128)).line_height(24.0)]).weight(1.0), right])
                 .align(Align::Center)
                 .padding_xy(8.0, 8.0)
-                .radius(16.0)
-                .margin_each(0.0, 0.0, 0.0, 0.0);
+                .radius(16.0);
             if active {
                 r = r.bg(ACCENT.with_opacity(0.12));
             } else {
-                let (me, from, to) = (self.clone(), p.id, a.id);
+                let (from, to) = (p.id, a.id);
                 r = r.on_click(move || {
                     ACC_OPEN.with(|s| s.set(false));
-                    let _ = &me;
                     crate::accounts::switch_to(from, to);
                 });
             }
@@ -478,9 +483,9 @@ impl Home {
         let (me, from) = (self.clone(), p.id);
         kids.push(
             row(vec![
-                column(vec![tx("\u{ff0b}", 18.0, Color::WHITE)]).center().width(38.0).height(38.0).radius(19.0).bg(Color::rgba(255, 255, 255, 26)),
+                column(vec![icon(PLUS, 22.0).color(Color::WHITE)]).center().width(38.0).height(38.0).radius(19.0).bg(Color::rgba(255, 255, 255, 26)),
                 gap_box(12.0, 0.0),
-                tx("Account qo'shish", 15.0, Color::WHITE).bold(),
+                tx("Account qo'shish", 15.0, Color::WHITE).bold().line_height(24.0),
             ])
             .align(Align::Center)
             .padding_xy(8.0, 12.0)
@@ -496,11 +501,11 @@ impl Home {
             }),
         );
         let lim = crate::accounts::limit();
-        kids.push(tx(format!("{} / {lim}{}", accs.len(), if lim < 5 { " \u{b7} birorta accountda obuna bo'lsa 5 tagacha" } else { "" }), 12.0, Color::rgba(255, 255, 255, 115)).padding_xy(10.0, 4.0));
-        let panel = column(kids).width(290.0).padding_each(0.0, 0.0, 0.0, 8.0).bg(SURFACE).border(1.0, Color::rgba(255, 255, 255, 71)).radius(24.0).padding_each(6.0, 0.0, 6.0, 8.0);
+        kids.push(row(vec![gap_box(10.0, 0.0), tx(format!("{} / {lim}{}", accs.len(), if lim < 5 { " \u{b7} birorta accountda obuna bo'lsa 5 tagacha" } else { "" }), 12.0, Color::rgba(255, 255, 255, 115)).line_height(24.0)]).padding_each(0.0, 4.0, 0.0, 4.0));
+        let panel = column(vec![self.acc_capsule(true), column(kids).padding_each(6.0, 0.0, 6.0, 8.0)]).width(290.0).bg(SURFACE).border(1.0, Color::rgba(255, 255, 255, 71)).radius(24.0);
         let scrim = column(vec![]).on_click(|| ACC_OPEN.with(|s| s.set(false)));
         let off = self.prof_scroll.offset() / density();
-        stack(vec![scrim, column(vec![row(vec![panel, spacer()]).margin_each(16.0, (top + 8.0 - off).max(0.0) + 8.0, 0.0, 0.0), spacer()])])
+        stack(vec![scrim, column(vec![row(vec![panel, spacer()]).margin_each(16.0, (top + 8.0 - off).max(0.0), 0.0, 0.0), spacer()])])
     }
 
     fn acc_remove_dialog(self: &Rc<Self>, id: i64) -> Element {
