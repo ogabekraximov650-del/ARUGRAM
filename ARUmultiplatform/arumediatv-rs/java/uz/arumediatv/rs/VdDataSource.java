@@ -32,7 +32,7 @@ public final class VdDataSource extends BaseDataSource {
     }
 
     private static final int RETRY = -2;
-    private static final int MAX_RETRIES = 60;
+    private static final int MAX_RETRIES = 100;
 
     @Nullable private Uri uri;
     private String name = "";
@@ -55,7 +55,7 @@ public final class VdDataSource extends BaseDataSource {
         long size = 0;
         for (int i = 0; i < 4 && size <= 0; i++) {
             size = nativeSize(name);
-            if (size <= 0) pause();
+            if (size <= 0) pause(1000);
         }
         if (size <= 0) throw new IOException("vd: video ma'lumoti topilmadi: " + name);
         if (dataSpec.position >= size) throw new IOException("vd: noto'g'ri joy");
@@ -75,7 +75,7 @@ public final class VdDataSource extends BaseDataSource {
         int tries = 0;
         while ((n = nativeRead(name, position, buffer, offset, want)) == RETRY) {
             if (++tries > MAX_RETRIES) throw new IOException("vd: bo'lak olinmadi");
-            pause();
+            pause(100);
         }
         if (n < 0) throw new IOException("vd: o'qib bo'lmadi");
         if (n == 0) return C.RESULT_END_OF_INPUT;
@@ -85,9 +85,9 @@ public final class VdDataSource extends BaseDataSource {
         return n;
     }
 
-    private static void pause() throws IOException {
+    private static void pause(long ms) throws IOException {
         try {
-            Thread.sleep(1000);
+            Thread.sleep(ms);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new InterruptedIOException("vd: bekor qilindi");

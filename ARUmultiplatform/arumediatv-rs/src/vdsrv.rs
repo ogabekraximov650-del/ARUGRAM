@@ -727,7 +727,7 @@ fn maybe_readahead(name: &str, idx: u64, total: u64) {
 }
 
 fn get_block(name: &str, idx: u64, total: u64) -> Result<std::sync::Arc<Vec<u8>>, String> {
-    for _ in 0..12000 {
+    for _ in 0..100 {
         if let Some(b) = mem_get(name, idx) {
             return Ok(b);
         }
@@ -744,7 +744,7 @@ fn get_block(name: &str, idx: u64, total: u64) -> Result<std::sync::Arc<Vec<u8>>
         // Boshqa so'rov shu bo'lakni olyapti — tugashini kutamiz.
         std::thread::sleep(Duration::from_millis(10));
     }
-    Err("bo'lak kutish muddati tugadi".into())
+    Err("kutilmoqda".into())
 }
 
 /// `idx` dan boshlab shu oynaning oxirigacha (keshda yoki band bo'lakkacha) BITTA so'rov bilan oladi. Birinchi bo'lak tayyor bo'lishi bilan qaytadi,
@@ -760,6 +760,10 @@ fn start_run(name: &str, idx: u64, total: u64) -> Result<Vec<u8>, String> {
             break;
         }
         last = k;
+    }
+    // Keyingi oyna Telegramdan keshga DARHOL isitila boshlaydi (u kelganda tayyor bo'lsin; Kotlin `VdWarm.onRead`).
+    if (w + 1) * CHUNK < total {
+        prefetch_ahead(name, w, total);
     }
     let (tx, rx) = std::sync::mpsc::channel::<Result<Vec<u8>, String>>();
     let n = name.to_string();
@@ -806,11 +810,12 @@ fn start_run(name: &str, idx: u64, total: u64) -> Result<Vec<u8>, String> {
         if let (Err(e), false) = (res, sent) {
             let _ = tx.send(Err(e));
         }
-        if (w + 1) * CHUNK < total {
-            prefetch_ahead(&n, w, total);
-        }
     });
-    rx.recv_timeout(Duration::from_secs(240)).map_err(|_| "bo'lak olinmadi (muddat)".to_string())?
+    // Uzoq kutilmaydi: Java qayta so'raydi (ExoPlayer yuklashni bekor qilganda native chaqiruv uzoq osilib qolmasin).
+    match rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(r) => r,
+        Err(_) => Err("kutilmoqda".into()),
+    }
 }
 
 /// Oyna isitiladi va `[from_b, last]` bo'laklar bitta so'rov bilan olinadi; har tayyor bo'lak `on_block` ga beriladi.
