@@ -201,12 +201,14 @@ impl Home {
 
     pub(super) fn push(&self, page: Page) {
         let mut v = self.pages.get();
+        *self.trans.borrow_mut() = Some((std::time::Instant::now(), true, v.clone()));
         v.push(page);
         self.pages.set(v);
     }
 
     pub(super) fn pop(&self) -> bool {
         let mut v = self.pages.get();
+        let before = v.clone();
         let popped = v.pop();
         if let Some(Page::Season(sp)) = &popped {
             self.pl_close(sp);
@@ -216,6 +218,7 @@ impl Home {
         }
         let had = popped.is_some();
         if had {
+            *self.trans.borrow_mut() = Some((std::time::Instant::now(), false, before));
             self.pages.set(v);
             self.dl_unwatch_all();
         }

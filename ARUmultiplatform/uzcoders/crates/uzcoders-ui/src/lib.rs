@@ -128,6 +128,8 @@ pub struct Ui {
     regions: Vec<Region>,
     scrolls: Vec<ScrollState>,
     pressed: Option<usize>,
+    /// UZ: Bosilgan element kichrayishi (prujina): 1.0 — oddiy, ~0.96 — bosilgan. EN: Press-scale of the pressed element (spring). RU: Сжатие нажатого элемента (пружина).
+    press_spring: uzcoders_core::Spring,
     last_rev: Option<u64>,
     dirty: bool,
     scale: f32,
@@ -165,6 +167,7 @@ impl Ui {
             regions: Vec::new(),
             scrolls: Vec::new(),
             pressed: None,
+            press_spring: uzcoders_core::Spring::new(1.0, 900.0, 0.55),
             last_rev: None,
             dirty: true,
             scale: 1.0,
@@ -369,6 +372,14 @@ impl Ui {
         };
         self.last_frame_now = Some(self.now);
         self.step_flings(dt);
+        // UZ: Bosish effekti: bosilgan element prujina bilan ~96% gacha kichrayadi va qo'yib yuborilganda qaytadi.
+        // EN: Press effect: the pressed element shrinks to ~96% with a spring and bounces back on release.
+        // RU: Эффект нажатия: нажатый элемент пружинно сжимается до ~96% и возвращается при отпускании.
+        self.press_spring.target = if self.pressed.is_some() { 0.96 } else { 1.0 };
+        if !self.press_spring.at_rest() {
+            self.press_spring.step(dt * 1000.0);
+            self.animating = true;
+        }
         self.last_blink = self.blink_phase();
         uzcoders_core::set_density(self.scale);
         uzcoders_core::set_window_dp(size.w / self.scale, size.h / self.scale);
@@ -403,6 +414,25 @@ impl Ui {
         let mut clips: Vec<Rect> = Vec::new();
         let caret_on = self.blink_phase() % 2 == 0;
 
+        // UZ: Bosilgan elementning avlod tugunlari to'plami (bosish masshtabi shularga qo'llanadi).
+        // EN: Set of descendant nodes of the pressed element (the press scale applies to them).
+        // RU: Набор потомков нажатого элемента (масштаб нажатия применяется к ним).
+        let press_scale = self.press_spring.value;
+        let press_node: Option<usize> = self.pressed.and_then(|h| items.iter().find(|i| i.hit == Some(h)).map(|i| i.node));
+        let mut press_set: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        if let Some(pn) = press_node {
+            let r0 = tree.rect(pn);
+            // Faqat o'rtacha o'lchamdagi elementlar (butun ekranli parda yoki uzun ro'yxat qatori emas).
+            if (press_scale - 1.0).abs() > 0.0005 && r0.h <= size.h * 0.6 && r0.w * r0.h <= size.w * size.h * 0.5 {
+                let mut stack = vec![pn];
+                while let Some(n) = stack.pop() {
+                    press_set.insert(n);
+                    stack.extend(tree.children(n).iter().copied());
+                }
+            }
+        }
+        let mut press_xf: Option<(f32, f32)> = None;
+
         for it in items {
             if let ItemKind::ScrollEnd = it.kind {
                 cmds.push(DrawCmd::PopClip);
@@ -410,7 +440,15 @@ impl Ui {
                 shift = shifts.pop().unwrap_or((0.0, 0.0));
                 continue;
             }
-            let r = tree.rect(it.node).translate(shift.0, shift.1);
+            let mut r = tree.rect(it.node).translate(shift.0, shift.1);
+            if !press_set.is_empty() {
+                if Some(it.node) == press_node {
+                    press_xf = Some((r.x + r.w / 2.0, r.y + r.h / 2.0));
+                }
+                if let (Some((cx, cy)), true) = (press_xf, press_set.contains(&it.node)) {
+                    r = Rect::new(cx + (r.x - cx) * press_scale, cy + (r.y - cy) * press_scale, r.w * press_scale, r.h * press_scale);
+                }
+            }
             let clip = clips.last().copied();
             let eff = clip.map_or(r, |c| r.intersect(&c));
             let visible = !eff.is_empty();

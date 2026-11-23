@@ -39,6 +39,19 @@ const PLAY: &str = "M8,5v14l11,-7z";
 const HEART: &str = "M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z";
 const STAR: &str = "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z";
 /// Bosh sahifa sarlavhasi balandligi (dp): PageHeader 66 + oraliq 14 + "Ommabop anime" 34 + oraliq 14.
+thread_local! {
+    /// Testlarda sahifa o'tishi odatda o'chiq (snapshotlar tayyor sahifani ko'rsatsin); maxsus testda yoqiladi.
+    static TEST_TRANS: Cell<bool> = const { Cell::new(false) };
+}
+
+fn trans_enabled() -> bool {
+    !cfg!(test) || TEST_TRANS.with(|c| c.get())
+}
+
+/// Sahifa o'tishi: davomiyligi va prujina chastotasi.
+const TRANS_SECS: f32 = 0.55;
+const TRANS_W: f32 = 15.0;
+
 const HOME_HEADER_H: f32 = 128.0;
 
 /// Tarjimonlar ro'yxati (bir marta serverdan; kartadagi logotip va katalog "Tarjimonlar" yorlig'i uchun).
@@ -103,6 +116,12 @@ pub struct Home {
     unread: State<u32>,
     picked_cb: RefCell<Option<Box<dyn Fn(String)>>>,
     pages: State<Vec<pages::Page>>,
+    /// Sahifa o'tishi: (boshlanish vaqti, oldinga(push)mi, oldingi sahifalar ro'yxati).
+    trans: RefCell<Option<(std::time::Instant, bool, Vec<pages::Page>)>>,
+    /// Pastki menyu tabletkasi: prujina, oxirgi kadr vaqti, boshlang'ich joyga qo'yilganmi.
+    nav_spring: RefCell<uzcoders::core::Spring>,
+    nav_last: Cell<Option<std::time::Instant>>,
+    nav_init: Cell<bool>,
     hidden: State<Vec<String>>,
     consent: State<bool>,
     gate_rev: State<u32>,
@@ -229,6 +248,10 @@ impl Home {
             unread: State::new(0),
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
+            trans: RefCell::new(None),
+            nav_spring: RefCell::new(uzcoders::core::Spring::new(0.0, 420.0, 0.62)),
+            nav_last: Cell::new(None),
+            nav_init: Cell::new(false),
             hidden: State::new(Vec::new()),
             consent: State::new(false),
             gate_rev: State::new(0),
@@ -1168,8 +1191,28 @@ impl Home {
         .padding_each(16.0, top, 16.0, bottom)
     }
 
+    /// Pastki menyu (Kotlin `FloatingNav`): faol "tabletka" tablar orasida prujina bilan sirpanadi (HarmonyOS uslubi).
     fn nav(self: &Rc<Self>, bottom_inset: f32) -> Element {
         let sel = self.tab.get();
+        // Tabletka joyi: prujina (kadr vaqti bo'yicha); birinchi chizishda to'g'ridan-to'g'ri joyiga qo'yiladi.
+        let pos = {
+            let mut sp = self.nav_spring.borrow_mut();
+            let now = std::time::Instant::now();
+            let dt = self.nav_last.get().map(|t| now.duration_since(t).as_secs_f32().min(0.05)).unwrap_or(0.0);
+            self.nav_last.set(Some(now));
+            if !self.nav_init.replace(true) {
+                sp.value = sel as f32;
+                sp.velocity = 0.0;
+            }
+            sp.target = sel as f32;
+            if !sp.at_rest() {
+                sp.step(dt * 1000.0);
+                uzcoders::core::request_frame();
+            }
+            sp.value
+        };
+        let (w, _) = window_dp();
+        let slot_w = (w - 32.0 - 12.0) / NAV.len() as f32;
         let items: Vec<Element> = NAV
             .iter()
             .enumerate()
@@ -1180,22 +1223,19 @@ impl Home {
                 if on {
                     kids.push(tx(*label, 9.0, Color::WHITE).bold().padding_each(0.0, 3.0, 0.0, 0.0));
                 }
-                let mut e = column(kids).center().weight(1.0).height(52.0).margin_each(4.0, 0.0, 4.0, 0.0).radius(20.0).on_click(move || {
+                column(kids).center().weight(1.0).height(52.0).margin_each(4.0, 0.0, 4.0, 0.0).radius(20.0).on_click(move || {
                     if i == 3 && me.tab.get() != 3 {
                         me.dl_index.set(None);
                     }
                     me.tab.set(i)
-                });
-                if on {
-                    e = e.gradient(ACCENT, ACCENT2);
-                }
-                e
+                })
             })
             .collect();
+        let pill = column(vec![]).width(slot_w - 8.0).height(52.0).radius(20.0).gradient(ACCENT, ACCENT2);
+        let pill_layer = column(vec![row(vec![gap_box(slot_w * pos + 4.0, 0.0), pill]).align(Align::Start)]).align(Align::Start);
         column(vec![
             spacer(),
-            row(items)
-                .gap(0.0)
+            stack(vec![pill_layer, row(items).gap(0.0)])
                 .bg(SURFACE)
                 .border(1.0, BORDER)
                 .radius(28.0)
@@ -1219,7 +1259,33 @@ impl Home {
         if self.pages.get().is_empty() && self.tab.get() != 3 {
             self.dl_unwatch_all();
         }
-        if let Some(page) = self.pages.get().last().cloned() {
+        let cur = self.pages.get();
+        // Sahifa o'tishi (HarmonyOS uslubi): yangi sahifa o'ngdan prujina bilan kiradi, orqadagisi biroz suriladi va xiralashadi.
+        let tr = self.trans.borrow().clone();
+        if let Some((start, push, prev)) = tr {
+            let t = start.elapsed().as_secs_f32();
+            let involves_media = cur.iter().chain(prev.iter()).any(|p| matches!(p, pages::Page::Media(_)));
+            if t < TRANS_SECS && !involves_media && trans_enabled() {
+                uzcoders::core::request_frame();
+                let (w, h) = window_dp();
+                let p = 1.0 - (1.0 + TRANS_W * t) * (-TRANS_W * t).exp(); // kritik so'nuvchi prujina: oshmasdan silliq to'xtaydi
+                let (front, back, k) = if push { (self.view_for(&cur), self.view_for(&prev), p) } else { (self.view_for(&prev), self.view_for(&cur), 1.0 - p) };
+                // `k`: 0 — orqadagi sahifa to'liq ochiq, 1 — oldingi sahifa to'liq ochiq.
+                let fx = if push { (1.0 - p) * w } else { p * w };
+                let dim = Color::rgba(0, 0, 0, (115.0 * k) as u8);
+                return stack(vec![
+                    back,
+                    column(vec![]).bg(dim),
+                    row(vec![gap_box(fx, 0.0), front.width(w)]).height(h),
+                ]);
+            }
+            *self.trans.borrow_mut() = None;
+        }
+        self.view_for(&cur)
+    }
+
+    fn view_for(self: &Rc<Self>, pages: &[pages::Page]) -> Element {
+        if let Some(page) = pages.last().cloned() {
             let v = self.page_view(page);
             return match self.dl_dialogs() {
                 Some(d) => stack(vec![v, d]),
@@ -1419,6 +1485,10 @@ mod tests {
             unread: State::new(0),
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
+            trans: RefCell::new(None),
+            nav_spring: RefCell::new(uzcoders::core::Spring::new(0.0, 420.0, 0.62)),
+            nav_last: Cell::new(None),
+            nav_init: Cell::new(false),
             hidden: State::new(Vec::new()),
             consent: State::new(false),
             gate_rev: State::new(0),
@@ -1497,6 +1567,16 @@ mod tests {
                 c.clear(Color::BLACK);
                 c.execute(&cmds);
                 std::fs::write(format!("{dir}/17_translator.png"), c.to_png()).unwrap();
+                // Sahifa o'tishining o'rtasidagi kadr (yangi sahifa o'ngdan kirayotgan payt).
+                TEST_TRANS.with(|c| c.set(true));
+                *home.trans.borrow_mut() = Some((std::time::Instant::now() - std::time::Duration::from_millis(110), true, vec![]));
+                let cmds = ui.frame(size);
+                let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
+                c.clear(Color::BLACK);
+                c.execute(&cmds);
+                std::fs::write(format!("{dir}/18_otish.png"), c.to_png()).unwrap();
+                TEST_TRANS.with(|c| c.set(false));
+                *home.trans.borrow_mut() = None;
                 home.pop();
             }
             home.tab.set(2);
