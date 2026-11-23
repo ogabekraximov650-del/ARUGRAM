@@ -185,9 +185,10 @@ public class AruActivity extends UzActivity {
         ExoPlayer e = new ExoPlayer.Builder(getApplicationContext(),
                 new DefaultRenderersFactory(getApplicationContext()).setEnableDecoderFallback(true))
                 .setLoadControl(new DefaultLoadControl.Builder()
-                        .setBufferDurationsMs(15_000, 30_000, 1_000, 2_000)
-                        .setBackBuffer(10_000, true)
-                        .setTargetBufferBytes(24 * 1024 * 1024)
+                        // UZ: bufer imkon qadar katta: oldinga 40..180 s (xotira chegarasi 64 MB), orqaga 30 s — surilganda video kutdirmaydi.
+                        .setBufferDurationsMs(40_000, 180_000, 1_000, 2_000)
+                        .setBackBuffer(30_000, true)
+                        .setTargetBufferBytes(64 * 1024 * 1024)
                         .setPrioritizeTimeOverSizeThresholds(false)
                         .build())
                 .build();

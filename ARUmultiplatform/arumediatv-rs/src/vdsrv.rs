@@ -231,9 +231,7 @@ fn handle(mut s: TcpStream) -> std::io::Result<()> {
         if !warm(name, w) {
             return Ok(());
         }
-        if (w + 1) * CHUNK < total {
-            prefetch(name, w + 1);
-        }
+        prefetch_ahead(name, w, total);
         let win_last_block = ((w + 1) * CHUNK / BLOCK).saturating_sub(1);
         let mut last_b = (end / BLOCK).min(win_last_block).min(b + RUN_MAX - 1);
         // Keshda bor bo'laklarga yetganda to'xtaymiz (ular diskdan olinadi).
@@ -288,27 +286,35 @@ fn agent() -> &'static ureq::Agent {
     A.get_or_init(|| ureq::AgentBuilder::new().max_idle_connections_per_host(8).timeout_connect(Duration::from_secs(20)).timeout_read(Duration::from_secs(60)).build())
 }
 
-/// Keyingi oynani fonda isitadi (bir oyna uchun bitta oqim).
-fn prefetch(name: &str, w: u64) {
-    static BUSY: Mutex<Option<HashSet<(String, u64)>>> = Mutex::new(None);
-    let key = (name.to_string(), w);
+/// Joriy oynadan keyingi `AHEAD` oynani fonda ketma-ket isitadi (surilganda yoki davom etganda kutdirmasin). Bir fayl uchun bitta oqim.
+const AHEAD: u64 = 3;
+
+fn prefetch_ahead(name: &str, cur_w: u64, total: u64) {
+    static BUSY: Mutex<Option<HashSet<String>>> = Mutex::new(None);
     {
         let Ok(mut g) = BUSY.lock() else { return };
-        if !g.get_or_insert_with(HashSet::new).insert(key.clone()) {
+        if !g.get_or_insert_with(HashSet::new).insert(name.to_string()) {
             return;
         }
     }
     let n = name.to_string();
     std::thread::spawn(move || {
-        let _ = warm(&n, w);
+        for k in 1..=AHEAD {
+            let w = cur_w + k;
+            if w * CHUNK >= total {
+                break;
+            }
+            if !warm(&n, w) {
+                break;
+            }
+        }
         if let Ok(mut g) = BUSY.lock() {
             if let Some(set) = g.as_mut() {
-                set.remove(&key);
+                set.remove(&n);
             }
         }
     });
 }
-
 
 // ── Yuklab olish (Kotlin `VdDownloads`): fayl 18 MiB oynalar bo'yicha olinadi, 1 MiB bo'laklar diskka shifrlab yoziladi ──
 
@@ -486,9 +492,7 @@ fn dl_run(name: &str, rt: &DlRt, carry: &mut DlCarry) -> Result<(), String> {
         if !warm(name, w) {
             return Err("oyna isitilmadi".into());
         }
-        if (w + 1) * CHUNK < total {
-            prefetch(name, w + 1);
-        }
+        prefetch_ahead(name, w, total);
         // Bitta so'rov = shu oynaning (18 MiB) hozirgi joydan oxirigacha.
         let last = (((w + 1) * CHUNK / BLOCK).saturating_sub(1)).min(nb - 1);
         let have = if resume_here { carry.blk.len() as u64 } else { 0 };
