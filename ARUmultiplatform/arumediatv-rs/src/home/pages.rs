@@ -67,6 +67,7 @@ pub enum Page {
     AdminStats(Rc<super::admin::StatsPage>),
     AdminEncode(Rc<super::admin3::EncodePage>),
     AdminContent(super::admin4::Content),
+    AdminDb(super::admin5::DbContent),
 }
 
 impl Home {
@@ -322,6 +323,7 @@ impl Home {
             Page::AdminStats(p) => self.admin_stats_page(&p),
             Page::AdminEncode(p) => self.admin_encode_page(&p),
             Page::AdminContent(c) => self.admin_content_page(&c),
+            Page::AdminDb(c) => self.admin_db_page(&c),
         }
     }
 

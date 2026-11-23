@@ -4,6 +4,7 @@ mod admin;
 mod admin2;
 mod admin3;
 mod admin4;
+mod admin5;
 mod billing;
 mod comments;
 mod dl;
