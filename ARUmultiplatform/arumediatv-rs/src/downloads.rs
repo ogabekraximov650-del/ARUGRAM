@@ -124,7 +124,7 @@ pub fn collect(seasons: &[Season]) -> Vec<DlItem> {
         let Some(rest) = fname.strip_prefix("eps_").and_then(|r| r.strip_suffix(".json")) else { continue };
         let mut it = rest.split('_');
         let (Some(a), Some(s)) = (it.next().and_then(|v| v.parse::<i64>().ok()), it.next().and_then(|v| v.parse::<i64>().ok())) else { continue };
-        let Some(v) = std::fs::read_to_string(e.path()).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
+        let Some(v) = crate::secure::read_text(&e.path().to_string_lossy(), "eps").and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { continue };
         let season = by.get(&(a, s));
         for ep in parse_episodes(&v) {
             for q in &ep.qualities {

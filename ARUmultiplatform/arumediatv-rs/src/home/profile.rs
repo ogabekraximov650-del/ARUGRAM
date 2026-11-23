@@ -29,8 +29,9 @@ impl Home {
     pub(super) fn load_profile(self: &Rc<Self>) {
         let (me, session) = (self.clone(), self.session.clone());
         spawn_bg(move || fetch_profile(&session), move |r| {
-            let dir = format!("{}/posters", uzcoders::android::files_dir());
-            let size: u64 = std::fs::read_dir(dir).map(|d| d.flatten().filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum()).unwrap_or(0);
+            // "Xotira" kartasi: posterlar + video keshi (yuklab olingan videolar ham shu yerda).
+            let root = uzcoders::android::files_dir();
+            let size: u64 = ["posters", "vdcache"].iter().map(|n| std::fs::read_dir(format!("{root}/{n}")).map(|d| d.flatten().filter_map(|e| e.metadata().ok()).map(|m| m.len()).sum::<u64>()).unwrap_or(0)).sum();
             me.cache_bytes.set(size as i64);
             if let Ok(p) = r {
                 if !p.photo_url.is_empty() && !me.posters.borrow().contains_key(&p.photo_url) {

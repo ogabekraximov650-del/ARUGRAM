@@ -25,6 +25,11 @@ fn dir_bytes(p: &std::path::Path) -> u64 {
 }
 
 fn wipe(p: &str) {
+    // Video keshi: davom etayotgan yuklashlar to'xtatiladi va ro'yxati tozalanadi.
+    if p.ends_with("/vdcache") {
+        crate::vdsrv::dl_wipe();
+        return;
+    }
     let path = std::path::Path::new(p);
     if let Ok(rd) = std::fs::read_dir(path) {
         for e in rd.flatten() {
@@ -38,7 +43,7 @@ fn measure() -> Vec<(String, u64, Vec<String>)> {
     let files = uzcoders::android::files_dir();
     let cache = std::path::Path::new(&files).parent().map(|p| p.join("cache").to_string_lossy().into_owned()).unwrap_or_default();
     let defs: Vec<(&str, Vec<String>)> = vec![
-        ("Videolar", vec![format!("{files}/video_byte_cache")]),
+        ("Videolar", vec![format!("{files}/vdcache")]),
         ("Posterlar", vec![format!("{files}/posters")]),
         ("Emoji, GIF va stikerlar", vec![format!("{files}/aru_packs")]),
         ("Vaqtinchalik fayllar", vec![cache]),
