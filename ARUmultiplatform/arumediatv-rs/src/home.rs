@@ -87,6 +87,46 @@ pub(crate) fn appear(key: &'static str, el: Element, pivot: (f32, f32)) -> Eleme
     el.pivot(pivot.0, pivot.1).scale(0.9 + 0.1 * p).alpha((p * 1.6).min(1.0))
 }
 
+thread_local! {
+    /// `enter` uchun: element id -> ko'ringan vaqti va kechikish; oxirgi yangi element vaqti va ketma-ketlik raqami.
+    static ENTER: std::cell::RefCell<(HashMap<i64, (std::time::Instant, f32)>, std::time::Instant, u32)> =
+        std::cell::RefCell::new((HashMap::new(), std::time::Instant::now(), 0));
+}
+
+/// Ro'yxat elementi birinchi ko'ringanda: har keyingisi 40 ms kechikib (8 tagacha), 28 dp pastdan prujina bilan chiqadi.
+pub(crate) fn enter(id: i64, el: Element) -> Element {
+    if !trans_enabled() {
+        return el;
+    }
+    let now = std::time::Instant::now();
+    let (t, delay) = ENTER.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.0.len() > 4000 {
+            m.0.clear();
+        }
+        if !m.0.contains_key(&id) {
+            if now.duration_since(m.1).as_millis() > 200 {
+                m.2 = 0;
+            }
+            let d = m.2.min(8) as f32 * 0.04;
+            m.2 += 1;
+            m.1 = now;
+            m.0.insert(id, (now, d));
+        }
+        let (st, d) = m.0[&id];
+        (now.duration_since(st).as_secs_f32(), d)
+    });
+    let t = t - delay;
+    if t >= 0.45 {
+        return el;
+    }
+    uzcoders::core::request_frame();
+    let t = t.max(0.0);
+    let k = 14.0;
+    let p = 1.0 - (1.0 + k * t) * (-k * t).exp();
+    el.translate(0.0, 28.0 * (1.0 - p)).alpha((p * 1.5).min(1.0))
+}
+
 /// Sahifa o'tishi: davomiyligi va prujina chastotasi.
 const TRANS_SECS: f32 = 0.55;
 const TRANS_W: f32 = 15.0;
@@ -674,7 +714,13 @@ impl Home {
         });
     }
 
+    /// Karta ro'yxatda birinchi ko'ringanda birin-ketin (stagger) pastdan suzib chiqadi va xiralikdan chiqadi.
     fn card(self: &Rc<Self>, s: &Season, h: f32) -> Element {
+        let e = self.card_inner(s, h);
+        enter(s.season_id, e)
+    }
+
+    fn card_inner(self: &Rc<Self>, s: &Season, h: f32) -> Element {
         let base = match self.posters.borrow().get(&s.photo_url) {
             Some(img) => {
                 let r = CARD_IMGS.with(|c| {
@@ -1362,7 +1408,9 @@ impl Home {
         let page = page.width(w).height(h).pivot(0.0, 0.0).scale(s).alpha((0.3 + 2.4 * q).min(1.0));
         let inner = column(vec![page]).scroll(&self.rev_sy).width(w).height(r.3.max(1.0));
         let outer = row(vec![inner]).scroll(&self.rev_sx).width(r.2.max(1.0)).height(r.3.max(1.0));
-        column(vec![gap_box(0.0, r.1.max(0.0)), row(vec![gap_box(r.0.max(0.0), 0.0), outer]).align(Align::Start)]).align(Align::Start)
+        // Oyna burchaklari yumaloq: karta radiusidan (20 dp) boshlab ekran to'lgach 0 ga tushadi.
+        let win = column(vec![outer]).width(r.2.max(1.0)).height(r.3.max(1.0)).round_clip(20.0 * (1.0 - q).clamp(0.0, 1.0));
+        column(vec![gap_box(0.0, r.1.max(0.0)), row(vec![gap_box(r.0.max(0.0), 0.0), win]).align(Align::Start)]).align(Align::Start)
     }
 
     fn view_for(self: &Rc<Self>, pages: &[pages::Page]) -> Element {

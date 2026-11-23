@@ -7814,4 +7814,7 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 
 - `uzcoders-ui`: `Element::scale/scale_xy/pivot/translate/alpha` (`Transform`). Joylashuv o'zgarmaydi; chizish buyruqlari, bosish sohalari, matn o'lchami, burchak radiusi va rang shaffofligi guruh (element + avlodlari) bo'yicha qayta hisoblanadi. Bosish effekti (96%) ham shu qatlam orqali, matn ham haqiqiy masshtablanadi.
 - Ilova (`home.rs`): karta bosilganda sahifa kartadan haqiqiy masshtab bilan o'sib ochiladi (`reveal`), orqadagi sahifa kichrayadi/xiralashadi; oddiy o'tishda orqadagi sahifa chapga suriladi; `appear()` — dialog va panellar 0.9→1.0 prujina bilan paydo bo'ladi.
-- Chegara: yumaloq (radiusli) qirqish yo'q — oyna to'rtburchak qirqiladi. GPU yo'lini shu muhitda sinab bo'lmaydi (CPU rasm bilan tekshirildi).
+- `Element::round_clip(r)`: yumaloq qirqish backend'ga tegmasdan — burchak bandlari ingichka gorizontal bo'laklar bilan yaqinlashtiriladi (`round_clip_cmds`). Kartadan ochilish oynasi shu bilan yumaloq.
+- Overscroll (rezina): `ScrollState::over()`; chekkada tortilsa qarshilik bilan siljiydi, qo'yib yuborilganda prujina bilan qaytadi, inersiya chekkaga urilsa biroz o'tib qaytadi.
+- Ilova: karta ro'yxatda birinchi ko'ringanda birin-ketin chiqadi (`enter`), mavsum sahifasi yorliq tabletkasi prujina bilan sirpanadi.
+- Chegara: yumaloq qirqish bo'laklar bilan yaqinlashtirilgan (burchak qirrasi biroz pog'onali bo'lishi mumkin); GPU yo'li shu muhitda sinalmagan (CPU rasm bilan tekshirildi).

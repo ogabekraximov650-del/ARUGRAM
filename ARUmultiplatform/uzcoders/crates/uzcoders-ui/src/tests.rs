@@ -643,3 +643,50 @@ fn transformatsiya_masshtab_va_alpha() {
     assert!(((first.0.x + first.0.w / 2.0) - 50.0).abs() < 0.01);
     assert!(first.1.a < 255);
 }
+
+// UZ: Yumaloq qirqish: burchak piksellari bo'sh qoladi, markaz esa to'ladi.
+// EN: Rounded clip: corner pixels stay empty while the centre is filled.
+// RU: Скруглённая обрезка: угловые пиксели остаются пустыми, центр залит.
+#[test]
+fn yumaloq_qirqish_burchakni_kesadi() {
+    let mut ui = Ui::new(font(), || {
+        column(vec![column(vec![column(vec![]).bg(Color::rgb(255, 0, 0)).width(100.0).height(100.0)])
+            .width(100.0)
+            .height(100.0)
+            .round_clip(30.0)])
+        .align(Alignment::Start)
+    });
+    let cmds = ui.frame(SZ);
+    let mut c = ui.canvas(200, 300);
+    c.clear(Color::rgb(0, 0, 0));
+    c.execute(&cmds);
+    assert_eq!(c.pixel(1, 1).r, 0, "burchak kesilishi kerak");
+    assert_eq!(c.pixel(50, 50).r, 255);
+    assert_eq!(c.pixel(50, 1).r, 255, "yuqori o'rta to'la");
+}
+
+// UZ: Overscroll: tepada pastga tortilsa kontent siljiydi (rezina), qo'yib yuborilgach prujina bilan 0 ga qaytadi.
+// EN: Overscroll: dragging down at the top moves the content (rubber band) and it springs back to 0 on release.
+// RU: Оверскролл: потянув вниз на верху, содержимое смещается (резинка) и после отпускания пружиной возвращается в 0.
+#[test]
+fn overscroll_tortiladi_va_qaytadi() {
+    let sc = ScrollState::new();
+    let clicked = Rc::new(Cell::new(-1));
+    let mut ui = list_ui(&sc, &clicked);
+    ui.frame(SZ);
+    ui.set_time(100);
+    ui.pointer(PointerEvent::new(PointerKind::Down, 100.0, 100.0));
+    ui.set_time(116);
+    ui.pointer(PointerEvent::new(PointerKind::Move, 100.0, 140.0));
+    ui.set_time(132);
+    ui.pointer(PointerEvent::new(PointerKind::Move, 100.0, 180.0));
+    assert!(sc.over() > 5.0, "{}", sc.over());
+    assert_eq!(sc.offset(), 0.0);
+    ui.set_time(1000);
+    ui.pointer(PointerEvent::new(PointerKind::Up, 100.0, 180.0));
+    for k in 0..120 {
+        ui.set_time(1016 + k * 16);
+        ui.frame(SZ);
+    }
+    assert_eq!(sc.over(), 0.0);
+}

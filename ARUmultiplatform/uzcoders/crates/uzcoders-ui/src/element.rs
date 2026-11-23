@@ -142,6 +142,10 @@ pub struct Element {
     /// EN: Transform (scale / translate / opacity): applies to the element and all its descendants.
     /// RU: Трансформация (масштаб / сдвиг / прозрачность): применяется к элементу и всем потомкам.
     pub(crate) xf: Option<Transform>,
+    /// UZ: Yumaloq qirqish radiusi (dp): avlodlar shu burchak radiusli to'rtburchakdan tashqariga chiqmaydi.
+    /// EN: Rounded clip radius (dp): descendants do not draw outside the rounded rectangle.
+    /// RU: Радиус скруглённой обрезки (dp): потомки не рисуются за пределами скруглённого прямоугольника.
+    pub(crate) rclip: Option<f32>,
     pub(crate) children: Vec<Element>,
 }
 
@@ -197,6 +201,7 @@ impl Element {
             on_drag: None,
             scroll: None,
             xf: None,
+            rclip: None,
             children,
         }
     }
@@ -281,6 +286,16 @@ impl Element {
     /// RU: Стекло-«лупа» (iOS Liquid Glass): почти прозрачное; изображение под панелью увеличено в `zoom` раз от её центра, у края — преломление.
     pub fn lens(mut self, tint: Color, zoom: f32) -> Self {
         self.backdrop = Some((tint, 0.0, zoom));
+        self
+    }
+    /// UZ: Avlodlarni yumaloq burchakli to'rtburchak bilan qirqadi (radius dp). Backend'ga bog'liq emas: burchaklar ingichka
+    /// gorizontal bo'laklar bilan yaqinlashtiriladi (faqat burchak qismlari qayta chiziladi).
+    /// EN: Clips descendants to a rounded rectangle (radius in dp). Backend-independent: the corners are approximated with thin
+    /// horizontal strips (only the corner bands are redrawn).
+    /// RU: Обрезает потомков скруглённым прямоугольником (радиус в dp). Не зависит от бэкенда: углы приближаются тонкими
+    /// горизонтальными полосами (перерисовываются только угловые полосы).
+    pub fn round_clip(mut self, radius: f32) -> Self {
+        self.rclip = Some(radius);
         self
     }
     /// UZ: Elementni (va avlodlarini) tekis masshtablaydi; markaz atrofida. Joylashuv o'zgarmaydi.

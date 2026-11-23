@@ -63,6 +63,7 @@ struct Item {
     hscroll: bool,
     /// UZ: Elementning transformatsiyasi. EN: The element's transform. RU: Трансформация элемента.
     xf: Option<Transform>,
+    rclip: Option<f32>,
 }
 
 /// UZ: Transformatsiya guruhi: ildiz tuguni, avlodlar to'plami va (ildiz chizilganda aniqlanadigan) markaz nuqtasi.
@@ -459,7 +460,16 @@ impl Ui {
                 groups.push(XGroup { node: it.node, set, xf, pivot: None });
             }
         }
+        // Yumaloq qirqish: ochiq guruhlar (avlod tugunlari, radius, qutisi, buyruqlar boshlanishi).
+        let mut rclips: Vec<(HashSet<usize>, f32, Rect, usize)> = Vec::new();
         for it in items {
+            while let Some((set, ..)) = rclips.last() {
+                if set.contains(&it.node) {
+                    break;
+                }
+                let (_, rad, rect, start) = rclips.pop().unwrap();
+                round_clip_cmds(&mut cmds, start, rect, rad);
+            }
             if let ItemKind::ScrollEnd = it.kind {
                 cmds.push(DrawCmd::PopClip);
                 clips.pop();
@@ -467,6 +477,7 @@ impl Ui {
                 continue;
             }
             let cmd_start = cmds.len();
+            let new_rclip = it.rclip.filter(|r| *r > 1.0);
             let r = tree.rect(it.node).translate(shift.0, shift.1);
             for g in groups.iter_mut() {
                 if g.node == it.node && g.pivot.is_none() {
@@ -480,6 +491,20 @@ impl Ui {
                 .filter(|(_, g)| g.pivot.is_some() && g.set.contains(&it.node))
                 .map(|(i, _)| i)
                 .collect();
+            if let Some(rad) = new_rclip {
+                let mut rr = r;
+                for &gi in owning.iter().rev() {
+                    rr = xf_rect(&groups[gi], rr);
+                }
+                let mut set = HashSet::new();
+                let mut stack = vec![it.node];
+                while let Some(n) = stack.pop() {
+                    set.insert(n);
+                    stack.extend(tree.children(n).iter().copied());
+                }
+                let k = owning.iter().fold(1.0, |a, &gi| a * (groups[gi].xf.scale_x + groups[gi].xf.scale_y) * 0.5);
+                rclips.push((set, rad * k, rr, cmd_start));
+            }
             let clip = clips.last().copied();
             let eff = clip.map_or(r, |c| r.intersect(&c));
             let visible = !eff.is_empty();
@@ -814,10 +839,12 @@ impl Ui {
                     horizontal: it.hscroll,
                 });
                 let off = sc.offset();
+                let sc_over = sc.over();
                 self.scrolls.push(sc);
                 cmds.push(DrawCmd::PushClip(r));
                 clips.push(eff);
                 shifts.push(shift);
+                let off = off - sc_over;
                 if it.hscroll {
                     shift.0 -= off;
                 } else {
@@ -828,6 +855,9 @@ impl Ui {
                 let g = &groups[gi];
                 xf_cmds(&mut cmds[cmd_start..], g);
             }
+        }
+        while let Some((_, rad, rect, start)) = rclips.pop() {
+            round_clip_cmds(&mut cmds, start, rect, rad);
         }
         if let Some(id) = self.focus {
             if !self.fields.iter().any(|f| f.cfg.state.id() == id) {
@@ -842,6 +872,15 @@ impl Ui {
             return;
         }
         for s in &self.scrolls {
+            // UZ: Chekkadan o'tgan qism prujinadek qaytadi.
+            // EN: The overscrolled part springs back.
+            // RU: Вылет за край возвращается пружиной.
+            let o = s.over();
+            if o != 0.0 && !self.touch.as_ref().is_some_and(|t| t.dragging) {
+                let n = o * (-dt * 12.0).exp();
+                s.set_over(if n.abs() < 0.5 { 0.0 } else { n });
+                uzcoders_core::request_frame();
+            }
             let v = s.velocity();
             if v == 0.0 {
                 continue;
@@ -851,6 +890,12 @@ impl Ui {
             let after = s.offset();
             let hit_edge = (after <= 0.0 && v < 0.0) || (after >= s.max_offset() && v > 0.0);
             let nv = v * (-dt * 1.1).exp();
+            if hit_edge && v.abs() > 400.0 && s.max_offset() > 0.5 {
+                // Inersiya chekkaga urilsa — biroz o'tib, qaytadi.
+                let cap = s.viewport().max(1.0) * 0.12;
+                s.set_over((-v * 0.025).clamp(-cap, cap));
+                uzcoders_core::request_frame();
+            }
             s.set_velocity(if hit_edge || nv.abs() < 20.0 { 0.0 } else { nv });
         }
     }
@@ -944,6 +989,7 @@ impl Ui {
             drag: el.on_drag.take(),
             hscroll: el.scroll.is_some() && el.style.direction == Axis::Row,
             scroll: el.scroll,
+            rclip: el.rclip.map(|r| r * self.scale),
             xf: el.xf.map(|mut x| {
                 x.dx *= self.scale;
                 x.dy *= self.scale;
@@ -1052,6 +1098,7 @@ impl Ui {
                 hscroll: false,
                 scroll: None,
                 xf: None,
+                rclip: None,
             });
         }
         node
@@ -1243,7 +1290,22 @@ impl Ui {
                                 let cap = 120.0 * self.scale;
                                 st.set_pull(if dy > 0.0 { (st.pull() + dy * 0.5).min(cap) } else { st.pull() + dy });
                             } else {
-                                st.raw_set(st.offset() - dy);
+                                // UZ: Chekkadan o'tib tortish (rezina): qarshilik bilan; teskari tomonga tortilsa avval qaytadi.
+                                // EN: Overscroll (rubber band): with resistance; dragging back shrinks it first.
+                                // RU: Растяжение за край (резинка): с сопротивлением; обратное движение сначала возвращает.
+                                let o = st.over();
+                                let edge = if hz { 0.0 } else { st.max_offset() };
+                                let can = st.max_offset() > 0.5;
+                                if (o > 0.0 && dy < 0.0) || (o < 0.0 && dy > 0.0) {
+                                    let n = o + dy;
+                                    st.set_over(if (o > 0.0) == (n > 0.0) { n } else { 0.0 });
+                                } else if can && ((st.offset() <= 0.5 && dy > 0.0) || (st.offset() >= edge.max(st.max_offset()) - 0.5 && dy < 0.0)) {
+                                    let cap = st.viewport().max(1.0) * 0.22;
+                                    let damp = (1.0 - o.abs() / cap).max(0.05) * 0.55;
+                                    st.set_over((o + dy * damp).clamp(-cap, cap));
+                                } else {
+                                    st.raw_set(st.offset() - dy);
+                                }
                             }
                             let tm = if e.time_ms > 0 { e.time_ms } else { self.now };
                             t.samples.push((tm, cur));
@@ -1759,5 +1821,34 @@ fn xf_cmds(cmds: &mut [DrawCmd], g: &XGroup) {
             DrawCmd::PushClip(r) => *r = xf_rect(g, *r),
             DrawCmd::PopClip => {}
         }
+    }
+}
+
+/// UZ: `cmds[start..]` ni yumaloq burchakli `rect` ichiga qirqadi: o'rta qism bir marta, burchak bandlari esa ingichka
+/// gorizontal bo'laklar bilan (har biri o'z kengligida qirqilgan) qayta chiziladi.
+/// EN: Clips `cmds[start..]` to the rounded `rect`: the middle part once, the corner bands redrawn as thin horizontal
+/// strips (each clipped to its own width).
+/// RU: Обрезает `cmds[start..]` скруглённым `rect`: средняя часть один раз, угловые полосы перерисовываются тонкими
+/// горизонтальными полосками (каждая обрезана по своей ширине).
+fn round_clip_cmds(cmds: &mut Vec<DrawCmd>, start: usize, rect: Rect, radius: f32) {
+    let r = radius.min(rect.w / 2.0).min(rect.h / 2.0);
+    if r < 1.0 || start >= cmds.len() || rect.is_empty() {
+        return;
+    }
+    let sub: Vec<DrawCmd> = cmds.drain(start..).collect();
+    let n = (r.ceil() as usize).clamp(1, 12);
+    let hh = r / n as f32;
+    let mut strips: Vec<Rect> = Vec::with_capacity(2 * n + 1);
+    for i in 0..n {
+        let dy = r - (i as f32 + 0.5) * hh;
+        let inset = r - (r * r - dy * dy).max(0.0).sqrt();
+        strips.push(Rect::new(rect.x + inset, rect.y + i as f32 * hh, rect.w - 2.0 * inset, hh));
+        strips.push(Rect::new(rect.x + inset, rect.y + rect.h - (i as f32 + 1.0) * hh, rect.w - 2.0 * inset, hh));
+    }
+    strips.push(Rect::new(rect.x, rect.y + r, rect.w, rect.h - 2.0 * r));
+    for s in strips {
+        cmds.push(DrawCmd::PushClip(s));
+        cmds.extend(sub.iter().cloned());
+        cmds.push(DrawCmd::PopClip);
     }
 }

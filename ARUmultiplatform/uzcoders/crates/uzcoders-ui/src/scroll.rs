@@ -13,6 +13,10 @@ struct Inner {
     viewport: Cell<f32>,
     /// UZ: Tepada pastga tortish (piksel, >= 0) — "tortib yangilash" uchun. EN: pull distance past the top (pixels) for pull-to-refresh.
     pull: Cell<f32>,
+    /// UZ: Chekkadan o'tib tortilish (piksel): > 0 — tepadan pastga, < 0 — pastdan yuqoriga; qo'yib yuborilganda prujina bilan qaytadi.
+    /// EN: Overscroll displacement (pixels): > 0 past the top, < 0 past the bottom; springs back on release.
+    /// RU: Смещение за край (пиксели): > 0 — за верхом, < 0 — за низом; после отпускания пружинно возвращается.
+    over: Cell<f32>,
     on_refresh: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
@@ -39,6 +43,7 @@ impl ScrollState {
                 max: Cell::new(0.0),
                 viewport: Cell::new(0.0),
                 pull: Cell::new(0.0),
+                over: Cell::new(0.0),
                 on_refresh: RefCell::new(None),
             }),
         }
@@ -76,6 +81,15 @@ impl ScrollState {
     /// UZ: Hozirgi tortish masofasi (piksel).
     pub fn pull(&self) -> f32 {
         self.inner.pull.get()
+    }
+
+    /// UZ: Chekkadan o'tib tortilish masofasi (piksel). EN: Overscroll distance (pixels). RU: Расстояние за краем (пиксели).
+    pub fn over(&self) -> f32 {
+        self.inner.over.get()
+    }
+    pub(crate) fn set_over(&self, v: f32) {
+        self.inner.over.set(v);
+        invalidate();
     }
 
     pub(crate) fn has_refresh(&self) -> bool {

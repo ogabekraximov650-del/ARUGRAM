@@ -28,6 +28,10 @@ pub struct SeasonPage {
     /// Karta joyi (dp: x, y, eni, bo'yi): sahifa shu joydan kattalashib ochiladi va yopilganda shu joyga kichrayadi.
     pub(super) anchor: std::cell::Cell<Option<(f32, f32, f32, f32)>>,
     pub(super) tab: State<usize>,
+    /// Yorliq tabletkasi: prujina (qiymat — yorliq tartibi), oxirgi kadr vaqti, birinchi chizish belgisi.
+    pub(super) tab_spring: std::cell::RefCell<uzcoders::core::Spring>,
+    pub(super) tab_last: std::cell::Cell<Option<std::time::Instant>>,
+    pub(super) tab_init: std::cell::Cell<bool>,
     pub(super) info: State<Rc<SeasonInfo>>,
     pub(super) eps: State<Rc<Vec<Episode>>>,
     pub(super) eps_loading: State<bool>,
@@ -142,6 +146,9 @@ impl Home {
             anchor: std::cell::Cell::new(None),
             season: season.clone(),
             tab: State::new(0),
+            tab_spring: std::cell::RefCell::new(uzcoders::core::Spring::new(0.0, 420.0, 0.62)),
+            tab_last: std::cell::Cell::new(None),
+            tab_init: std::cell::Cell::new(false),
             info: State::new(Rc::new(SeasonInfo::default())),
             eps: State::new(Rc::new(Vec::new())),
             eps_loading: State::new(true),
@@ -436,11 +443,29 @@ impl Home {
                 let st = p.tab.clone();
                 let on = i == tab;
                 let label = if on { tx(*t, 13.0, Color::WHITE).bold() } else { tx(*t, 13.0, Color::rgba(255, 255, 255, 138)) };
-                let e = column(vec![label]).center().weight(1.0).height(32.0).radius(11.0).on_click(move || st.set(i));
-                if on { e.bg(ACCENT) } else { e }
+                column(vec![label]).center().weight(1.0).height(32.0).radius(11.0).on_click(move || st.set(i))
             })
             .collect();
-        let tab_bar = Self::card_box(row(tabs).padding_xy(3.0, 3.0)).radius(14.0).margin_each(16.0, 8.0, 16.0, 6.0);
+        // Faol tabletka yorliqlar orasida prujina bilan sirpanadi.
+        let pos = {
+            let mut sp = p.tab_spring.borrow_mut();
+            let now = std::time::Instant::now();
+            let dt = p.tab_last.get().map(|t| now.duration_since(t).as_secs_f32().min(0.05)).unwrap_or(0.0);
+            p.tab_last.set(Some(now));
+            if !p.tab_init.replace(true) {
+                sp.value = tab as f32;
+                sp.velocity = 0.0;
+            }
+            sp.target = tab as f32;
+            if !sp.at_rest() {
+                sp.step(dt * 1000.0);
+                uzcoders::core::request_frame();
+            }
+            sp.value
+        };
+        let slot = (w - 32.0 - 6.0) / 4.0;
+        let pill = row(vec![gap_box((pos * slot).max(0.0), 0.0), column(vec![]).width(slot).height(32.0).radius(11.0).bg(ACCENT)]).align(Align::Start);
+        let tab_bar = Self::card_box(stack(vec![pill, row(tabs)]).padding_xy(3.0, 3.0)).radius(14.0).margin_each(16.0, 8.0, 16.0, 6.0);
 
         let body = match tab {
             0 => self.season_info_tab(p, &info),
