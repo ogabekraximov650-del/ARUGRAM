@@ -305,6 +305,13 @@ pub fn tg_port() -> i64 {
 
 static EP_HIST: std::sync::Mutex<Vec<(i64, i64, i64)>> = std::sync::Mutex::new(Vec::new());
 
+/// Hisob almashtirilganda oldingi hisobning xotiradagi shaxsiy ma'lumoti tozalanadi.
+pub fn reset_account_memory() {
+    if let Ok(mut g) = EP_HIST.lock() {
+        g.clear();
+    }
+}
+
 /// Qismning tarixdagi joyi va davomiyligi (ms); yo'q bo'lsa (0, 0). Birinchi (eng yangi) yozuv olinadi.
 pub fn ep_progress(ep_id: i64) -> (i64, i64) {
     EP_HIST.lock().ok().and_then(|g| g.iter().find(|h| h.0 == ep_id).map(|h| (h.1, h.2))).unwrap_or((0, 0))

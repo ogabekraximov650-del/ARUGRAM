@@ -63,7 +63,7 @@ impl Home {
             return None;
         };
         // Poster 480x720 ga cho'zilgan (kvadrat rasm torayib ketgan) — butun rasm kvadratga qaytariladi, kesilmaydi.
-        let a = Rc::new(squash(&img, 256).round_corners(128.0));
+        let a = Rc::new(crop_square(&img, 256).round_corners(128.0));
         *self.avatar.borrow_mut() = Some(a.clone());
         Some(a)
     }
@@ -539,24 +539,14 @@ thread_local! {
 
 const P_BELL: &str = super::BELL;
 
-/// Rasmni majburan `n`×`n` kvadratga (bilinear) keltiradi: poster 480x720 ga cho'zilgan kvadrat rasm edi, shuning uchun nisbat tiklanadi.
-fn squash(img: &Image, n: u32) -> Image {
-    let (w, h) = (img.w as f32, img.h as f32);
-    let mut out = vec![0u8; (n * n * 4) as usize];
-    for y in 0..n {
-        let sy = ((y as f32 + 0.5) * h / n as f32 - 0.5).clamp(0.0, h - 1.0);
-        let (y0, fy) = (sy.floor() as u32, sy.fract());
-        let y1 = (y0 + 1).min(img.h - 1);
-        for x in 0..n {
-            let sx = ((x as f32 + 0.5) * w / n as f32 - 0.5).clamp(0.0, w - 1.0);
-            let (x0, fx) = (sx.floor() as u32, sx.fract());
-            let x1 = (x0 + 1).min(img.w - 1);
-            for c in 0..4usize {
-                let g = |xx: u32, yy: u32| img.rgba[((yy * img.w + xx) * 4) as usize + c] as f32;
-                let v = g(x0, y0) * (1.0 - fx) * (1.0 - fy) + g(x1, y0) * fx * (1.0 - fy) + g(x0, y1) * (1.0 - fx) * fy + g(x1, y1) * fx * fy;
-                out[((y * n + x) * 4) as usize + c] = v as u8;
-            }
-        }
+/// Rasmni markazidan kvadrat qilib kesadi (Kotlin `ContentScale.Crop`): bo'yi yoki eni uzun rasm cho'zilmaydi, shakli buzilmaydi.
+fn crop_square(img: &Image, n: u32) -> Image {
+    let side = img.w.min(img.h).max(1);
+    let (x0, y0) = ((img.w - side) / 2, (img.h - side) / 2);
+    let mut buf = Vec::with_capacity((side * side * 4) as usize);
+    for y in 0..side {
+        let st = (((y0 + y) * img.w + x0) * 4) as usize;
+        buf.extend_from_slice(&img.rgba[st..st + (side * 4) as usize]);
     }
-    Image { w: n, h: n, rgba: out }
+    Image { w: side, h: side, rgba: buf }.resized(n, n)
 }

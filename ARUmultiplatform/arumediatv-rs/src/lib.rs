@@ -106,12 +106,19 @@ pub fn make_ui(scale: f32) -> Ui {
     }
 
     let (l, h, s) = (login.clone(), home.clone(), screen.clone());
-    let mut ui = Ui::new(font, move || match s.get() {
-        Screen::Login => l.view(),
-        Screen::Home => match h.borrow().as_ref() {
-            Some(home) => home.view(),
-            None => l.view(),
-        },
+    let mut ui = Ui::new(font, move || {
+        let v = match s.get() {
+            Screen::Login => l.view(),
+            Screen::Home => match h.borrow().as_ref() {
+                Some(home) => home.view(),
+                None => l.view(),
+            },
+        };
+        // Hisob almashtirish qoplamasi (Kotlin: butun ekran, matn va aylanuvchi belgi).
+        match accounts::overlay() {
+            Some(t) => stack(vec![v, column(vec![spinner(36.0, 3.0, theme::ACCENT2), text(t).size(15.0).color(Color::WHITE).margin_each(0.0, 14.0, 0.0, 0.0)]).center().bg(Color::rgba(10, 10, 12, 235)).on_click(|| {})]),
+            None => v,
+        }
     });
     ui.add_font(700, Rc::new(Font::parse(BOLD).expect("Roboto Bold")));
     ui.add_font(900, Rc::new(Font::parse(BLACK).expect("Roboto Black")));

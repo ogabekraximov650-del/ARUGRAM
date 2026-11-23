@@ -152,32 +152,65 @@ fn hooks() -> Option<Hooks> {
     HOOKS.with(|x| x.borrow().clone())
 }
 
-/// Boshqa hisobga o'tadi (UI oqimidan): avval navbat serverga yuboriladi, so'ng fayllar almashadi va bosh sahifa qayta quriladi.
-pub fn switch_to(from: i64, to: i64) {
+thread_local! {
+    /// Hisob almashtirish davomida butun ekran qoplamasi matni (Kotlin `AccountSwitcher.switching`).
+    static SWITCHING: uzcoders::prelude::State<String> = uzcoders::prelude::State::new(String::new());
+}
+
+pub fn overlay() -> Option<String> {
+    let s = SWITCHING.with(|s| s.get());
+    if s.is_empty() { None } else { Some(s) }
+}
+
+fn set_overlay(t: &str) {
+    SWITCHING.with(|s| s.set(t.to_string()));
+}
+
+/// Hozir faol hisob (sessiya bo'yicha): profil hali yuklanmagan bo'lsa ham to'g'ri topiladi.
+pub fn current_id() -> i64 {
+    let Some(tok) = crate::api::load_session() else { return 0 };
+    list().into_iter().find(|a| a.session == tok).map(|a| a.id).unwrap_or(0)
+}
+
+/// Boshqa hisobga o'tadi (UI oqimidan), tez va xatosiz: ekran qoplamasi chiqadi, hozirgi hisobning yuborilmagan navbati (`sync_queue.json`)
+/// chetga olinadi (tarmoqni kutmasdan — u shu hisob bilan birga saqlanadi va qaytganda yuboriladi), yangisiniki joyiga qaytadi,
+/// xotiradagi shaxsiy holat tozalanadi va bosh sahifa yangi sessiya bilan qayta quriladi.
+pub fn switch_to(_from: i64, to: i64) {
     let Some(t) = list().into_iter().find(|a| a.id == to) else { return };
-    spawn_bg(crate::sync::flush, move |_| {
+    if current_id() == to {
+        return;
+    }
+    set_overlay("Account almashtirilmoqda");
+    spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(160)), move |_| {
+        let from = current_id();
         if from > 0 {
             move_files(true, from);
         }
         move_files(false, to);
+        crate::data::reset_account_memory();
         crate::api::save_session(&t.session);
         if let Some(h) = hooks() {
             (h.activate)(t.session.clone());
         }
+        spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(450)), |_| set_overlay(""));
     });
 }
 
 /// "Account qo'shish": hozirgisi saqlanadi, mehmon holatida kirish ekrani ochiladi.
-pub fn begin_add(from: i64) {
-    spawn_bg(crate::sync::flush, move |_| {
+pub fn begin_add(_from: i64) {
+    set_overlay("Account qo'shilmoqda");
+    spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(160)), move |_| {
+        let from = current_id();
         if from > 0 {
             move_files(true, from);
             set_add_return(from);
         }
+        crate::data::reset_account_memory();
         crate::api::clear_session();
         if let Some(h) = hooks() {
             (h.add)();
         }
+        spawn_bg(|| std::thread::sleep(std::time::Duration::from_millis(450)), |_| set_overlay(""));
     });
 }
 
@@ -189,6 +222,7 @@ pub fn cancel_add() -> bool {
         return false;
     }
     move_files(false, back);
+    crate::data::reset_account_memory();
     crate::api::save_session(&t.session);
     set_add_return(0);
     if let Some(h) = hooks() {
