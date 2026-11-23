@@ -135,6 +135,9 @@ impl Home {
 
     pub(super) fn open_season(self: &Rc<Self>, season: Season) {
         uzcoders::prelude::breadcrumb("open_season");
+        if self.tab.get() == 1 && self.pages.get().is_empty() {
+            self.remember_search(&season);
+        }
         let p = Rc::new(SeasonPage {
             anchor: std::cell::Cell::new(None),
             season: season.clone(),

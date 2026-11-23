@@ -127,6 +127,8 @@ pub struct Home {
     pages: State<Vec<pages::Page>>,
     /// Sahifa o'tishi: (boshlanish vaqti, oldinga(push)mi, oldingi sahifalar ro'yxati).
     trans: RefCell<Option<Trans>>,
+    /// Qidiruvdan ochilgan animelar (eng yangisi birinchi): (anime_id, season_id); diskda saqlanadi, qidiruv sahifasida tepada turadi.
+    recent: RefCell<Vec<(i64, i64)>>,
     /// Kattalashib ochiladigan oyna (`reveal`): gorizontal/vertikal siljish holatlari.
     rev_sx: ScrollState,
     rev_sy: ScrollState,
@@ -261,6 +263,7 @@ impl Home {
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
             trans: RefCell::new(None),
+            recent: RefCell::new(Vec::new()),
             rev_sx: ScrollState::new(),
             rev_sy: ScrollState::new(),
             nav_spring: RefCell::new(uzcoders::core::Spring::new(0.0, 420.0, 0.62)),
@@ -325,6 +328,10 @@ impl Home {
         }
         crate::vdsrv::start(&h.session);
         crate::vdsrv::dl_resume_all(&h.session);
+        // Qidiruvdan ochilgan animelar (doimiy xotiradan).
+        if let Some(j) = crate::data::jc_get(&h.session, "search_recent") {
+            *h.recent.borrow_mut() = j.as_array().map(|a| a.iter().filter_map(|o| Some((o["a"].as_i64()?, o["s"].as_i64()?))).collect()).unwrap_or_default();
+        }
         // Doimiy keshdan DARHOL ko'rsatiladi (kutish yo'q), so'ng tarmoqdan yangilanadi.
         if let Some((favs, hist)) = crate::data::cached_library(&h.session) {
             {
@@ -1205,6 +1212,16 @@ impl Home {
         .padding_each(16.0, top, 16.0, bottom)
     }
 
+    /// Qidiruv sahifasidan ochilgan animeni eng tepaga qo'yib, diskka saqlaydi.
+    pub(super) fn remember_search(&self, s: &Season) {
+        let mut r = self.recent.borrow_mut();
+        r.retain(|(a, sid)| !(*a == s.anime_id && *sid == s.season_id));
+        r.insert(0, (s.anime_id, s.season_id));
+        r.truncate(40);
+        let j: Vec<serde_json::Value> = r.iter().map(|(a, sid)| serde_json::json!({"a": a, "s": sid})).collect();
+        crate::data::jc_put(&self.session, "search_recent", &serde_json::Value::Array(j).to_string());
+    }
+
     /// Pastki menyu (Kotlin `FloatingNav`): faol "tabletka" tablar orasida prujina bilan sirpanadi (HarmonyOS uslubi).
     fn nav(self: &Rc<Self>, bottom_inset: f32) -> Element {
         let sel = self.tab.get();
@@ -1332,7 +1349,21 @@ impl Home {
         let header_h = HOME_HEADER_H;
         let content = if tab == 1 {
             let qs = self.query.get().trim().to_lowercase();
-            let items = self.memoized(format!("s{qs}"), |all| if qs.is_empty() { Vec::new() } else { all.iter().filter(|s| s.name.to_lowercase().contains(&qs)).cloned().collect() });
+            let rec = self.recent.borrow().clone();
+            let rk = rec.iter().map(|(a, s)| format!("{a}:{s}")).collect::<Vec<_>>().join(",");
+            // Bo'sh qidiruvda — oxirgi ochilgan animelar; yozilganda — natijalar, ochilganlari tepada.
+            let items = self.memoized(format!("s{qs}|{rk}"), |all| {
+                let rank = |s: &Season| rec.iter().position(|(a, sid)| *a == s.anime_id && *sid == s.season_id);
+                if qs.is_empty() {
+                    let mut v: Vec<(usize, Season)> = all.iter().filter_map(|s| rank(s).map(|r| (r, s.clone()))).collect();
+                    v.sort_by_key(|x| x.0);
+                    v.into_iter().map(|x| x.1).collect()
+                } else {
+                    let mut v: Vec<(usize, Season)> = all.iter().filter(|s| s.name.to_lowercase().contains(&qs)).map(|s| (rank(s).unwrap_or(usize::MAX), s.clone())).collect();
+                    v.sort_by_key(|x| x.0);
+                    v.into_iter().map(|x| x.1).collect()
+                }
+            });
             if items.is_empty() {
                 let msg = if qs.is_empty() { "Anime nomini yozib qidiruv qiling" } else { "Qidiruv natijalari topilmadi" };
                 column(vec![tx(msg, 15.0, TEXT_FAINT)]).center()
@@ -1517,6 +1548,7 @@ mod tests {
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
             trans: RefCell::new(None),
+            recent: RefCell::new(Vec::new()),
             rev_sx: ScrollState::new(),
             rev_sy: ScrollState::new(),
             nav_spring: RefCell::new(uzcoders::core::Spring::new(0.0, 420.0, 0.62)),
