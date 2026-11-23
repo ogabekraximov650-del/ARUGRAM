@@ -446,7 +446,16 @@ impl Ui {
                     press_xf = Some((r.x + r.w / 2.0, r.y + r.h / 2.0));
                 }
                 if let (Some((cx, cy)), true) = (press_xf, press_set.contains(&it.node)) {
-                    r = Rect::new(cx + (r.x - cx) * press_scale, cy + (r.y - cy) * press_scale, r.w * press_scale, r.h * press_scale);
+                    // UZ: Matn va maydon o'lchami O'ZGARMAYDI (aks holda qator torayib, so'zlar boshqa qatorga o'tib ketadi): faqat markazi siljiydi.
+                    // EN: Text and field size stays the same (otherwise the line narrows and words wrap): only the centre moves.
+                    // RU: Размер текста и поля не меняется (иначе строка сужается и слова переносятся): смещается только центр.
+                    if matches!(it.kind, ItemKind::Text(..) | ItemKind::Field(_)) {
+                        let (mx, my) = (r.x + r.w / 2.0, r.y + r.h / 2.0);
+                        let (nx, ny) = (cx + (mx - cx) * press_scale, cy + (my - cy) * press_scale);
+                        r = Rect::new(nx - r.w / 2.0, ny - r.h / 2.0, r.w, r.h);
+                    } else {
+                        r = Rect::new(cx + (r.x - cx) * press_scale, cy + (r.y - cy) * press_scale, r.w * press_scale, r.h * press_scale);
+                    }
                 }
             }
             let clip = clips.last().copied();
