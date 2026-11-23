@@ -434,7 +434,7 @@ impl Home {
             std::thread::spawn(|| {
                 let root = uzcoders::android::files_dir();
                 crate::secure::gc_dir(&format!("{root}/posters"), 300 << 20);
-                crate::secure::gc_dir(&format!("{root}/vdcache"), 1 << 30);
+                crate::vdsrv::gc(2 << 30);
                 crate::secure::gc_dir(&format!("{root}/cache/packs"), 200 << 20);
                 crate::secure::gc_dir(&format!("{root}/cache/tgsheets"), 150 << 20);
                 crate::secure::gc_dir(&format!("{root}/cache/tgm"), 150 << 20);

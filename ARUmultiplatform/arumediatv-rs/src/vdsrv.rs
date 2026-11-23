@@ -124,11 +124,26 @@ fn info_net(name: &str) -> Option<(u64, String)> {
 
 /// Oynani Telegram'dan Cloudflare keshiga isitadi (kerak bo'lsa kutadi). `true` — tayyor.
 fn warm(name: &str, w: u64) -> bool {
-    if WARM.lock().ok().and_then(|s| s.as_ref().map(|s| s.contains(&(name.to_string(), w)))).unwrap_or(false) {
+    warm_opts(name, w, false)
+}
+
+/// `force` — Cloudflare kesh o'chib ketgan bo'lishi mumkin: eski belgi tashlanadi va oyna majburan qayta isitiladi.
+fn warm_opts(name: &str, w: u64, force: bool) -> bool {
+    if force {
+        if let Ok(mut s) = WARM.lock() {
+            if let Some(set) = s.as_mut() {
+                set.remove(&(name.to_string(), w));
+            }
+        }
+    }
+    let mut first = force;
+    if !force && WARM.lock().ok().and_then(|s| s.as_ref().map(|s| s.contains(&(name.to_string(), w)))).unwrap_or(false) {
         return true;
     }
     for _ in 0..40 {
-        let Ok(text) = crate::api::request_long("GET", &format!("/api/warm/vd~{name}"), &format!("?w={w}"), 120) else { return false };
+        let q = if first { format!("?w={w}&force=1") } else { format!("?w={w}") };
+        first = false;
+        let Ok(text) = crate::api::request_long("GET", &format!("/api/warm/vd~{name}"), &q, 120) else { return false };
         let st = serde_json::from_str::<Value>(&text).ok().and_then(|j| j["status"].as_str().map(String::from)).unwrap_or_default();
         if st == "cached" || st == "warmed" {
             if let Ok(mut s) = WARM.lock() {
@@ -322,6 +337,9 @@ struct DlRt {
     cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     retrying: std::sync::atomic::AtomicBool,
     speed: std::sync::atomic::AtomicI64,
+    /// Jami olingan bayt va tezlik o'lchash nuqtasi (Kotlin `Job.got/lastGot`).
+    got: std::sync::atomic::AtomicU64,
+    sample: Mutex<(std::time::Instant, u64)>,
 }
 
 static DLS: Mutex<Option<HashMap<String, std::sync::Arc<DlRt>>>> = Mutex::new(None);
@@ -344,7 +362,17 @@ pub fn dl_stats(name: &str) -> (u64, u64, bool, bool, i64) {
     let have: u64 = (0..nb).filter(|&i| block_exists(name, i)).map(|i| block_len(total, i) as u64).sum();
     let rt = dl_get(name);
     let (downloading, retrying, speed) = match &rt {
-        Some(r) => (true, r.retrying.load(std::sync::atomic::Ordering::Relaxed), r.speed.load(std::sync::atomic::Ordering::Relaxed)),
+        Some(r) => {
+            if let Ok(mut sm) = r.sample.lock() {
+                let el = sm.0.elapsed();
+                if el.as_millis() >= 900 {
+                    let g = r.got.load(std::sync::atomic::Ordering::Relaxed);
+                    r.speed.store((g.saturating_sub(sm.1) as f64 / el.as_secs_f64()) as i64, std::sync::atomic::Ordering::Relaxed);
+                    *sm = (std::time::Instant::now(), g);
+                }
+            }
+            (true, r.retrying.load(std::sync::atomic::Ordering::Relaxed), r.speed.load(std::sync::atomic::Ordering::Relaxed))
+        }
         None => (false, false, 0),
     };
     (total, have, downloading && have < total, retrying, speed)
@@ -417,7 +445,7 @@ pub fn dl_start(session: &str, name: &str) {
     if let Ok(mut s) = SESSION.lock() {
         *s = session.to_string();
     }
-    let rt = std::sync::Arc::new(DlRt { cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), retrying: std::sync::atomic::AtomicBool::new(false), speed: std::sync::atomic::AtomicI64::new(0) });
+    let rt = std::sync::Arc::new(DlRt { cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), retrying: std::sync::atomic::AtomicBool::new(false), speed: std::sync::atomic::AtomicI64::new(0), got: std::sync::atomic::AtomicU64::new(0), sample: Mutex::new((std::time::Instant::now(), 0)) });
     {
         let Ok(mut g) = DLS.lock() else { return };
         let m = g.get_or_insert_with(HashMap::new);
@@ -429,12 +457,12 @@ pub fn dl_start(session: &str, name: &str) {
         m.insert(name.to_string(), rt.clone());
     }
     wanted_set(name, true);
+    let _ = std::fs::write(format!("{}/{name}__pin", cache_dir()), b"1");
     let n = name.to_string();
     std::thread::spawn(move || {
         let mut fails = 0;
-        let mut carry = DlCarry { cur: u64::MAX, blk: Vec::new() };
         loop {
-            match dl_run(&n, &rt, &mut carry) {
+            match dl_run(&n, &rt) {
                 Ok(()) => break,
                 Err(_) if rt.cancel.load(SeqCst) => break,
                 Err(_) => {
@@ -464,93 +492,143 @@ pub fn dl_start(session: &str, name: &str) {
     });
 }
 
-/// Yuklash holati qayta urinishlar orasida saqlanadi: uzilgan joydagi chala bo'lak ham yo'qolmaydi, so'rov aynan shu baytdan davom etadi.
-struct DlCarry {
-    cur: u64,
-    blk: Vec<u8>,
-}
+/// Bir vaqtda nechta 18 MiB oyna parallel olinadi (Kotlin `WINDOWS_AT_ONCE`).
+const WINDOWS_AT_ONCE: u64 = 3;
+const MAX_TRIES: u32 = 40;
 
-fn dl_run(name: &str, rt: &DlRt, carry: &mut DlCarry) -> Result<(), String> {
-    use std::sync::atomic::Ordering::SeqCst;
+fn dl_run(name: &str, rt: &std::sync::Arc<DlRt>) -> Result<(), String> {
+    use std::sync::atomic::{AtomicU64, Ordering::SeqCst};
     let (total, key) = info(name).ok_or("video ma'lumoti yo'q")?;
-    let nb = total.div_ceil(BLOCK);
-    let mut buf = vec![0u8; 64 * 1024];
-    let mut win_bytes = 0u64;
-    let mut win_t = std::time::Instant::now();
-    let mut b = 0u64;
-    while b < nb {
-        if rt.cancel.load(SeqCst) {
-            return Ok(());
-        }
-        // Chala qolgan bo'lak shu yerdan davom etadi.
-        let resume_here = carry.cur == b && !carry.blk.is_empty();
-        if !resume_here && block_exists(name, b) {
-            b += 1;
-            continue;
-        }
-        let w = b * BLOCK / CHUNK;
-        if !warm(name, w) {
-            return Err("oyna isitilmadi".into());
-        }
-        prefetch_ahead(name, w, total);
-        // Bitta so'rov = shu oynaning (18 MiB) hozirgi joydan oxirigacha.
-        let last = (((w + 1) * CHUNK / BLOCK).saturating_sub(1)).min(nb - 1);
-        let have = if resume_here { carry.blk.len() as u64 } else { 0 };
-        let (rs, re) = (b * BLOCK + have, ((last + 1) * BLOCK).min(total) - 1);
-        // Umumiy muddat YO'Q (sekin tarmoqda 18 MiB ko'p vaqt oladi): faqat ulanish va har o'qish uchun muddat.
-        let resp = agent()
-            .get(&play_url(name))
-            .set("Range", &format!("bytes={rs}-{re}"))
-            .call()
-            .map_err(|e| e.to_string())?;
-        if !(resp.status() == 206 || (resp.status() == 200 && rs == 0 && re + 1 == total)) {
-            return Err(format!("HTTP {}", resp.status()));
-        }
-        rt.retrying.store(false, SeqCst);
-        let mut r = resp.into_reader();
-        let mut pos = rs;
-        let mut cur = b;
-        let mut blk: Vec<u8> = if resume_here { std::mem::take(&mut carry.blk) } else { Vec::with_capacity(BLOCK as usize) };
-        carry.cur = u64::MAX;
-        let res: Result<(), String> = (|| {
-            while pos <= re {
-                if rt.cancel.load(SeqCst) {
-                    return Ok(());
+    let windows = total.div_ceil(CHUNK);
+    let next = std::sync::Arc::new(AtomicU64::new(0));
+    let mut hs = Vec::new();
+    for _ in 0..WINDOWS_AT_ONCE.min(windows) {
+        let (n, k, rt, next) = (name.to_string(), key.clone(), rt.clone(), next.clone());
+        hs.push(std::thread::spawn(move || {
+            while !rt.cancel.load(SeqCst) {
+                let w = next.fetch_add(1, SeqCst);
+                if w >= windows {
+                    break;
                 }
-                let want = ((re - pos + 1) as usize).min(buf.len());
-                let n = r.read(&mut buf[..want]).map_err(|e| e.to_string())?;
-                if n == 0 {
-                    return Err("uzildi".into());
-                }
-                crate::vd::apply(&key, pos, &mut buf[..n]);
-                blk.extend_from_slice(&buf[..n]);
-                pos += n as u64;
-                win_bytes += n as u64;
-                if win_t.elapsed().as_millis() >= 1000 {
-                    rt.speed.store((win_bytes as f64 / win_t.elapsed().as_secs_f64()) as i64, SeqCst);
-                    win_bytes = 0;
-                    win_t = std::time::Instant::now();
-                }
-                while cur < nb && blk.len() >= block_len(total, cur) {
-                    let l = block_len(total, cur);
-                    if !block_exists(name, cur) {
-                        block_write(name, cur, &blk[..l]);
+                let mut tries = 0u32;
+                let mut carry: (u64, Vec<u8>) = (u64::MAX, Vec::new());
+                while !rt.cancel.load(SeqCst) {
+                    match dl_window(&n, &k, total, w, &rt, &mut carry, tries > 0) {
+                        Ok(()) => {
+                            rt.retrying.store(false, SeqCst);
+                            break;
+                        }
+                        Err(_) if rt.cancel.load(SeqCst) => break,
+                        Err(_) => {
+                            tries += 1;
+                            if tries >= MAX_TRIES {
+                                break;
+                            }
+                            rt.retrying.store(true, SeqCst);
+                            for _ in 0..(2 * tries).min(15) {
+                                if rt.cancel.load(SeqCst) {
+                                    break;
+                                }
+                                std::thread::sleep(Duration::from_secs(1));
+                            }
+                        }
                     }
-                    blk.drain(..l);
-                    cur += 1;
                 }
             }
-            Ok(())
-        })();
-        if res.is_err() || rt.cancel.load(SeqCst) {
-            carry.cur = cur;
-            carry.blk = blk;
-        }
-        res?;
-        if rt.cancel.load(SeqCst) {
-            return Ok(());
-        }
-        b = last + 1;
+        }));
     }
-    Ok(())
+    for h in hs {
+        let _ = h.join();
+    }
+    if rt.cancel.load(SeqCst) {
+        return Ok(());
+    }
+    let nb = total.div_ceil(BLOCK);
+    if (0..nb).all(|i| block_exists(name, i)) { Ok(()) } else { Err("to'liq emas".into()) }
+}
+
+/// Bitta 18 MiB oyna: yetishmayotgan birinchi bo'lakdan oyna oxirigacha BITTA so'rov bilan; uzilsa chala bo'lak saqlanadi va aynan shu baytdan davom etadi.
+fn dl_window(name: &str, key: &str, total: u64, w: u64, rt: &DlRt, carry: &mut (u64, Vec<u8>), force: bool) -> Result<(), String> {
+    use std::sync::atomic::Ordering::SeqCst;
+    let nb = total.div_ceil(BLOCK);
+    let first = w * CHUNK / BLOCK;
+    let last = (first + CHUNK / BLOCK - 1).min(nb - 1);
+    let resume = carry.0 != u64::MAX && !carry.1.is_empty();
+    let Some(miss) = (first..=last).find(|&b| !block_exists(name, b)) else { return Ok(()) };
+    if !warm_opts(name, w, force) {
+        return Err("oyna isitilmadi".into());
+    }
+    let (mut cur, mut blk): (u64, Vec<u8>) = if resume && carry.0 >= miss && carry.0 <= last { (carry.0, std::mem::take(&mut carry.1)) } else { (miss, Vec::new()) };
+    carry.0 = u64::MAX;
+    let rs = cur * BLOCK + blk.len() as u64;
+    let re = ((last + 1) * BLOCK).min(total) - 1;
+    let resp = agent().get(&play_url(name)).set("Range", &format!("bytes={rs}-{re}")).call().map_err(|e| e.to_string())?;
+    if !(resp.status() == 206 || (resp.status() == 200 && rs == 0 && re + 1 == total)) {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    let mut r = resp.into_reader();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut pos = rs;
+    let res: Result<(), String> = (|| {
+        while pos <= re {
+            if rt.cancel.load(SeqCst) {
+                return Ok(());
+            }
+            let want = ((re - pos + 1) as usize).min(buf.len());
+            let n = r.read(&mut buf[..want]).map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("uzildi".into());
+            }
+            crate::vd::apply(key, pos, &mut buf[..n]);
+            blk.extend_from_slice(&buf[..n]);
+            pos += n as u64;
+            rt.got.fetch_add(n as u64, SeqCst);
+            while cur <= last && blk.len() >= block_len(total, cur) {
+                let l = block_len(total, cur);
+                if !block_exists(name, cur) {
+                    block_write(name, cur, &blk[..l]);
+                }
+                blk.drain(..l);
+                cur += 1;
+            }
+        }
+        Ok(())
+    })();
+    if res.is_err() {
+        *carry = (cur, blk);
+    }
+    res
+}
+
+/// Telefon keshi hajmini cheklaydi (Kotlin `BlockCache` 2 GB): eng eskilaridan boshlab o'chiriladi, lekin YUKLAB OLINGAN (qadalgan, `<nom>__pin`) videolar tegilmaydi.
+pub fn gc(max_bytes: u64) {
+    let Ok(rd) = std::fs::read_dir(cache_dir()) else { return };
+    let mut pinned: HashSet<String> = HashSet::new();
+    let mut files: Vec<(std::time::SystemTime, u64, std::path::PathBuf, String)> = Vec::new();
+    for e in rd.flatten() {
+        let fname = e.file_name().to_string_lossy().into_owned();
+        let Some((n, _)) = fname.split_once("__") else { continue };
+        if fname.ends_with("__pin") {
+            pinned.insert(n.to_string());
+            continue;
+        }
+        let Ok(m) = e.metadata() else { continue };
+        files.push((m.modified().unwrap_or(std::time::UNIX_EPOCH), m.len(), e.path(), n.to_string()));
+    }
+    let mut total: u64 = files.iter().map(|f| f.1).sum();
+    if total <= max_bytes {
+        return;
+    }
+    files.sort_by_key(|f| f.0);
+    for (_, len, p, n) in files {
+        if total <= max_bytes {
+            break;
+        }
+        if pinned.contains(&n) {
+            continue;
+        }
+        if std::fs::remove_file(&p).is_ok() {
+            total -= len;
+        }
+    }
 }
