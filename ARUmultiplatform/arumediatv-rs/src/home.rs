@@ -283,6 +283,7 @@ impl Home {
             });
         }
         crate::vdsrv::start(&h.session);
+        crate::vdsrv::dl_resume_all(&h.session);
         h.reload();
         h.load_library();
         h.load_profile();

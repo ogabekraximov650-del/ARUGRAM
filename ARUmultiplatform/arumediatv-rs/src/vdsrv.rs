@@ -344,7 +344,35 @@ pub fn dl_stats(name: &str) -> (u64, u64, bool, bool, i64) {
     (total, have, downloading && have < total, retrying, speed)
 }
 
+/// Yuklanishi kerak bo'lgan fayllar ro'yxati (ilova qayta ochilganda davom ettiriladi).
+fn wanted_path() -> String {
+    format!("{}/dl_wanted", cache_dir())
+}
+
+fn wanted_get() -> Vec<String> {
+    crate::secure::read_text(&wanted_path(), "vdwanted").map(|t| t.lines().filter(|l| !l.is_empty()).map(String::from).collect()).unwrap_or_default()
+}
+
+fn wanted_set(name: &str, on: bool) {
+    static LOCK: Mutex<()> = Mutex::new(());
+    let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut v = wanted_get();
+    v.retain(|x| x != name);
+    if on {
+        v.push(name.to_string());
+    }
+    let _ = crate::secure::write_text(&wanted_path(), "vdwanted", &v.join("\n"));
+}
+
+/// Ilova ochilganda yarim qolgan yuklashlarni davom ettiradi.
+pub fn dl_resume_all(session: &str) {
+    for n in wanted_get() {
+        dl_start(session, &n);
+    }
+}
+
 pub fn dl_pause(name: &str) {
+    wanted_set(name, false);
     if let Some(r) = dl_get(name) {
         r.cancel.store(true, std::sync::atomic::Ordering::SeqCst);
     }
@@ -394,6 +422,7 @@ pub fn dl_start(session: &str, name: &str) {
         }
         m.insert(name.to_string(), rt.clone());
     }
+    wanted_set(name, true);
     let n = name.to_string();
     std::thread::spawn(move || {
         let mut fails = 0;
@@ -402,14 +431,20 @@ pub fn dl_start(session: &str, name: &str) {
                 Ok(()) => break,
                 Err(_) if rt.cancel.load(SeqCst) => break,
                 Err(_) => {
+                    // Tarmoq uzilsa to'xtab qolmaydi: urinish oraliqi oshib boradi (3..30 s), foydalanuvchi pauza bosmaguncha davom etadi.
                     fails += 1;
-                    if fails > 8 {
-                        break;
-                    }
                     rt.retrying.store(true, SeqCst);
-                    std::thread::sleep(Duration::from_secs(3));
+                    for _ in 0..(3 * fails.min(10)) {
+                        if rt.cancel.load(SeqCst) {
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_secs(1));
+                    }
                 }
             }
+        }
+        if !rt.cancel.load(SeqCst) {
+            wanted_set(&n, false);
         }
         rt.speed.store(0, SeqCst);
         if let Ok(mut g) = DLS.lock() {
