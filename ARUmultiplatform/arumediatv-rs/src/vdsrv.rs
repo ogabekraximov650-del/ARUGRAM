@@ -665,6 +665,7 @@ pub fn read_at(name: &str, pos: u64, out: &mut [u8]) -> Result<usize, String> {
     }
     let idx = pos / BLOCK;
     let blk = get_block(name, idx, total)?;
+    maybe_readahead(name, idx, total);
     let off = (pos - idx * BLOCK) as usize;
     if off >= blk.len() {
         return Ok(0);
@@ -672,6 +673,39 @@ pub fn read_at(name: &str, pos: u64, out: &mut [u8]) -> Result<usize, String> {
     let n = out.len().min(blk.len() - off);
     out[..n].copy_from_slice(&blk[off..off + n]);
     Ok(n)
+}
+
+fn infl_has(name: &str, idx: u64) -> bool {
+    INFL.lock().ok().map(|g| g.as_ref().map(|s| s.contains(&(name.to_string(), idx))).unwrap_or(false)).unwrap_or(false)
+}
+
+/// Ko'rilayotgan joydan oldinda 10 MiB dan kam (telefonda yoki yo'lda) qolsa, KEYINGI 18 MiB oyna bitta so'rovda olinadi (Kotlin `AheadPlan`);
+/// undan ko'p oldindan olinmaydi.
+const AHEAD_MIN_BLOCKS: u64 = 10;
+
+fn maybe_readahead(name: &str, idx: u64, total: u64) {
+    static LAST: Mutex<Option<(String, u64)>> = Mutex::new(None);
+    {
+        let Ok(mut g) = LAST.lock() else { return };
+        if g.as_ref().map(|(n, i)| n == name && *i == idx).unwrap_or(false) {
+            return;
+        }
+        *g = Some((name.to_string(), idx));
+    }
+    let nb = total.div_ceil(BLOCK);
+    let mut k = idx + 1;
+    while k < nb && k - idx <= AHEAD_MIN_BLOCKS && (block_exists(name, k) || infl_has(name, k)) {
+        k += 1;
+    }
+    if k >= nb || k - idx > AHEAD_MIN_BLOCKS {
+        return;
+    }
+    if infl_claim(name, k) {
+        let n = name.to_string();
+        std::thread::spawn(move || {
+            let _ = start_run(&n, k, total);
+        });
+    }
 }
 
 fn get_block(name: &str, idx: u64, total: u64) -> Result<Vec<u8>, String> {
