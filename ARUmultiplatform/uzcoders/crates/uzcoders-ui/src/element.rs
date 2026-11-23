@@ -6,7 +6,7 @@ use crate::scroll::ScrollState;
 use std::rc::Rc;
 use uzcoders_core::{Color, EdgeInsets, State};
 use uzcoders_layout::{Align, Axis, Dim, Justify, Style};
-use uzcoders_render::{Image, Path};
+use uzcoders_render::{DrawCmd, Image, Path};
 
 /// UZ: Klaviatura turi (Android `inputType` ga aylanadi).
 /// EN: Keyboard kind (converted to Android `inputType`).
@@ -146,7 +146,34 @@ pub struct Element {
     /// EN: Rounded clip radius (dp): descendants do not draw outside the rounded rectangle.
     /// RU: Радиус скруглённой обрезки (dp): потомки не рисуются за пределами скруглённого прямоугольника.
     pub(crate) rclip: Option<f32>,
+    pub(crate) capture: Option<LayerSlot>,
+    pub(crate) frozen: Option<Layer>,
     pub(crate) children: Vec<Element>,
+}
+
+/// UZ: Qotirilgan qatlam: bir marta chizilgan buyruqlar (mutlaq koordinatalarda) va ularni olgan qutining chap-yuqori nuqtasi.
+/// Murakkab sahifani animatsiya davomida qayta qurmasdan faqat ko'chirib / masshtablab chizish uchun.
+/// EN: A frozen layer: draw commands rendered once (absolute coordinates) and the top-left of the box they came from.
+/// Lets a heavy page be moved / scaled during an animation without rebuilding it.
+/// RU: Замороженный слой: команды, нарисованные один раз (абсолютные координаты), и левый верхний угол рамки, откуда они взяты.
+/// Позволяет двигать / масштабировать тяжёлую страницу во время анимации, не пересобирая её.
+#[derive(Clone)]
+pub struct Layer {
+    pub cmds: Rc<Vec<DrawCmd>>,
+    pub x: f32,
+    pub y: f32,
+}
+
+/// UZ: `Element::capture` natijasini oladigan joy. EN: Where `Element::capture` stores its result. RU: Куда `Element::capture` кладёт результат.
+pub type LayerSlot = Rc<std::cell::RefCell<Option<Layer>>>;
+
+/// UZ: Qotirilgan qatlamni chizadigan element (o'lchamini `.width()/.height()` bilan bering).
+/// EN: An element that draws a frozen layer (give its size with `.width()/.height()`).
+/// RU: Элемент, рисующий замороженный слой (размер задайте через `.width()/.height()`).
+pub fn frozen(layer: &Layer) -> Element {
+    let mut e = Element::container(Axis::Column, Vec::new());
+    e.frozen = Some(layer.clone());
+    e
 }
 
 /// UZ: Element transformatsiyasi. Joylashuv (layout) o'zgarmaydi — faqat chizish va bosish sohasi o'zgaradi.
@@ -202,6 +229,8 @@ impl Element {
             scroll: None,
             xf: None,
             rclip: None,
+            capture: None,
+            frozen: None,
             children,
         }
     }
@@ -294,6 +323,13 @@ impl Element {
     /// horizontal strips (only the corner bands are redrawn).
     /// RU: Обрезает потомков скруглённым прямоугольником (радиус в dp). Не зависит от бэкенда: углы приближаются тонкими
     /// горизонтальными полосами (перерисовываются только угловые полосы).
+    /// UZ: Shu elementning chizilgan buyruqlarini `slot` ga saqlaydi (har kadrda yangilanadi). `frozen()` bilan keyin qayta chizish mumkin.
+    /// EN: Stores this element's drawn commands into `slot` (refreshed every frame); `frozen()` can replay them later.
+    /// RU: Сохраняет нарисованные команды элемента в `slot` (обновляется каждый кадр); позже их можно воспроизвести через `frozen()`.
+    pub fn capture(mut self, slot: &LayerSlot) -> Self {
+        self.capture = Some(slot.clone());
+        self
+    }
     pub fn round_clip(mut self, radius: f32) -> Self {
         self.rclip = Some(radius);
         self

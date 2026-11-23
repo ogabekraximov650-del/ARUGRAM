@@ -19,6 +19,7 @@ use uzcoders_text::Font;
 
 pub use element::Hold;
 pub use element::Transform;
+pub use element::{frozen, Layer, LayerSlot};
 pub use element::{sprite_frame,
     button, column, field, gap_box, grid, icon, image, image_fill, lazy_column, lazy_column_var, row, scroll_column,
     spacer, sprite, spinner, stack, text, Element, KeyboardKind,
@@ -64,6 +65,8 @@ struct Item {
     /// UZ: Elementning transformatsiyasi. EN: The element's transform. RU: Трансформация элемента.
     xf: Option<Transform>,
     rclip: Option<f32>,
+    capture: Option<LayerSlot>,
+    frozen: Option<Layer>,
 }
 
 /// UZ: Transformatsiya guruhi: ildiz tuguni, avlodlar to'plami va (ildiz chizilganda aniqlanadigan) markaz nuqtasi.
@@ -462,7 +465,16 @@ impl Ui {
         }
         // Yumaloq qirqish: ochiq guruhlar (avlod tugunlari, radius, qutisi, buyruqlar boshlanishi).
         let mut rclips: Vec<(HashSet<usize>, f32, Rect, usize)> = Vec::new();
+        // Qatlam yozib olish: (avlodlar, joy, boshlanish, chap-yuqori nuqta).
+        let mut caps: Vec<(HashSet<usize>, LayerSlot, usize, (f32, f32))> = Vec::new();
         for it in items {
+            while let Some((set, ..)) = caps.last() {
+                if set.contains(&it.node) {
+                    break;
+                }
+                let (_, slot, start, (ox, oy)) = caps.pop().unwrap();
+                *slot.borrow_mut() = Some(Layer { cmds: Rc::new(cmds[start..].to_vec()), x: ox, y: oy });
+            }
             while let Some((set, ..)) = rclips.last() {
                 if set.contains(&it.node) {
                     break;
@@ -478,6 +490,28 @@ impl Ui {
             }
             let cmd_start = cmds.len();
             let new_rclip = it.rclip.filter(|r| *r > 1.0);
+            if let Some(slot) = it.capture.clone() {
+                let mut set = HashSet::new();
+                let mut stack = vec![it.node];
+                while let Some(n) = stack.pop() {
+                    set.insert(n);
+                    stack.extend(tree.children(n).iter().copied());
+                }
+                let rr = tree.rect(it.node).translate(shift.0, shift.1);
+                caps.push((set, slot, cmd_start, (rr.x, rr.y)));
+            }
+            if let Some(l) = &it.frozen {
+                let rr = tree.rect(it.node).translate(shift.0, shift.1);
+                let g = XGroup {
+                    node: usize::MAX,
+                    set: HashSet::new(),
+                    xf: Transform { dx: rr.x - l.x, dy: rr.y - l.y, ..Transform::default() },
+                    pivot: Some((0.0, 0.0)),
+                };
+                let mut v: Vec<DrawCmd> = l.cmds.iter().cloned().collect();
+                xf_cmds(&mut v, &g);
+                cmds.extend(v);
+            }
             let r = tree.rect(it.node).translate(shift.0, shift.1);
             for g in groups.iter_mut() {
                 if g.node == it.node && g.pivot.is_none() {
@@ -856,6 +890,9 @@ impl Ui {
                 xf_cmds(&mut cmds[cmd_start..], g);
             }
         }
+        while let Some((_, slot, start, (ox, oy))) = caps.pop() {
+            *slot.borrow_mut() = Some(Layer { cmds: Rc::new(cmds[start..].to_vec()), x: ox, y: oy });
+        }
         while let Some((_, rad, rect, start)) = rclips.pop() {
             round_clip_cmds(&mut cmds, start, rect, rad);
         }
@@ -990,6 +1027,8 @@ impl Ui {
             hscroll: el.scroll.is_some() && el.style.direction == Axis::Row,
             scroll: el.scroll,
             rclip: el.rclip.map(|r| r * self.scale),
+            capture: el.capture.take(),
+            frozen: el.frozen.take(),
             xf: el.xf.map(|mut x| {
                 x.dx *= self.scale;
                 x.dy *= self.scale;
@@ -1099,6 +1138,8 @@ impl Ui {
                 scroll: None,
                 xf: None,
                 rclip: None,
+                capture: None,
+                frozen: None,
             });
         }
         node

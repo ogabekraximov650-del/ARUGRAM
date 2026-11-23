@@ -690,3 +690,28 @@ fn overscroll_tortiladi_va_qaytadi() {
     }
     assert_eq!(sc.over(), 0.0);
 }
+
+// UZ: Qatlamni yozib olish va qotirilgan nusxani boshqa joyda chizish.
+// EN: Capturing a layer and drawing the frozen copy elsewhere.
+// RU: Захват слоя и отрисовка замороженной копии в другом месте.
+#[test]
+fn qatlam_yozib_olinadi_va_qotirib_chiziladi() {
+    let slot: LayerSlot = Rc::new(std::cell::RefCell::new(None));
+    let s2 = slot.clone();
+    let mut ui = Ui::new(font(), move || {
+        let live = column(vec![column(vec![]).bg(Color::rgb(0, 255, 0)).width(40.0).height(40.0)]).width(50.0).height(50.0).capture(&s2);
+        let copy = match s2.borrow().as_ref() {
+            Some(l) => frozen(l).width(50.0).height(50.0),
+            None => column(vec![]).width(50.0).height(50.0),
+        };
+        row(vec![live, copy]).align(Alignment::Start)
+    });
+    ui.frame(SZ);
+    assert!(slot.borrow().is_some());
+    let cmds = ui.frame(SZ);
+    let mut c = ui.canvas(200, 300);
+    c.clear(Color::rgb(0, 0, 0));
+    c.execute(&cmds);
+    assert_eq!(c.pixel(10, 10).g, 255);
+    assert_eq!(c.pixel(60, 10).g, 255, "qotirilgan nusxa 50 px o'ngda");
+}

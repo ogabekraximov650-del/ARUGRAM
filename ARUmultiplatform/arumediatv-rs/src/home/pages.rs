@@ -224,7 +224,7 @@ impl Home {
             }
             sp.anchor.set(anchor);
         }
-        *self.trans.borrow_mut() = Some(super::Trans { start: std::time::Instant::now(), push: true, prev: v.clone(), anchor });
+        *self.trans.borrow_mut() = Some(super::Trans::new(true, v.clone(), anchor));
         v.push(page);
         self.pages.set(v);
     }
@@ -242,7 +242,7 @@ impl Home {
         }
         let had = popped.is_some();
         if had {
-            *self.trans.borrow_mut() = Some(super::Trans { start: std::time::Instant::now(), push: false, prev: before, anchor: pop_anchor });
+            *self.trans.borrow_mut() = Some(super::Trans::new(false, before, pop_anchor));
             self.pages.set(v);
             self.dl_unwatch_all();
         }

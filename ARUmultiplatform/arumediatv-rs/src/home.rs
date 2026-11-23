@@ -46,6 +46,22 @@ pub(crate) struct Trans {
     pub push: bool,
     pub prev: Vec<pages::Page>,
     pub anchor: Option<(f32, f32, f32, f32)>,
+    /// Qotirilgan qatlamlar: o'tish boshida ikkala sahifa BIR marta chiziladi, animatsiya davomida faqat ko'chirib/masshtablab chiziladi.
+    pub cap: Rc<TransCap>,
+}
+
+#[derive(Default)]
+pub(crate) struct TransCap {
+    pub back: uzcoders::ui::LayerSlot,
+    pub front: uzcoders::ui::LayerSlot,
+    /// Animatsiya soati: qatlamlar tayyor bo'lgan paytdan boshlanadi (og'ir birinchi kadr animatsiyani yemaydi).
+    pub t0: Cell<Option<std::time::Instant>>,
+}
+
+impl Trans {
+    pub fn new(push: bool, prev: Vec<pages::Page>, anchor: Option<(f32, f32, f32, f32)>) -> Self {
+        Trans { start: std::time::Instant::now(), push, prev, anchor, cap: Rc::new(TransCap::default()) }
+    }
 }
 
 thread_local! {
@@ -1374,14 +1390,30 @@ impl Home {
         let cur = self.pages.get();
         // Sahifa o'tishi (HarmonyOS uslubi): yangi sahifa o'ngdan prujina bilan kiradi, orqadagisi biroz suriladi va xiralashadi.
         let tr = self.trans.borrow().clone();
-        if let Some(Trans { start, push, prev, anchor }) = tr {
-            let t = start.elapsed().as_secs_f32();
+        if let Some(Trans { start, push, prev, anchor, cap }) = tr {
+            let ready = cap.back.borrow().is_some() && cap.front.borrow().is_some();
+            if ready && cap.t0.get().is_none() {
+                cap.t0.set(Some(std::time::Instant::now()));
+            }
+            let t = if cfg!(test) { start.elapsed().as_secs_f32() } else { cap.t0.get().map_or(0.0, |t0| t0.elapsed().as_secs_f32()) };
             let involves_media = cur.iter().chain(prev.iter()).any(|p| matches!(p, pages::Page::Media(_)));
-            if t < TRANS_SECS && !involves_media && trans_enabled() {
+            if t < TRANS_SECS && start.elapsed().as_secs_f32() < 2.5 && !involves_media && trans_enabled() {
                 uzcoders::core::request_frame();
                 let (w, h) = window_dp();
+                if !ready {
+                    // 1-kadr: ikkala sahifa BIR marta chiziladi va qatlam sifatida saqlanadi (old sahifa ekrandan tashqarida turadi).
+                    let (front, back) = if push { (self.view_for(&cur), self.view_for(&prev)) } else { (self.view_for(&prev), self.view_for(&cur)) };
+                    return stack(vec![
+                        column(vec![back]).width(w).height(h).capture(&cap.back),
+                        row(vec![gap_box(w, 0.0), column(vec![front]).width(w).height(h).capture(&cap.front)]).height(h),
+                    ]);
+                }
+                // Keyingi kadrlar arzon: sahifalar qayta qurilmaydi, faqat saqlangan qatlamlar ko'chiriladi / masshtablanadi.
+                let lb = cap.back.borrow().clone().unwrap();
+                let lf = cap.front.borrow().clone().unwrap();
+                let (front, back) = (uzcoders::ui::frozen(&lf).width(w).height(h), uzcoders::ui::frozen(&lb).width(w).height(h));
                 let p = 1.0 - (1.0 + TRANS_W * t) * (-TRANS_W * t).exp(); // kritik so'nuvchi prujina: oshmasdan silliq to'xtaydi
-                let (front, back, k) = if push { (self.view_for(&cur), self.view_for(&prev), p) } else { (self.view_for(&prev), self.view_for(&cur), 1.0 - p) };
+                let k = if push { p } else { 1.0 - p };
                 // `k`: 0 — orqadagi sahifa to'liq ochiq, 1 — oldingi sahifa to'liq ochiq.
                 let dim = Color::rgba(0, 0, 0, (115.0 * k) as u8);
                 if let Some(a) = anchor {
@@ -1391,7 +1423,7 @@ impl Home {
                     return stack(vec![back.scale(1.0 - 0.06 * q).alpha(1.0 - 0.25 * q), column(vec![]).bg(dim), self.reveal(front, r, w, h, q)]);
                 }
                 let fx = if push { (1.0 - p) * w } else { p * w };
-                return stack(vec![back.translate(-0.22 * w * k, 0.0), column(vec![]).bg(dim), row(vec![gap_box(fx, 0.0), front.width(w)]).height(h)]);
+                return stack(vec![back.translate(-0.22 * w * k, 0.0), column(vec![]).bg(dim), row(vec![gap_box(fx, 0.0), front]).height(h)]);
             }
             *self.trans.borrow_mut() = None;
         }
@@ -1715,7 +1747,7 @@ mod tests {
                 std::fs::write(format!("{dir}/17_translator.png"), c.to_png()).unwrap();
                 // Sahifa o'tishining o'rtasidagi kadr (yangi sahifa o'ngdan kirayotgan payt).
                 TEST_TRANS.with(|c| c.set(true));
-                *home.trans.borrow_mut() = Some(Trans { start: std::time::Instant::now() - std::time::Duration::from_millis(110), push: true, prev: vec![], anchor: None });
+                *home.trans.borrow_mut() = Some({ let mut t = Trans::new(true, vec![], None); t.start = std::time::Instant::now() - std::time::Duration::from_millis(110); t });
                 let cmds = ui.frame(size);
                 let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
@@ -1729,6 +1761,7 @@ mod tests {
                 uzcoders::core::set_press_rect((17.0, 129.0, 156.0, 240.0));
                 home.open_season(home.seasons.get()[0].clone());
                 TEST_TRANS.with(|c| c.set(true));
+                let _ = ui.frame(size); // qatlamlarni yozib olish kadri
                 for (i, ms) in [70u64, 150, 260].iter().enumerate() {
                     if let Some(t) = home.trans.borrow_mut().as_mut() {
                         t.start = std::time::Instant::now() - std::time::Duration::from_millis(*ms);

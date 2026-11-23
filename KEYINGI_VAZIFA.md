@@ -7818,3 +7818,8 @@ Foydalanuvchi talabi: "bir qo'lli aylana boshqaruv" Android ilovadan olib tashla
 - Overscroll (rezina): `ScrollState::over()`; chekkada tortilsa qarshilik bilan siljiydi, qo'yib yuborilganda prujina bilan qaytadi, inersiya chekkaga urilsa biroz o'tib qaytadi.
 - Ilova: karta ro'yxatda birinchi ko'ringanda birin-ketin chiqadi (`enter`), mavsum sahifasi yorliq tabletkasi prujina bilan sirpanadi.
 - Chegara: yumaloq qirqish bo'laklar bilan yaqinlashtirilgan (burchak qirrasi biroz pog'onali bo'lishi mumkin); GPU yo'li shu muhitda sinalmagan (CPU rasm bilan tekshirildi).
+
+## Sahifa o'tishi: qotirilgan qatlamlar (2026-11)
+
+Sabab: o'tish davomida har kadrda ikkala sahifa (pleyer, ro'yxatlar) qayta qurilib, o'lchanib, chizilardi — Redmi 9C'da kadrlar tushib, animatsiya "qotib" ko'rinardi.
+Yechim: `Element::capture(&slot)` o'tishning 1-kadrida ikkala sahifaning chizish buyruqlarini saqlaydi; keyingi kadrlarda `uzcoders::ui::frozen(&layer)` ularni qayta qurmasdan faqat siljitib/masshtablab chizadi (`home.rs` `Trans`/`TransCap`). Animatsiya soati qatlamlar tayyor bo'lgach boshlanadi (og'ir 1-kadr animatsiyani yemaydi). O'tish paytida sahifa bosilmaydi (rasm).
