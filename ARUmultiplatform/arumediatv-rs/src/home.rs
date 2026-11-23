@@ -1419,10 +1419,14 @@ impl Home {
                 if !ready {
                     // 1-kadr: ikkala sahifa BIR marta chiziladi va qatlam sifatida saqlanadi (old sahifa ekrandan tashqarida turadi).
                     let (front, back) = if push { (self.view_for(&cur), self.view_for(&prev)) } else { (self.view_for(&prev), self.view_for(&cur)) };
-                    return stack(vec![
-                        column(vec![back]).width(w).height(h).capture(&cap.back),
-                        row(vec![gap_box(w, 0.0), column(vec![front]).width(w).height(h).capture(&cap.front)]).height(h),
-                    ]);
+                    // Boshlang'ich holat ko'rinib turadi (yopilganda — yopilayotgan sahifa), shunda kadr "o'chib-yonmaydi".
+                    let b = column(vec![back]).width(w).height(h).capture(&cap.back);
+                    let f = column(vec![front]).width(w).height(h).capture(&cap.front);
+                    return if push {
+                        stack(vec![b, row(vec![gap_box(w, 0.0), f]).height(h)])
+                    } else {
+                        stack(vec![row(vec![gap_box(w, 0.0), b]).height(h), f])
+                    };
                 }
                 // Keyingi kadrlar arzon: sahifalar qayta qurilmaydi, faqat saqlangan qatlamlar ko'chiriladi / masshtablanadi.
                 let lb = cap.back.borrow().clone().unwrap();
@@ -1436,7 +1440,7 @@ impl Home {
                     // Karta kattalashib ochiladi: oyna kartaning joyidan butun ekrangacha o'sadi (yopilganda teskarisi), ichida sahifa ko'rinadi.
                     let q = k;
                     let r = (a.0 + (0.0 - a.0) * q, a.1 + (0.0 - a.1) * q, a.2 + (w - a.2) * q, a.3 + (h - a.3) * q);
-                    return stack(vec![back.scale(1.0 - 0.06 * q).alpha(1.0 - 0.25 * q), column(vec![]).bg(dim), self.reveal(front, r, w, h, q)]);
+                    return stack(vec![back.scale(1.0 - 0.06 * q), column(vec![]).bg(dim), self.reveal(front, r, w, h, q)]);
                 }
                 let fx = if push { (1.0 - p) * w } else { p * w };
                 return stack(vec![back.translate(-0.22 * w * k, 0.0), column(vec![]).bg(dim), row(vec![gap_box(fx, 0.0), front]).height(h)]);
@@ -1457,7 +1461,7 @@ impl Home {
         self.rev_sy.force_offset(0.0);
         let s = (r.2 / w.max(1.0)).clamp(0.05, 1.0);
         // Sahifa chap-yuqori burchagidan masshtablanadi va oynaning chap-yuqori burchagiga tushadi; tez ochiladi (xira boshlanadi).
-        let page = page.width(w).height(h).pivot(0.0, 0.0).scale(s).alpha((0.3 + 2.4 * q).min(1.0));
+        let page = page.width(w).height(h).pivot(0.0, 0.0).scale(s);
         let inner = column(vec![page]).scroll(&self.rev_sy).width(w).height(r.3.max(1.0));
         let outer = row(vec![inner]).scroll(&self.rev_sx).width(r.2.max(1.0)).height(r.3.max(1.0));
         // Yumaloq qirqish bu yerda ISHLATILMAYDI: butun sahifani (shisha xiralashuvi bilan) o'nlab marta qayta chizadi va Redmi 9C'da qotadi.
