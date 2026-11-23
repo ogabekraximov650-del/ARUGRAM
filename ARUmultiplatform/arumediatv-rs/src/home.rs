@@ -39,6 +39,15 @@ const PLAY: &str = "M8,5v14l11,-7z";
 const HEART: &str = "M12,21.35l-1.45,-1.32C5.4,15.36 2,12.28 2,8.5 2,5.42 4.42,3 7.5,3c1.74,0 3.41,0.81 4.5,2.09C13.09,3.81 14.76,3 16.5,3 19.58,3 22,5.42 22,8.5c0,3.78 -3.4,6.86 -8.55,11.54L12,21.35z";
 const STAR: &str = "M12,17.27L18.18,21l-1.64,-7.03L22,9.24l-7.19,-0.61L12,2 9.19,8.63 2,9.24l5.46,4.73L5.82,21z";
 /// Bosh sahifa sarlavhasi balandligi (dp): PageHeader 66 + oraliq 14 + "Ommabop anime" 34 + oraliq 14.
+/// Sahifa o'tishi holati: boshlanish vaqti, oldinga(push)mi, o'tishdan oldingi sahifalar va (bo'lsa) kartaning joyi.
+#[derive(Clone)]
+pub(crate) struct Trans {
+    pub start: std::time::Instant,
+    pub push: bool,
+    pub prev: Vec<pages::Page>,
+    pub anchor: Option<(f32, f32, f32, f32)>,
+}
+
 thread_local! {
     /// Testlarda sahifa o'tishi odatda o'chiq (snapshotlar tayyor sahifani ko'rsatsin); maxsus testda yoqiladi.
     static TEST_TRANS: Cell<bool> = const { Cell::new(false) };
@@ -117,7 +126,10 @@ pub struct Home {
     picked_cb: RefCell<Option<Box<dyn Fn(String)>>>,
     pages: State<Vec<pages::Page>>,
     /// Sahifa o'tishi: (boshlanish vaqti, oldinga(push)mi, oldingi sahifalar ro'yxati).
-    trans: RefCell<Option<(std::time::Instant, bool, Vec<pages::Page>)>>,
+    trans: RefCell<Option<Trans>>,
+    /// Kattalashib ochiladigan oyna (`reveal`): gorizontal/vertikal siljish holatlari.
+    rev_sx: ScrollState,
+    rev_sy: ScrollState,
     /// Pastki menyu tabletkasi: prujina, oxirgi kadr vaqti, boshlang'ich joyga qo'yilganmi.
     nav_spring: RefCell<uzcoders::core::Spring>,
     nav_last: Cell<Option<std::time::Instant>>,
@@ -249,6 +261,8 @@ impl Home {
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
             trans: RefCell::new(None),
+            rev_sx: ScrollState::new(),
+            rev_sy: ScrollState::new(),
             nav_spring: RefCell::new(uzcoders::core::Spring::new(0.0, 420.0, 0.62)),
             nav_last: Cell::new(None),
             nav_init: Cell::new(false),
@@ -1267,7 +1281,7 @@ impl Home {
         let cur = self.pages.get();
         // Sahifa o'tishi (HarmonyOS uslubi): yangi sahifa o'ngdan prujina bilan kiradi, orqadagisi biroz suriladi va xiralashadi.
         let tr = self.trans.borrow().clone();
-        if let Some((start, push, prev)) = tr {
+        if let Some(Trans { start, push, prev, anchor }) = tr {
             let t = start.elapsed().as_secs_f32();
             let involves_media = cur.iter().chain(prev.iter()).any(|p| matches!(p, pages::Page::Media(_)));
             if t < TRANS_SECS && !involves_media && trans_enabled() {
@@ -1276,17 +1290,29 @@ impl Home {
                 let p = 1.0 - (1.0 + TRANS_W * t) * (-TRANS_W * t).exp(); // kritik so'nuvchi prujina: oshmasdan silliq to'xtaydi
                 let (front, back, k) = if push { (self.view_for(&cur), self.view_for(&prev), p) } else { (self.view_for(&prev), self.view_for(&cur), 1.0 - p) };
                 // `k`: 0 — orqadagi sahifa to'liq ochiq, 1 — oldingi sahifa to'liq ochiq.
-                let fx = if push { (1.0 - p) * w } else { p * w };
                 let dim = Color::rgba(0, 0, 0, (115.0 * k) as u8);
-                return stack(vec![
-                    back,
-                    column(vec![]).bg(dim),
-                    row(vec![gap_box(fx, 0.0), front.width(w)]).height(h),
-                ]);
+                if let Some(a) = anchor {
+                    // Karta kattalashib ochiladi: oyna kartaning joyidan butun ekrangacha o'sadi (yopilganda teskarisi), ichida sahifa ko'rinadi.
+                    let q = k;
+                    let r = (a.0 + (0.0 - a.0) * q, a.1 + (0.0 - a.1) * q, a.2 + (w - a.2) * q, a.3 + (h - a.3) * q);
+                    return stack(vec![back, column(vec![]).bg(dim), self.reveal(front, r, w, h)]);
+                }
+                let fx = if push { (1.0 - p) * w } else { p * w };
+                return stack(vec![back, column(vec![]).bg(dim), row(vec![gap_box(fx, 0.0), front.width(w)]).height(h)]);
             }
             *self.trans.borrow_mut() = None;
         }
         self.view_for(&cur)
+    }
+
+    /// Sahifani `r` (dp: x, y, eni, bo'yi) oynasida ko'rsatadi: sahifa o'z joyida to'liq o'lchamda turadi, oyna esa uni "ochib" boradi (kesadi).
+    fn reveal(&self, page: Element, r: (f32, f32, f32, f32), w: f32, h: f32) -> Element {
+        let d = density();
+        self.rev_sx.force_offset(r.0.max(0.0) * d);
+        self.rev_sy.force_offset(r.1.max(0.0) * d);
+        let inner = column(vec![page.width(w).height(h)]).scroll(&self.rev_sy).width(w).height(r.3.max(1.0));
+        let outer = row(vec![inner]).scroll(&self.rev_sx).width(r.2.max(1.0)).height(r.3.max(1.0));
+        column(vec![gap_box(0.0, r.1.max(0.0)), row(vec![gap_box(r.0.max(0.0), 0.0), outer]).align(Align::Start)]).align(Align::Start)
     }
 
     fn view_for(self: &Rc<Self>, pages: &[pages::Page]) -> Element {
@@ -1491,6 +1517,8 @@ mod tests {
             picked_cb: RefCell::new(None),
             pages: State::new(Vec::new()),
             trans: RefCell::new(None),
+            rev_sx: ScrollState::new(),
+            rev_sy: ScrollState::new(),
             nav_spring: RefCell::new(uzcoders::core::Spring::new(0.0, 420.0, 0.62)),
             nav_last: Cell::new(None),
             nav_init: Cell::new(false),
@@ -1574,7 +1602,7 @@ mod tests {
                 std::fs::write(format!("{dir}/17_translator.png"), c.to_png()).unwrap();
                 // Sahifa o'tishining o'rtasidagi kadr (yangi sahifa o'ngdan kirayotgan payt).
                 TEST_TRANS.with(|c| c.set(true));
-                *home.trans.borrow_mut() = Some((std::time::Instant::now() - std::time::Duration::from_millis(110), true, vec![]));
+                *home.trans.borrow_mut() = Some(Trans { start: std::time::Instant::now() - std::time::Duration::from_millis(110), push: true, prev: vec![], anchor: None });
                 let cmds = ui.frame(size);
                 let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
                 c.clear(Color::BLACK);
@@ -1583,6 +1611,25 @@ mod tests {
                 TEST_TRANS.with(|c| c.set(false));
                 *home.trans.borrow_mut() = None;
                 home.pop();
+                // Karta kattalashib ochilishi (o'rtadagi kadrlar).
+                home.tab.set(0);
+                uzcoders::core::set_press_rect((17.0, 129.0, 156.0, 240.0));
+                home.open_season(home.seasons.get()[0].clone());
+                TEST_TRANS.with(|c| c.set(true));
+                for (i, ms) in [70u64, 150, 260].iter().enumerate() {
+                    if let Some(t) = home.trans.borrow_mut().as_mut() {
+                        t.start = std::time::Instant::now() - std::time::Duration::from_millis(*ms);
+                    }
+                    let cmds = ui.frame(size);
+                    let mut c = ui.canvas((360.0 * snap_scale()) as usize, (640.0 * snap_scale()) as usize);
+                    c.clear(Color::BLACK);
+                    c.execute(&cmds);
+                    std::fs::write(format!("{dir}/19_ochilish{i}.png"), c.to_png()).unwrap();
+                }
+                TEST_TRANS.with(|c| c.set(false));
+                *home.trans.borrow_mut() = None;
+                home.pop();
+                *home.trans.borrow_mut() = None;
             }
             home.tab.set(2);
             home.push(pages::Page::Sessions);

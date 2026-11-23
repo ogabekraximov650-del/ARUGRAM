@@ -25,6 +25,8 @@ const A_SHARE: &str = "M18,16.08c-0.76,0 -1.44,0.3 -1.96,0.77L8.91,12.7c0.05,-0.
 /// Bo'lim sahifasi holati (har ochilganda yangidan quriladi).
 pub struct SeasonPage {
     pub season: Season,
+    /// Karta joyi (dp: x, y, eni, bo'yi): sahifa shu joydan kattalashib ochiladi va yopilganda shu joyga kichrayadi.
+    pub(super) anchor: std::cell::Cell<Option<(f32, f32, f32, f32)>>,
     pub(super) tab: State<usize>,
     pub(super) info: State<Rc<SeasonInfo>>,
     pub(super) eps: State<Rc<Vec<Episode>>>,
@@ -134,6 +136,7 @@ impl Home {
     pub(super) fn open_season(self: &Rc<Self>, season: Season) {
         uzcoders::prelude::breadcrumb("open_season");
         let p = Rc::new(SeasonPage {
+            anchor: std::cell::Cell::new(None),
             season: season.clone(),
             tab: State::new(0),
             info: State::new(Rc::new(SeasonInfo::default())),
@@ -201,7 +204,17 @@ impl Home {
 
     pub(super) fn push(&self, page: Page) {
         let mut v = self.pages.get();
-        *self.trans.borrow_mut() = Some((std::time::Instant::now(), true, v.clone()));
+        // Karta bosilgan bo'lsa: sahifa o'sha kartadan kattalashib ochiladi (HarmonyOS uslubi).
+        let mut anchor = None;
+        if let Page::Season(sp) = &page {
+            let (x, y, w, h) = uzcoders::core::press_rect();
+            let (sw, sh) = window_dp();
+            if w > 40.0 && h > 40.0 && w * h < sw * sh * 0.6 && x >= -1.0 && y >= -1.0 && x + w <= sw + 1.0 {
+                anchor = Some((x, y, w, h));
+            }
+            sp.anchor.set(anchor);
+        }
+        *self.trans.borrow_mut() = Some(super::Trans { start: std::time::Instant::now(), push: true, prev: v.clone(), anchor });
         v.push(page);
         self.pages.set(v);
     }
@@ -210,6 +223,7 @@ impl Home {
         let mut v = self.pages.get();
         let before = v.clone();
         let popped = v.pop();
+        let pop_anchor = if let Some(Page::Season(sp)) = &popped { sp.anchor.get() } else { None };
         if let Some(Page::Season(sp)) = &popped {
             self.pl_close(sp);
         }
@@ -218,7 +232,7 @@ impl Home {
         }
         let had = popped.is_some();
         if had {
-            *self.trans.borrow_mut() = Some((std::time::Instant::now(), false, before));
+            *self.trans.borrow_mut() = Some(super::Trans { start: std::time::Instant::now(), push: false, prev: before, anchor: pop_anchor });
             self.pages.set(v);
             self.dl_unwatch_all();
         }

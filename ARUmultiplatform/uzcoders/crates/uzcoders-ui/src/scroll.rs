@@ -58,6 +58,14 @@ impl ScrollState {
         invalidate();
     }
 
+    /// UZ: Ofsetni CHEKLAMASDAN o'rnatadi (kontent o'lchami hali hisoblanmagan birinchi kadrda ham to'g'ri bo'lishi uchun; animatsiyali "ochilish" oynasi shu bilan joylanadi).
+    /// EN: Sets the offset WITHOUT clamping (so it is correct even on the first frame before content size is known; the animated reveal window uses it).
+    /// RU: Задаёт смещение БЕЗ ограничения (чтобы оно было верным даже в первом кадре, пока размер содержимого неизвестен; им пользуется анимированное окно раскрытия).
+    pub fn force_offset(&self, v: f32) {
+        self.inner.offset.set(v.max(0.0));
+        invalidate();
+    }
+
     /// UZ: "Tortib yangilash": ro'yxat eng tepada turganda pastga tortilib qo'yib yuborilsa `f` chaqiriladi. Tortilgan masofa `pull()` da (piksel).
     /// EN: Pull-to-refresh: when the list is at the top and pulled down far enough then released, `f` runs. The pull distance is in `pull()` (pixels).
     /// RU: «Потяни, чтобы обновить»: если список вверху и его потянули вниз достаточно далеко, при отпускании вызывается `f`; расстояние — в `pull()`.

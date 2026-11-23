@@ -1116,6 +1116,12 @@ impl Ui {
                 }
                 self.pressed = self.hit_test(p);
                 self.press_at = if e.time_ms > 0 { e.time_ms } else { self.now };
+                if let Some(h) = self.pressed {
+                    if let Some(hit) = self.hits.get(h) {
+                        let (r, k) = (hit.rect, self.scale.max(0.01));
+                        uzcoders_core::set_press_rect((r.x / k, r.y / k, r.w / k, r.h / k));
+                    }
+                }
                 let region = self.region_at(p);
                 if let Some(ri) = region {
                     self.regions[ri].state.set_velocity(0.0);

@@ -9,6 +9,7 @@ thread_local! {
     static SAFE: Cell<EdgeInsets> = const { Cell::new(EdgeInsets::ZERO) };
     static DENSITY: Cell<f32> = const { Cell::new(1.0) };
     static WINDOW_DP: Cell<(f32, f32)> = const { Cell::new((0.0, 0.0)) };
+    static PRESS_RECT: Cell<(f32, f32, f32, f32)> = const { Cell::new((0.0, 0.0, 0.0, 0.0)) };
     static FOCUS_REQ: Cell<Option<(usize, u8)>> = const { Cell::new(None) };
 }
 
@@ -61,4 +62,15 @@ pub fn window_dp() -> (f32, f32) {
 
 pub fn set_window_dp(w: f32, h: f32) {
     WINDOW_DP.with(|c| c.set((w, h)));
+}
+
+/// UZ: Oxirgi bosilgan elementning joyi (dp: x, y, eni, bo'yi). Ilova bosish (click) ichida o'qib, shu joydan "kattalashib ochiladigan" o'tish qila oladi.
+/// EN: Rectangle of the last pressed element (dp: x, y, width, height). The app reads it inside a click to run an "expand from here" transition.
+/// RU: Прямоугольник последнего нажатого элемента (dp: x, y, ширина, высота). Приложение читает его в клике, чтобы раскрывать переход из этого места.
+pub fn press_rect() -> (f32, f32, f32, f32) {
+    PRESS_RECT.with(|r| r.get())
+}
+
+pub fn set_press_rect(r: (f32, f32, f32, f32)) {
+    PRESS_RECT.with(|c| c.set(r));
 }
