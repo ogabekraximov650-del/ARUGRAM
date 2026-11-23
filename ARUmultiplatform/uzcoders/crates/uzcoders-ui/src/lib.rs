@@ -130,6 +130,8 @@ pub struct Ui {
     pressed: Option<usize>,
     /// UZ: Bosilgan element kichrayishi (prujina): 1.0 — oddiy, ~0.96 — bosilgan. EN: Press-scale of the pressed element (spring). RU: Сжатие нажатого элемента (пружина).
     press_spring: uzcoders_core::Spring,
+    /// UZ: Bosish boshlangan vaqt (ms); uzoq bosib qo'yib yuborilsa bosish (click) ishlamaydi. EN: Press start time (ms); a long press-and-release does not click. RU: Время начала нажатия (мс); долгое нажатие с отпусканием не срабатывает как клик.
+    press_at: u64,
     last_rev: Option<u64>,
     dirty: bool,
     scale: f32,
@@ -168,6 +170,7 @@ impl Ui {
             scrolls: Vec::new(),
             pressed: None,
             press_spring: uzcoders_core::Spring::new(1.0, 900.0, 0.55),
+            press_at: 0,
             last_rev: None,
             dirty: true,
             scale: 1.0,
@@ -1112,6 +1115,7 @@ impl Ui {
                     return;
                 }
                 self.pressed = self.hit_test(p);
+                self.press_at = if e.time_ms > 0 { e.time_ms } else { self.now };
                 let region = self.region_at(p);
                 if let Some(ri) = region {
                     self.regions[ri].state.set_velocity(0.0);
@@ -1292,6 +1296,13 @@ impl Ui {
                     return;
                 }
                 self.focus = None;
+                // UZ: Uzoq (>500 ms) bosib turib qo'yib yuborish — bosish hisoblanmaydi (tasodifan ochilib ketmasin; effekt qaytib ketadi).
+                // EN: A long (>500 ms) press-and-release is not a click (no accidental opening; the press effect just bounces back).
+                // RU: Долгое (>500 мс) нажатие с отпусканием не считается кликом (не открывается случайно; эффект просто возвращается).
+                let up_ms = if e.time_ms > 0 { e.time_ms } else { self.now };
+                if up_ms.saturating_sub(self.press_at) > 500 {
+                    return;
+                }
                 if let Some(i) = self.hit_test(p) {
                     let cb = self.hits[i].cb.clone();
                     cb();
