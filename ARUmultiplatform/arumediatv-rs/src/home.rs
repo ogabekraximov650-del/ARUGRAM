@@ -1408,8 +1408,8 @@ impl Home {
         let page = page.width(w).height(h).pivot(0.0, 0.0).scale(s).alpha((0.3 + 2.4 * q).min(1.0));
         let inner = column(vec![page]).scroll(&self.rev_sy).width(w).height(r.3.max(1.0));
         let outer = row(vec![inner]).scroll(&self.rev_sx).width(r.2.max(1.0)).height(r.3.max(1.0));
-        // Oyna burchaklari yumaloq: karta radiusidan (20 dp) boshlab ekran to'lgach 0 ga tushadi.
-        let win = column(vec![outer]).width(r.2.max(1.0)).height(r.3.max(1.0)).round_clip(20.0 * (1.0 - q).clamp(0.0, 1.0));
+        // Yumaloq qirqish bu yerda ISHLATILMAYDI: butun sahifani (shisha xiralashuvi bilan) o'nlab marta qayta chizadi va Redmi 9C'da qotadi.
+        let win = column(vec![outer]).width(r.2.max(1.0)).height(r.3.max(1.0));
         column(vec![gap_box(0.0, r.1.max(0.0)), row(vec![gap_box(r.0.max(0.0), 0.0), win]).align(Align::Start)]).align(Align::Start)
     }
 

@@ -1836,7 +1836,7 @@ fn round_clip_cmds(cmds: &mut Vec<DrawCmd>, start: usize, rect: Rect, radius: f3
         return;
     }
     let sub: Vec<DrawCmd> = cmds.drain(start..).collect();
-    let n = (r.ceil() as usize).clamp(1, 12);
+    let n = (r.ceil() as usize).clamp(1, 6);
     let hh = r / n as f32;
     let mut strips: Vec<Rect> = Vec::with_capacity(2 * n + 1);
     for i in 0..n {
