@@ -10706,7 +10706,7 @@ async fn auth_route(req: Request, env: &Env, origin: &str, path: &str, method: M
             let b: Value = req.json().await.unwrap_or(json!({}));
             let now = now_ms();
             let _ = turso_exec(env, "DELETE FROM login_tokens WHERE expires_at < ?", vec![TursoArg::int(now)]).await;
-            let token = random_hex(16);
+            let token = random_hex(32);
             turso_exec(env,
                 "INSERT INTO login_tokens (token,status,user_id,session_token,device,platform,app_version,created_at,expires_at)
                  VALUES (?,'pending',0,'',?,?,?,?,?)",
