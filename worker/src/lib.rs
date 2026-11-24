@@ -12276,6 +12276,8 @@ async fn encode_settle(env: &Env, a: i64, s: i64, e: i64, queued_at: i64) {
     encode_notify(env, &format!(
         "\u{2705} Kodlash tugadi: <b>{}</b>, {}, {num}-qism.\nTayyor sifatlar: {}\nAsl video o'chirildi.",
         html_escape(&an), html_escape(&sn), done.join(", "))).await;
+    // Qism to'liq tayyor, asl video o'chdi — endi eng yuqori sifatdan kadrlar olinadi (alohida workflow).
+    let _ = frames::kick(env).await;
 }
 
 /// Shu sifat-workflow uchun Telegram sessiyasi ulanganmi (`sess_ok_<q>`, "🔑 Yangi sessiya" tugagach yoziladi).
@@ -13493,8 +13495,6 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         }
         let done = encode_commit_quality(env, (a, s, e), queued_at, q, file, &key, size, jint(&b, "msg_id"),
             wq.is_some(), job["done"].as_str().unwrap_or("")).await?;
-        // Qism sifati tayyor — kadrlar workflow'ini uyg'otamiz (video ombori tayyor bo'lmasa, cron keyin oladi).
-        let _ = frames::kick(env).await;
         return ok(json!({"ok": true, "done": done}));
     }
 

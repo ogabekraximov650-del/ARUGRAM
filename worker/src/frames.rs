@@ -33,6 +33,7 @@ const WINDOW_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 /// Navbatdagi (kadrsiz, videosi omborda tayyor) qismlar shartini hosil qiladi; `?` lar: oyna boshi, hozir, hozir (ijara).
 const CANDIDATE_WHERE: &str =
     "COALESCE(e.collage_file_id,'')='' AND e.created_at > ?
+     AND NOT EXISTS (SELECT 1 FROM encode_jobs j WHERE j.anime_id=e.anime_id AND j.season_id=e.season_id AND j.epizod_id=e.epizod_id)
      AND (COALESCE(e.q1080_vd_ids,'')<>'' OR COALESCE(e.q720_vd_ids,'')<>'' OR COALESCE(e.q480_vd_ids,'')<>'' OR COALESCE(e.q360_vd_ids,'')<>'')
      AND (f.anime_id IS NULL OR (f.attempts < 5 AND f.lease_until <= ?))";
 
