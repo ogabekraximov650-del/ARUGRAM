@@ -1247,6 +1247,14 @@ async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
         start(env, chat, status, &it, None, height).await;
         return;
     }
+    // Har bosqich xabarda ko'rinadi: xabar qayerda qotib qolsa, muammo shu bosqichda (jim to'xtash endi bilinadi).
+    let step = |line: &'static str| async move {
+        if status > 0 {
+            let _ = encbot_api(env, "editMessageText", json!({"chat_id": chat, "message_id": status,
+                "text": format!("\u{23F3} {} \u{2014} {line}", quality_name(height))})).await;
+        }
+    };
+    step("fasllar ro'yxati olinmoqda...").await;
     let ss = match seasons(env, &it.s).await {
         Ok(ss) => ss,
         Err(e) => { fail(&format!("fasllarni olib bo'lmadi ({e}).")).await; return; }
@@ -1255,6 +1263,7 @@ async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
         fail("fasl topilmadi \u{2014} qaytadan tanlang.").await;
         return;
     };
+    step("qismlar ro'yxati olinmoqda...").await;
     let eps = match episodes(env, &it.s, &season.slug).await {
         Ok(e) => e,
         Err(e) => { fail(&format!("qismlarni olib bo'lmadi ({e}).")).await; return; }
