@@ -7836,3 +7836,5 @@ Tab o'tishi (Bosh -> Profil va h.k.): `home.rs` `tab_view`/`TabAnim` — har bar
 - Post `AUTO_POST=false`: kadrlar saqlanadi, admin tugmasi bilan joylanadi (`repost` kadrlar bo'lsa albom qiladi).
 
 Qo'riqchi (osilib qolgan run): cron `encode_kick_full(full)` da sifat uchun ish kutayotgan, faol ijara yo'q, lekin workflow run'i `queued`/`in_progress` bo'lib 25 daqiqadan oshsa (`encode_cancel_stale`) — run bekor qilinadi, keyingi cron yangisini ishga tushiradi. Sabab: 1080p 4.5 soat dispatch qilinmadi (`encode_kicked_1080p`), `gh_workflow_busy` tugamagan run'ni "band" deb hisoblaydi.
+
+Bir martalik tozalash (`worker/src/purge.rs`): `app_config.ep_purge = <anime>/<bo'lim>/<dan>/<gacha>` (qism RAQAMLARI) qo'yilsa, cron har tikda 5 tagacha qismni admin "qismni o'chirish" yo'li bilan tozalaydi (baza avval, kanal fayllari `job_enqueue_cleanup` orqali), tugagach belgi o'chadi, `ep_purge_q` (anime nomi bo'lagi) bo'lsa Anibla navbatidagi shu ishlar ham o'chadi va adminga xabar ketadi. Belgi bo'lmasa hech narsa qilmaydi.

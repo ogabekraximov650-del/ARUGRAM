@@ -39,6 +39,7 @@ mod videoassets;
 mod channels;
 mod postbot;
 mod frames;
+mod purge;
 mod trbot;
 mod cmpbot;
 mod dubbot;
@@ -15377,6 +15378,8 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     let _ = postbot::kick(&env).await;
     // Qism kadrlari — ALOHIDA workflow (`frames::kick`).
     let _ = frames::kick(&env).await;
+    // Bir martalik qismlar oralig'ini tozalash (`app_config.ep_purge` bo'lsagina).
+    purge::tick(&env).await;
     // "Anibla yuklash" navbati — ALOHIDA workflow (`anibla::kick`).
     let _ = anibla::kick(&env).await;
     // "Manga tarjima" navbati — ALOHIDA workflow (`trbot::kick`).
