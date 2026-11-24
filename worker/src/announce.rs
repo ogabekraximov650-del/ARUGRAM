@@ -199,8 +199,18 @@ pub(crate) async fn collage_post(env: &Env, a: i64, s: i64, e: i64, sealed: &[u8
     let key = hex_key(key_hex.trim()).ok_or("kadrlar kaliti noto'g'ri")?;
     let frames = split_frames(&decrypt(sealed, &key))?;
     // Shifrlangan nusxa avval saqlash kanaliga; xato bo'lsa e'lon baribir chiqadi (keyingi safar afisha bilan).
-    if let Err(why) = store_collage(env, a, s, e, sealed, key_hex.trim()).await {
-        console_log!("kadrlar saqlanmadi ({a}/{s}/{e}): {why}");
+    match store_collage(env, a, s, e, sealed, key_hex.trim()).await {
+        Err(why) => console_log!("kadrlar saqlanmadi ({a}/{s}/{e}): {why}"),
+        Ok(_) => {
+            // Kodlash botiga xabar ("Kodlash tugadi" kabi): kadrlar tayyor.
+            let num = turso_exec(env, "SELECT epizod_number FROM epizod_db WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await.ok()
+                .and_then(|r| first_row(&r)).map(|r| jint(&r, "epizod_number")).unwrap_or(0);
+            let (an, sn) = encbot_titles(env, a, s).await.unwrap_or_else(|| (format!("anime #{a}"), format!("bo'lim #{s}")));
+            encode_notify(env, &format!(
+                "\u{1F5BC} Kadrlar tayyor: <b>{}</b>, {}, {num}-qism.\nKadrlar: {} ta ({} KB).",
+                html_escape(&an), html_escape(&sn), frames.len(), frames.iter().map(|f| f.len()).sum::<usize>() / 1024)).await;
+        }
     }
     if !AUTO_POST {
         return Ok(false); // kadrlar saqlandi; post qo'lda (`repost`) joylanadi
