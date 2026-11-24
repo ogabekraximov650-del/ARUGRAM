@@ -7836,3 +7836,5 @@ Tab o'tishi (Bosh -> Profil va h.k.): `home.rs` `tab_view`/`TabAnim` — har bar
 - Post `AUTO_POST=false`: kadrlar saqlanadi, admin tugmasi bilan joylanadi (`repost` kadrlar bo'lsa albom qiladi).
 
 Qo'riqchi (osilib qolgan run): cron `encode_kick_full(full)` da sifat uchun ish kutayotgan, faol ijara yo'q, lekin workflow run'i `queued`/`in_progress` bo'lib 25 daqiqadan oshsa (`encode_cancel_stale`) — run bekor qilinadi, keyingi cron yangisini ishga tushiradi. Sabab: 1080p 4.5 soat dispatch qilinmadi (`encode_kicked_1080p`), `gh_workflow_busy` tugamagan run'ni "band" deb hisoblaydi.
+
+Kadrlar ASL videodan (2026-11): eng yuqori sifat run'i (`QUALITY == top_label`, `tool/encode/run.py`) asl videoni yuklagach, kodlashdan OLDIN `make_frames(src, ..., full=True)` bilan 10 ta kadrni ASL o'lchamida (kichraytirmasdan) oladi va `/api/encode/collage` ga yuboradi (asl video keyin o'chadi). Oqim worker chegarasiga (18 MiB) sig'ishi uchun kadr ~1.6 MiB dan oshsa sifat (JPEG q), kerak bo'lsa o'lcham 25% tushiriladi. Xato bo'lsa jim: ZAXIRA — `frames.yml` (qism to'liq tayyor bo'lgach, kadrsiz qolsa) tayyor eng yuqori sifatdan oladi (1920 px gacha).

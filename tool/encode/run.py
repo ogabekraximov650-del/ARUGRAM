@@ -624,7 +624,7 @@ FRAMES_N = 10          # kanal postidagi kadrlar soni (Telegram albomi — eng k
 FRAMES_FROM, FRAMES_TO = 0.20, 0.80   # videoning shu oralig'idan olinadi: boshidagi intro va oxiridagi titrlar tushib qolmasin
 
 
-def make_frames(video: Path, dur: float, n: int = FRAMES_N) -> list:
+def make_frames(video: Path, dur: float, n: int = FRAMES_N, full: bool = False) -> list:
     """UZ: Kodlangan videodan `n` ta SIFATLI kadr (har biri TO'LIQ o'lchamda, 16:9, JPEG ro'yxati; kollaj EMAS). Videoning 20%..80% oralig'i `n` teng
     bo'lakka bo'linadi; har bo'lakdan 6 ta nomzod kadr (kichik nusxada) olinib ENG BATAFSILI (JPEG hajmi eng katta: tiniq, ma'noli kadr) tanlanadi,
     so'ng aynan shu vaqt to'liq o'lchamda (eng ko'pi 1920 px eni) qayta olinadi.
@@ -647,10 +647,31 @@ def make_frames(video: Path, dur: float, n: int = FRAMES_N) -> list:
             raise RuntimeError(f"kadrlar: {i + 1}-bo'lakdan kadr olinmadi")
         _, bt = max(cands, key=lambda c: c[0])
         out = tmp / f"f{i}.jpg"
+        # `full` — ASL video o'lchamida (kichraytirilmaydi); aks holda eng ko'pi bilan 1920 px eni.
+        vf = ["-vf", "scale='min(1920,iw)':-2:flags=lanczos"] if not full else []
         r = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-ss", f"{bt:.2f}", "-i", str(video), "-frames:v", "1",
-                            "-vf", "scale='min(1920,iw)':-2:flags=lanczos", "-q:v", "2", str(out)], capture_output=True, timeout=120)
+                            *vf, "-q:v", "2", str(out)], capture_output=True, timeout=180)
         if r.returncode != 0 or not out.exists() or out.stat().st_size < 2000:
             raise RuntimeError(f"{i + 1}-kadr olinmadi: " + (r.stderr or b"")[-200:].decode(errors="replace"))
+        # Hamma kadrlar oqimi worker chegarasiga (18 MiB) sig'ishi kerak: kadr ~1.6 MiB dan oshsa, o'lcham SAQLANIB sifat (JPEG q) bosqichma-bosqich
+        # tushiriladi; shunda ham sig'masa o'lcham 25% kichraytiriladi. Odatdagi 1080p kadr bunga yetmaydi (~0.4-0.8 MiB).
+        lim = (16 * 1048576) // max(n, 1)
+        if full and out.stat().st_size > lim:
+            best = out
+            for q in (4, 6, 9, 13):
+                o2 = tmp / f"g{i}_{q}.jpg"
+                rr = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(out), "-q:v", str(q), str(o2)], capture_output=True, timeout=180)
+                if rr.returncode == 0 and o2.exists() and o2.stat().st_size > 2000:
+                    best = o2
+                    if o2.stat().st_size <= lim:
+                        break
+            if best.stat().st_size > lim:
+                o3 = tmp / f"h{i}.jpg"
+                rr = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-y", "-i", str(best), "-vf", "scale=trunc(iw*0.75/2)*2:-2", "-q:v", "6", str(o3)],
+                                    capture_output=True, timeout=180)
+                if rr.returncode == 0 and o3.exists() and o3.stat().st_size > 2000:
+                    best = o3
+            out = best
         frames.append(out.read_bytes())
     shutil.rmtree(tmp, ignore_errors=True)
     return frames
@@ -1355,6 +1376,17 @@ async def process(app: Client, channel: int, job: dict):
         log(f"  manba {src_h}p, {src_d:.0f} s, {src_mb:.1f} MB, "
             f"bitreyt ~{src.stat().st_size * 8 / src_d / 1000:.0f} kb/s -> "
             f"{', '.join(x[0] for x in steps)}")
+
+        # KADRLAR ASL videodan, ASL o'lchamida olinadi (kodlashdan oldin; asl video keyin o'chadi). Faqat eng yuqori sifat run'ida;
+        # xato bo'lsa jim o'tmaydi: qism baribir tayyorlanadi, kadrlarni esa zaxira workflow (`frames.yml`) tayyor sifatdan oladi.
+        if QUALITY and QUALITY == top_label:
+            try:
+                fr = await asyncio.to_thread(make_frames, src, src_d, FRAMES_N, True)
+                log(f"  asl videodan {len(fr)} ta kadr ({sum(len(x) for x in fr) // 1024} KB)")
+                r_ = await asyncio.to_thread(post_frames, ident, fr)
+                log(f"  kadrlar saqlandi ({'joylandi' if r_.get('posted') else 'post qo`lda'})")
+            except Exception as ex:  # noqa: BLE001
+                log(f"  kadrlar olinmadi ({type(ex).__name__}: {str(ex)[:150]}) — zaxira workflow tayyor sifatdan oladi")
 
         for idx, (label, target, dcrf) in enumerate(steps, 1):
             hb.check()

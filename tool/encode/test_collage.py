@@ -60,3 +60,16 @@ assert max(secs) <= hi + 0.5, (hi, secs)
 assert secs == sorted(secs), secs   # tartib saqlanadi
 print("kadr vaqtlari (s):", [round(x) for x in secs])
 print("test_collage: OK", len(frames), "kadr,", sum(len(f) for f in frames) // 1024, "KB")
+
+# ASL o'lcham: `full=True` kadrni KICHRAYTIRMAYDI (2560x1440 manba -> 2560x1440), `full=False` esa 1920 pxgacha kichraytiradi.
+v2 = d / "t2.mp4"
+subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=size=2560x1440:rate=10", "-t", "30", "-c:v", "libx264", "-preset", "ultrafast", str(v2)], check=True)
+def _wh(b):
+    p = d / "wh.jpg"; p.write_bytes(b)
+    return tuple(int(x) for x in subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(p)]).decode().strip().split("x"))
+big = ns["make_frames"](v2, 30.0, 10, True)
+assert len(big) == 10 and _wh(big[0]) == (2560, 1440), _wh(big[0])
+assert sum(len(f) for f in big) <= 18 * 1024 * 1024, "kadrlar oqimi 18 MiB dan oshdi"
+small = ns["make_frames"](v2, 30.0)
+assert _wh(small[0]) == (1920, 1080), _wh(small[0])
+print("test_collage: asl o'lcham OK")
