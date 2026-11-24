@@ -1247,14 +1247,6 @@ async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
         start(env, chat, status, &it, None, height).await;
         return;
     }
-    // Har bosqich xabarda ko'rinadi: xabar qayerda qotib qolsa, muammo shu bosqichda (jim to'xtash endi bilinadi).
-    let step = |line: &'static str| async move {
-        if status > 0 {
-            let _ = encbot_api(env, "editMessageText", json!({"chat_id": chat, "message_id": status,
-                "text": format!("\u{23F3} {} \u{2014} {line}", quality_name(height))})).await;
-        }
-    };
-    step("fasllar ro'yxati olinmoqda...").await;
     let ss = match seasons(env, &it.s).await {
         Ok(ss) => ss,
         Err(e) => { fail(&format!("fasllarni olib bo'lmadi ({e}).")).await; return; }
@@ -1263,7 +1255,6 @@ async fn pick_quality(env: &Env, chat: i64, nav: &Nav, height: i64) {
         fail("fasl topilmadi \u{2014} qaytadan tanlang.").await;
         return;
     };
-    step("qismlar ro'yxati olinmoqda...").await;
     let eps = match episodes(env, &it.s, &season.slug).await {
         Ok(e) => e,
         Err(e) => { fail(&format!("qismlarni olib bo'lmadi ({e}).")).await; return; }
@@ -1431,6 +1422,7 @@ async fn send_card(env: &Env, chat: i64, it: &Item, text: &str, markup: Value) {
 
 // ── Video va sifatlar ────────────────────────────────────────
 
+#[derive(Clone)]
 struct Variant {
     height: i64,
     bandwidth: i64,
@@ -1488,6 +1480,20 @@ fn join_url(base: &str, rel: &str) -> String {
 
 /// Qism/film sahifasidagi `video` -> HLS master -> sifatlar (balanddan pastga).
 async fn variants(video: &str) -> std::result::Result<Vec<Variant>, String> {
+    let now = now_ms();
+    if let Some(v) = VARIANTS_CACHE.with(|c| c.borrow().get(video).filter(|(t, _)| now - *t < VIDEO_CACHE_MS).map(|(_, v)| v.clone())) {
+        return Ok(v);
+    }
+    let v = variants_raw(video).await?;
+    VARIANTS_CACHE.with(|c| {
+        let mut m = c.borrow_mut();
+        if m.len() >= 20 { m.clear(); }
+        m.insert(video.to_string(), (now, v.clone()));
+    });
+    Ok(v)
+}
+
+async fn variants_raw(video: &str) -> std::result::Result<Vec<Variant>, String> {
     if video.is_empty() {
         return Err("bu qismda video yo'q (hali yuklanmagan yoki obuna kerak)".into());
     }
@@ -1578,7 +1584,33 @@ fn quality_name(h: i64) -> String {
 }
 
 /// Qism (yoki film) videosi manzili.
+thread_local! {
+    /// UZ: Bir so'rov ichida (sifat tugmalari -> navbatga qo'yish) video manzili va sifatlar ikki marta olinmasin: Cloudflare bepul rejasida
+    ///     bitta chaqiruvga 50 ta tashqi so'rov chegarasi bor — takror so'rovlar chegaradan oshirib, bot xabarni yangilamay jim qolardi.
+    /// EN: Within one request the video URL and variants are not fetched twice (the free plan allows 50 subrequests per invocation).
+    static VIDEO_CACHE: std::cell::RefCell<std::collections::HashMap<String, (i64, String)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    static VARIANTS_CACHE: std::cell::RefCell<std::collections::HashMap<String, (i64, Vec<Variant>)>> = std::cell::RefCell::new(std::collections::HashMap::new());
+}
+const VIDEO_CACHE_MS: i64 = 90 * 1000;
+
 async fn video_of(env: &Env, it: &Item, ep: Option<(&str, &Episode)>) -> std::result::Result<String, String> {
+    let key = format!("{}|{}", it.s, ep.map(|(s, e)| format!("{s}/{}", e.slug)).unwrap_or_default());
+    let now = now_ms();
+    if let Some(v) = VIDEO_CACHE.with(|c| c.borrow().get(&key).filter(|(t, _)| now - *t < VIDEO_CACHE_MS).map(|(_, v)| v.clone())) {
+        return Ok(v);
+    }
+    let v = video_of_raw(env, it, ep).await?;
+    if !v.is_empty() {
+        VIDEO_CACHE.with(|c| {
+            let mut m = c.borrow_mut();
+            if m.len() >= 20 { m.clear(); }
+            m.insert(key, (now, v.clone()));
+        });
+    }
+    Ok(v)
+}
+
+async fn video_of_raw(env: &Env, it: &Item, ep: Option<(&str, &Episode)>) -> std::result::Result<String, String> {
     let v = match ep {
         Some((season, e)) => {
             match get(env, &format!("episodes/{}/{}/{}", enc(&it.s), enc(season), enc(&e.slug)), true).await {
