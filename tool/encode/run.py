@@ -1328,7 +1328,7 @@ async def process(app: Client, channel: int, job: dict):
         hb.check()
         src_h, src_d = await asyncio.to_thread(probe, src)
         steps = plan(src_h)
-        top_label = steps[0][0]  # eng yuqori sifat (plan: yuqoridan pastga) — kadrlar kollaji va kanal posti shu run'da
+        top_label = steps[0][0]  # eng yuqori sifat (plan: yuqoridan pastga)
         if QUALITY:
             # Haqiqiy balandlik worker'ga yoziladi: boshqa sifatlar uchun to'g'ri kelmaydiganlari
             # (upscale yo'q) "skip" bo'ladi, asl video bekorga yuklanmaydi.
@@ -1376,13 +1376,7 @@ async def process(app: Client, channel: int, job: dict):
             _, d = await asyncio.to_thread(probe, out)
             if abs(d - src_d) > 2.0:
                 raise RuntimeError(f"{label}: davomiylik mos emas ({d:.1f} / {src_d:.1f} s)")
-            collage = None
-            if QUALITY and label == top_label:
-                try:
-                    collage = await asyncio.to_thread(make_frames, out, src_d)
-                    log(f"  {label}: {len(collage)} ta kadr tayyor ({sum(len(x) for x in collage) // 1024} KB)")
-                except Exception as ex:  # noqa: BLE001
-                    log(f"  {label}: kadrlar olinmadi ({type(ex).__name__}: {str(ex)[:150]}) — e'lon afisha bilan chiqadi")
+            # Kadrlar (afisha albomi) bu yerda OLINMAYDI: ularni ALOHIDA workflow oladi (`tool/frames/frames.py`, worker `frames.rs`).
             hb.check()
             k = secrets.token_bytes(16)
             sealed = WORK / name
@@ -1446,13 +1440,6 @@ async def process(app: Client, channel: int, job: dict):
             STATUS.quality(label, state="done")
             STATUS.update(xfer=None)
             log(f"  {label}: jurnalga yozildi")
-            if collage:
-                # Sifat jurnalga yozildi (qism ilovada ochiladi) — endi kollajli asosiy post kanalga chiqadi (bir marta).
-                try:
-                    r_ = await asyncio.to_thread(post_frames, ident, collage)
-                    log(f"  {label}: kanal posti {'joylandi' if r_.get('posted') else 'avval joylangan'}")
-                except Exception as ex:  # noqa: BLE001
-                    log(f"  {label}: kanal posti yuborilmadi ({type(ex).__name__}: {str(ex)[:150]}) — afisha bilan chiqadi")
             nxt = [l for l, _, _ in steps if l not in done]
             if ONE_QUALITY_PER_RUN and nxt:
                 log(f"  keyingi sifat ({nxt[0]}) yangi run'da — bu run tugaydi")

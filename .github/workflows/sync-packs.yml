@@ -11,6 +11,7 @@ on:
       - 'tool/packs/**'
       - 'tool/encode/run.py'
       - 'tool/post/**'
+      - 'tool/frames/**'
       - 'tool/translate/**'
       - 'tool/anibla/download.py'
       - 'tool/anibla/stage.py'

@@ -39,6 +39,10 @@ FILES[".github/workflows/post.yml"] = HERE.parent / "post" / "post.workflow.yml"
 for _src in sorted((HERE.parent / "post").iterdir()):
     if _src.is_file() and _src.suffix in (".py", ".sh", ".png"):
         FILES[f"tool/post/{_src.name}"] = _src
+# Qism kadrlari (afisha albomi) — ALOHIDA workflow `frames.yml` (video ombori `vdlib.py` bilan, Telegram sessiyasisiz).
+FILES[".github/workflows/frames.yml"] = HERE.parent / "frames" / "frames.workflow.yml"
+FILES["tool/frames/frames.py"] = HERE.parent / "frames" / "frames.py"
+FILES["tool/vd/vdlib.py"] = HERE.parent / "vd" / "vdlib.py"
 # "Manga tarjima" (kodlash botining "🌐 Manga tarjima" bo'limi) — ALOHIDA workflow `translate.yml`.
 FILES[".github/workflows/translate.yml"] = HERE.parent / "translate" / "translate.workflow.yml"
 for _src in sorted((HERE.parent / "translate").iterdir()):

@@ -7827,3 +7827,10 @@ Yechim: `Element::capture(&slot)` o'tishning 1-kadrida ikkala sahifaning chizish
 Qo'shimcha (o'tish FPS): GPU'da `Backdrop` (shisha xiralashuvi) bor kadr butun ekran sahna FBO'si + nusxalash + xiralashtirish o'tishlarini talab qiladi (`gl.rs` `render`: `first_blur`). Shuning uchun qotirilgan qatlam chizilganda `Backdrop` → `Glass` (faqat tint) almashtiriladi (`uzcoders-ui` `frozen`). Umumiy FPS uchun keyingi qadam: oddiy skroll paytida ham xiralashuvni arzonlashtirish.
 
 Tab o'tishi (Bosh -> Profil va h.k.): `home.rs` `tab_view`/`TabAnim` — har barqaror kadr `capture` qilinadi; tab almashganda eski qatlam joyida qoladi, yangisi 1 kadrda chizilib o'ngdan (yoki chapdan) sirpanib kiradi (qotirilgan qatlamlar, 250 ms). Sahifa o'tishi va tab o'tishi egri chizig'i: ease-in-out (smootherstep), kadr qadami 33 ms bilan cheklangan soat.
+
+## Qism kadrlari ALOHIDA workflow'da (2026-11)
+
+- Sabab: 73-qismda kadrlar (collage) yo'q edi (kadr olish sifat workflow'ida, xato bersa jim o'tib ketardi). Endi sifat workflow'lari (`encode.yml`) faqat qismni tayyorlaydi (`tool/encode/run.py` kadr olmaydi).
+- `worker/src/frames.rs`: `frames_q` jadvali (urinishlar/ijara), `/api/frames/claim` va `/api/frames/fail`, `kick()` — `frames.yml` ni ishga tushiradi: qism sifati yozilganda (`encode/quality`), video ombori tayyor bo'lganda (`vd/done`) va cron (har 10 daqiqa). Navbat: `epizod_db.collage_file_id` bo'sh, video omborda tayyor, oxirgi 14 kun; yangisidan eskisiga; 5 urinishdan keyin to'xtaydi (adminga xabar).
+- `tool/frames/frames.py` + `frames.workflow.yml` (avtoencode repoda `frames.yml`, `sync_repo.py` ko'chiradi): eng yuqori sifatni `vdlib.download` bilan olib, 10 ta kadrni tanlaydi va mavjud `/api/encode/collage` ga shifrlab yuboradi. Telegram sessiyasi kerak emas.
+- Post `AUTO_POST=false`: kadrlar saqlanadi, admin tugmasi bilan joylanadi (`repost` kadrlar bo'lsa albom qiladi).

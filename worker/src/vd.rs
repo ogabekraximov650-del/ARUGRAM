@@ -741,6 +741,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str) -> Result<Res
             // Egasi bo'lsa ma'lumot unga ko'chadi va navbat qatori o'chadi; bo'lmasa navbatda qoladi (`try_attach`).
             let _ = try_attach(env, &name).await;
             r2_delete_all(&bk, &name).await;
+            // Video ombori tayyor — qism kadrlari workflow'ini uyg'otamiz (kadrsiz qism bo'lsa).
+            let _ = super::frames::kick(env).await;
             ok(json!({"ok": true}))
         }
         "/api/vd/fail" => {

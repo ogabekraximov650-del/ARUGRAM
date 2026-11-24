@@ -38,6 +38,7 @@ mod emojifont;
 mod videoassets;
 mod channels;
 mod postbot;
+mod frames;
 mod trbot;
 mod cmpbot;
 mod dubbot;
@@ -1574,6 +1575,7 @@ async fn init_db(env: &Env) -> bool {
         // ── POST KODLASH (kodlash botining ikkinchi bo'limi, `postbot.rs`) ──
         (postbot::DDL[0], vec![]),
         (postbot::DDL[1], vec![]),
+        (frames::DDL[0], vec![]),
         (trbot::DDL[0], vec![]),
         (trbot::DDL[1], vec![]),
         (trbot::DDL[2], vec![]),
@@ -11324,6 +11326,7 @@ fn needs_app_check(path: &str) -> bool {
     // tekshiruvdan o'tadi.
     if matches!(path, "/api/encode/peek" | "/api/encode/claim" | "/api/encode/heartbeat" | "/api/encode/release"
         | "/api/encode/quality" | "/api/encode/finish" | "/api/encode/push" | "/api/encode/meta" | "/api/encode/ulock" | "/api/encode/committed" | "/api/encode/origin" | "/api/encode/refresh" | "/api/encode/collage" | "/api/encode/uptest" | "/api/encode/repost"
+        | "/api/frames/claim" | "/api/frames/fail"
         | "/api/post/claim" | "/api/post/check" | "/api/post/finish" | "/api/post/progress"
         | "/api/tr/claim" | "/api/tr/peek" | "/api/tr/check" | "/api/tr/finish" | "/api/tr/progress"
         | "/api/cmp/claim" | "/api/cmp/peek" | "/api/cmp/check" | "/api/cmp/finish" | "/api/cmp/progress"
@@ -13469,6 +13472,8 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
         }
         let done = encode_commit_quality(env, (a, s, e), queued_at, q, file, &key, size, jint(&b, "msg_id"),
             wq.is_some(), job["done"].as_str().unwrap_or("")).await?;
+        // Qism sifati tayyor — kadrlar workflow'ini uyg'otamiz (video ombori tayyor bo'lmasa, cron keyin oladi).
+        let _ = frames::kick(env).await;
         return ok(json!({"ok": true, "done": done}));
     }
 
@@ -15338,6 +15343,8 @@ async fn scheduled(ev: ScheduledEvent, env: Env, _ctx: ScheduleContext) {
     cleanup_orphan_history(&env).await;
     // "Post kodlash" — ALOHIDA workflow (`postbot::kick`).
     let _ = postbot::kick(&env).await;
+    // Qism kadrlari — ALOHIDA workflow (`frames::kick`).
+    let _ = frames::kick(&env).await;
     // "Anibla yuklash" navbati — ALOHIDA workflow (`anibla::kick`).
     let _ = anibla::kick(&env).await;
     // "Manga tarjima" navbati — ALOHIDA workflow (`trbot::kick`).
@@ -15954,6 +15961,10 @@ async fn route(mut req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     if path.starts_with("/api/encode/") {
         return encode_route(req, &env, path, method.clone()).await;
+    }
+
+    if path.starts_with("/api/frames/") {
+        return frames::route(req, &env, path, method.clone()).await;
     }
 
     if path.starts_with("/api/post/") {

@@ -1,0 +1,44 @@
+name: Qism kadrlari (afisha albomi)
+
+# Sifat workflow'lari (`encode.yml`) faqat qismni tayyorlaydi; qismning kadrlarini (post afishasi uchun) shu ALOHIDA workflow oladi
+# (`tool/frames/frames.py`). Worker uni qism sifati tayyor bo'lishi bilan (`/api/encode/quality`, `/api/vd/done`) va cron bilan
+# (har 10 daqiqada, kadrsiz qism bo'lsa) o'zi ishga tushiradi (`worker/src/frames.rs`). Video video omboridan olinadi (Bot API) —
+# Telegram sessiyasi kerak emas.
+#
+# Bu fayl ARUMEDIATV repodagi `tool/frames/frames.workflow.yml` dan ko'chiriladi (`sync-packs.yml`) — shu yerda o'zgartirmang.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: arumediatv-frames
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  frames:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    env:
+      API_BASE: ${{ secrets.API_BASE || 'https://arumediatv.uzcom.workers.dev' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Python paketlari
+        run: pip install --no-cache-dir cryptography
+
+      - name: Kadrlarni olish
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          START_BUDGET_MIN: '300'
+          PYTHONUNBUFFERED: '1'
+        run: python3 tool/frames/frames.py
