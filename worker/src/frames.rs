@@ -4,8 +4,8 @@
 //
 // UZ: Sifat workflow'lari (`encode.yml`) faqat qismni tayyorlaydi. Qismning kadrlari (2..10 ta to'liq o'lchamli JPEG) ALOHIDA
 //     workflow'da (`frames.yml`, `avtoencode` repoda, shablon `tool/frames/frames.workflow.yml`) olinadi:
-//   * qism sifati tayyor bo'lishi bilan (`encode/quality`, `vd/done`) yoki cron (har 10 daqiqa) `kick` workflow'ni ishga tushiradi;
-//   * `tool/frames/frames.py` navbat bo'shaguncha `/api/frames/claim` qiladi: kadrlari YO'Q (`epizod_db.collage_file_id` bo'sh),
+//   * qism TO'LIQ tayyor bo'lgach (barcha sifatlar yozilgan, asl video o'chirilgan: `encode_jobs` qatori yo'q) — "Kodlash tugadi" dan keyin, `vd/done` da yoki cron (har 10 daqiqa) `kick` workflow'ni ishga tushiradi;
+//   * `tool/frames/frames.py` navbat bo'shaguncha `/api/frames/claim` qiladi: kadrlari YO'Q (`epizod_db.collage_file_id` bo'sh), kodlash ishi yakunlangan,
 //     video video omborida (`vd`) tayyor qismlar — yangisidan eskisiga (oxirgi 14 kun);
 //   * eng yuqori sifatni yuklab kadrlarni oladi va MAVJUD `/api/encode/collage` ga yuboradi (shifrlab saqlaydi); xato bo'lsa `/api/frames/fail`.
 //   Shu tariqa kadrsiz qolgan qism (masalan, kadr olish xato bergan) o'zi tuzaladi.
