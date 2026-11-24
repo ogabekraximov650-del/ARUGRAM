@@ -12063,6 +12063,27 @@ fn encode_paused(env: &Env) -> bool {
 }
 
 /// Pauza paytida kodlash repo'sidagi ishlayotgan va navbatdagi run'larni bekor qiladi (qaytadigan son — bekor qilinganlar).
+/// Workflow'ning `max_age_ms` dan eski, tugamagan (`queued`/`in_progress`) run'larini bekor qiladi. Soni qaytadi.
+async fn encode_cancel_stale(env: &Env, repo: &str, wf: &str, max_age_ms: i64) -> usize {
+    let now = now_ms();
+    let mut n = 0usize;
+    let Ok((200, v)) = gh_api(env, Method::Get, &format!("/repos/{repo}/actions/workflows/{wf}/runs?per_page=10"), None).await else { return 0 };
+    for r in v["workflow_runs"].as_array().cloned().unwrap_or_default() {
+        if r["status"].as_str().map(|s| s == "completed").unwrap_or(true) {
+            continue;
+        }
+        let started = js_sys::Date::parse(r["run_started_at"].as_str().or(r["created_at"].as_str()).unwrap_or("")) as i64;
+        if started > 0 && now - started > max_age_ms {
+            if let Some(id) = r["id"].as_i64() {
+                if let Ok((202, _)) = gh_api(env, Method::Post, &format!("/repos/{repo}/actions/runs/{id}/cancel"), None).await {
+                    n += 1;
+                }
+            }
+        }
+    }
+    n
+}
+
 async fn encode_cancel_runs(env: &Env, repo: &str) -> usize {
     let mut n = 0usize;
     for (_, wf) in ENCODE_WORKFLOWS.iter() {
@@ -15244,7 +15265,18 @@ async fn encode_kick_full(env: &Env, full: bool) -> String {
             continue;
         }
         match gh_workflow_busy(env, &repo, wf).await {
-            Ok(true) => { running.push(*q); continue; }
+            Ok(true) => {
+                // QO'RIQCHI: bu sifat uchun ish kutyapti, faol ijara yo'q, lekin run "tugamagan" — osilib qolgan (navbatda yoki
+                // ishga tushmagan) run yangi run'ga yo'l bermaydi. 25 daqiqadan eski bunday run bekor qilinadi (keyingi cron qayta ishga tushiradi).
+                if full {
+                    let n = encode_cancel_stale(env, &repo, wf, 25 * 60 * 1000).await;
+                    if n > 0 {
+                        notes.push(format!("\u{1F9F9} {q}: osilib qolgan {n} ta run bekor qilindi (qayta ishga tushiriladi)"));
+                    }
+                }
+                running.push(*q);
+                continue;
+            }
             Ok(false) => {}
             Err(e) => {
                 if e.contains("404") { missing += 1; } else { notes.push(e); }
