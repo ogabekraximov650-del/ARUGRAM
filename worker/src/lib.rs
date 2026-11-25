@@ -13988,13 +13988,18 @@ pub(crate) async fn encbot_register(env: &Env, a: i64, s: i64, n: i64, origin: &
             let r = turso_exec(env,
                 "UPDATE epizod_db SET url_360p='',size_360p=0,key_360p='',url_480p='',size_480p=0,key_480p='',
                     url_720p='',size_720p=0,key_720p='',url_1080p='',size_1080p=0,key_1080p='',
-                    origin_video=?, origin_key='', origin_size=?, origin_height=?
+                    origin_video=?, origin_key='', origin_size=?, origin_height=?,
+                    collage_file_id=''
                   WHERE anime_id=? AND season_id=? AND epizod_id=?",
                 vec![TursoArg::text(ov_name), TursoArg::int(size), TursoArg::int(height),
                      TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
             if r.is_err() {
                 return "\u{274C} Qismni yangilab bo'lmadi (baza xatosi).".into();
             }
+            // Video almashdi — eski videoning kadrlari eskirdi: `collage_file_id` bo'shaydi (kadrlar workflow'i yangidan oladi; eski kadrlar xabari
+            // `collage_msg` saqlanadi va yangisi saqlanganda o'chadi) va kadrlar navbati qatori tozalanadi.
+            let _ = turso_exec(env, "DELETE FROM frames_q WHERE anime_id=? AND season_id=? AND epizod_id=?",
+                vec![TursoArg::int(a), TursoArg::int(s), TursoArg::int(e)]).await;
             // Almashtirilgan sifatlar va eski asl video kanaldan o'chadi.
             for q in QUALITIES {
                 let u = ep[format!("url_{q}").as_str()].as_str().unwrap_or("");
