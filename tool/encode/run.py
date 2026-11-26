@@ -515,6 +515,59 @@ async def wait_committed(name: str, label: str, timeout: int = 300):
     raise RuntimeError(f"{label}: bot {timeout} soniyada faylni saqlamadi (bot kanalda adminmi? sessiya ro'yxatdan o'tganmi?)")
 
 
+async def pool_origin(job: dict, ident: dict, enc: Path):
+    """UZ: Asl videoni ASOSIY akkauntsiz yuklaydi: bot uni yuklovchi akkaunt (`tool/encode/pool`) chatiga nusxalaydi (`copyMessage`), akkaunt yuklab
+    oladi (har sifat-run o'z akkaunti bilan — Telegram bitta akkauntga ko'p GB bersa vaqtincha sekinlashtiradi). Muvaffaqiyatli bo'lsa `enc` yo'li,
+    aks holda `None` (chaqiruvchi eski yo'lga — umumiy sessiyaga o'tadi).
+    EN: downloads the origin through a pool account (bot copies the message into its chat) instead of the main account."""
+    files = sorted(Path(SESSION).parent.glob("dl_*.session"))
+    if not (QUALITY and BOT and files):
+        return None
+    names = [q for q, _, _ in LADDER][::-1]
+    idx = names.index(QUALITY) if QUALITY in names else 0
+    order = files[idx % len(files):] + files[:idx % len(files)]
+    for f in order:
+        base = str(f.with_suffix(""))
+        try:
+            import sqlite3  # noqa: PLC0415
+            c = sqlite3.connect(f"file:{f}?mode=ro", uri=True)
+            api_id = int(c.execute("SELECT api_id FROM sessions").fetchone()[0] or 0)
+        except Exception:  # noqa: BLE001
+            api_id = 0
+        cl = Client(base, api_id=api_id or int(os.environ["TG_API_ID"]), api_hash=os.environ["TG_API_HASH"], no_updates=True)
+        try:
+            async with cl:
+                me = await cl.get_me()
+                async for _ in cl.get_dialogs():
+                    pass
+                log(f"  asl video yuklovchi akkaunt orqali olinadi ({me.id}), asosiy akkauntsiz")
+                r = await asyncio.to_thread(api, "origin", {**ident, "uid": me.id})
+                tag = r.get("tag", "")
+                m = None
+                end = time.time() + 120
+                while time.time() < end and m is None:
+                    async for x in cl.get_chat_history(BOT, limit=15):
+                        if (x.caption or "") == tag and (x.document or x.video):
+                            m = x
+                            break
+                    if m is None:
+                        await asyncio.sleep(3)
+                if m is None:
+                    raise RuntimeError("bot asl videoni yubormadi")
+                got = await download_full(cl, m, enc, progress=transfer_progress("yuklab olinmoqda"))
+                if not got or Path(got).stat().st_size == 0:
+                    raise RuntimeError("yuklab olinmadi")
+                try:
+                    await cl.delete_messages(BOT, m.id)
+                except Exception as ex:  # noqa: BLE001
+                    log(f"  bot chatidagi nusxa o'chirilmadi: {ex}")
+                return Path(got)
+        except Exception as ex:  # noqa: BLE001
+            log(f"  yuklovchi akkaunt ({f.name}) bilan olinmadi: {type(ex).__name__}: {str(ex)[:120]} — keyingisi/eski yo'l")
+            enc.unlink(missing_ok=True)
+    return None
+
+
 async def fetch_origin_via_bot(app, ident: dict):
     """Worker orqali bot asl videoni shu sessiya chatiga yuboradi; chat tarixidan topib qaytaradi."""
     r = await asyncio.to_thread(api, "origin", ident)
@@ -1252,7 +1305,11 @@ async def process(app: Client, channel: int, job: dict):
             bot_msg = None
             origin_id = int(job["origin_msg"])
             m, why = None, ""
-            for t in range(3):  # Telegram vaqtincha bo'sh xabar qaytarishi mumkin: 3 marta, sabab yozib boriladi
+            # ASOSIY akkauntsiz: bot asl videoni yuklovchi akkaunt chatiga nusxalaydi, shu akkaunt yuklaydi (muvaffaqiyatsiz bo'lsa — eski yo'l).
+            pooled = None
+            if len([x for x in (job.get("origin_parts") or []) if int(x) > 0]) <= 1:
+                pooled = await pool_origin(job, ident, enc)
+            for t in range(3 if pooled is None else 0):  # Telegram vaqtincha bo'sh xabar qaytarishi mumkin: 3 marta, sabab yozib boriladi
                 try:
                     m = await app.get_messages(channel, origin_id)
                     why = "" if (m and not m.empty) else f"empty={getattr(m, 'empty', None)}"
@@ -1264,7 +1321,7 @@ async def process(app: Client, channel: int, job: dict):
                     break
                 log(f"  asl video xabari {origin_id} olinmadi ({why}), urinish {t + 1}/3")
                 await asyncio.sleep(4 * (t + 1))
-            if not m or m.empty or not (m.document or m.video):
+            if pooled is None and (not m or m.empty or not (m.document or m.video)):
                 raise Fatal(f"asl video kanalda topilmadi (xabar {origin_id}, kanal {channel}, hisob {getattr(app.me, 'id', 0)}, sabab: {why})")
             log("  asl video yuklab olinmoqda...")
             await asyncio.to_thread(hb.set, "download", True)
@@ -1309,6 +1366,8 @@ async def process(app: Client, channel: int, job: dict):
                         with open(pgot, "rb") as fi:
                             shutil.copyfileobj(fi, fo, 8 * 1048576)
                         Path(pgot).unlink()
+            elif pooled is not None:
+                got = str(pooled)
             else:
                 got = await download_full(app, m, enc,
                                                progress=transfer_progress("yuklab olinmoqda"))

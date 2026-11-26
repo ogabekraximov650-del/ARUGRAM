@@ -70,6 +70,27 @@ jobs:
           head -c 16 "$OUT" | grep -q "SQLite format 3" || { echo "::error::Sessiya ochilmadi (ENCODE_TOKEN noto'g'ri?)"; exit 1; }
           echo "Sessiya tiklandi ($SRC)"
 
+      # ASL VIDEONI YUKLASH asosiy akkauntsiz: botdagi "🗂 Yuklovchi sessiyalar" (tool/encode/pool/*.enc) akkauntlari. Bot asl videoni shu
+      # akkaunt chatiga nusxalaydi (`copyMessage`), u yuklaydi. Asosiy akkaunt ko'p GB yuklagach Telegram vaqtincha sekinlashtiradi, shuning
+      # uchun yuklash akkauntlar o'rtasida taqsimlanadi. Sessiya bo'lmasa yoki ishlamasa — eski yo'l (umumiy sessiya).
+      - name: Yuklovchi sessiyalar (asl video uchun)
+        if: steps.peek.outputs.pending != '0'
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          N=0
+          for F in tool/encode/pool/*.enc; do
+            [ -f "$F" ] || continue
+            P="tool/encode/dl_$(basename "$F" .enc).session"
+            if K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$F" -out "$P" && head -c 16 "$P" | grep -q "SQLite format 3"; then
+              N=$((N+1))
+            else
+              rm -f "$P"; echo "::warning::$F ochilmadi"
+            fi
+          done
+          echo "Yuklovchi sessiyalar: $N ta"
+
       - name: Kodlash (__Q__)
         id: enc
         if: steps.peek.outputs.pending != '0'
@@ -88,7 +109,7 @@ jobs:
 
       - name: Sessiyani o'chirish
         if: always()
-        run: rm -f tool/encode/pyro_session.session
+        run: rm -f tool/encode/pyro_session.session tool/encode/dl_*.session
 
       # Shu sifat bo'yicha navbat qolgan bo'lsa — keyingi cron'ni kutmasdan qayta ishga tushadi.
       - name: Davom ettirish

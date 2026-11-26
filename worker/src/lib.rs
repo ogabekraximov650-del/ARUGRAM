@@ -13443,7 +13443,17 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
     // chatiga `copyMessage` qiladi (izoh `ARUORIG|<nom>`); run uni shu chatdan yuklab oladi va o'chiradi.
     if path == "/api/encode/origin" {
         let Some(q) = wq else { return json_resp(&json!({"error": "sifat"}), 400) };
-        let uid: i64 = config_get(env, &format!("sess_uid_{q}")).await.and_then(|v| v.parse().ok()).unwrap_or(0);
+        let mut uid: i64 = config_get(env, &format!("sess_uid_{q}")).await.and_then(|v| v.parse().ok()).unwrap_or(0);
+        // Yuklovchi akkaunt (botdagi "🗂 Yuklovchi sessiyalar"): asl video ASOSIY akkauntga emas, shu akkaunt chatiga nusxalanadi. Faqat ro'yxatdagi uid qabul qilinadi.
+        if let Some(want) = b["uid"].as_i64().filter(|u| *u > 0) {
+            let pool = config_get(env, "sess_pool").await.unwrap_or_default();
+            let all = config_get(env, "sess_uid_upload_all").await.unwrap_or_default();
+            let ok_pool = serde_json::from_str::<Vec<Value>>(&pool).unwrap_or_default().iter().any(|x| x["uid"].as_i64() == Some(want))
+                || all.split(',').any(|x| x.trim().parse::<i64>().ok() == Some(want));
+            if ok_pool {
+                uid = want;
+            }
+        }
         let origin = job["origin"].as_str().unwrap_or("").to_string();
         let msg = turso_exec(env, "SELECT msg_id FROM tg_files WHERE file_name=?", vec![TursoArg::text(&origin)]).await.ok()
             .and_then(|r| first_row(&r)).map(|r| jint(&r, "msg_id")).unwrap_or(0);
