@@ -14,3 +14,6 @@ Noldan, faqat `uzcoders` kutubxonasida yozilgan ilova (boshqa kutubxona yo'q). U
 | `assets/` | 3 ta kichraytirilgan shrift (Latin + Kirill, ~86 KB) va logotip (4 KB) |
 
 Yig'ish va testlar FAQAT GitHub Actions'da: `.github/workflows/arumediatv-rs.yml` ichidagi `aru` job (testlar, ekran rasmlari artifact `aru-ekranlar-<run>`, APK `aru-<run>`).
+
+## Bot va kanal
+`bot.enc` — Telegram bot tokeni va kanal ID'si (ikki qator), AES-256-CBC + PBKDF2 (200 000), kalit — `ENCODE_TOKEN` (loyihadagi boshqa `.enc` fayllar kabi). Ochish: `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in bot.enc`. Ochiq matnda hech qayerga yozilmaydi.
