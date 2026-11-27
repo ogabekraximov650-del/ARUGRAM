@@ -1300,6 +1300,16 @@ async def process(app: Client, channel: int, job: dict):
             await asyncio.to_thread(vdlib.download, job["origin"], src)
             if not src.exists() or src.stat().st_size == 0:
                 raise RuntimeError("asl video (vd) yuklab olinmadi")
+        elif job.get("origin_fids"):
+            # Anibla videosi Bot API bilan ALOHIDA kanalga ~18 MiB li ochiladigan qismlarda qo'yilgan (`tool/anibla/botparts.py`): qismlar Bot API `getFile` bilan
+            # (akkaunt/FloodWait'siz) olinib, ffmpeg `concat` (-c copy) bilan ulanadi.
+            log(f"  asl video Bot API qismlaridan olinmoqda ({len(job['origin_fids'])} qism)...")
+            await asyncio.to_thread(hb.set, "download", True)
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "anibla"))
+            import botparts  # noqa: PLC0415
+            await asyncio.to_thread(botparts.fetch_origin, "".join(TOKEN.split()), job["origin_fids"], src, WORK / "botparts", log)
+            if not src.exists() or src.stat().st_size == 0:
+                raise RuntimeError("asl video (Bot API qismlari) yuklab olinmadi")
         else:
             # Telegram YUKLAB OLISHNI cheklamaydi (cheklov faqat yuklashda) — asl video kanaldan umumiy sessiya bilan olinadi.
             bot_msg = None

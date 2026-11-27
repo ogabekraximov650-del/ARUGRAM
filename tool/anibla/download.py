@@ -41,6 +41,7 @@ except Exception:  # noqa: BLE001 — modul yo'q bo'lsa eski usul
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import stage  # noqa: E402 — 2 GB dan katta videoni qismlab shifrlash (toza yordamchilar)
+import botparts  # noqa: E402 — Bot API orqali ~18 MiB li ochiladigan qismlar (R2'siz)
 
 WORK = Path(os.environ.get("RUNNER_TEMP", "/tmp")) / "anibla"
 SESSION = str(HERE / "pyro_session")
@@ -642,6 +643,37 @@ async def upload_video_part(app, job, path, name, caption, live, label):
     return m.id
 
 
+async def upload_via_bot(job, out, size, w, h, dur, live, bot):
+    """"Ilova uchun": video R2'SIZ va worker orqali o'tmasdan, Bot API bilan ALOHIDA kanalga ~18 MiB li OCHILADIGAN mp4 qismlarda (vaqt bo'yicha) yuklanadi.
+    Qismlar Bot API `getFile` (<= 20 MB) bilan qaytarib olinadi — kodlovchiga akkaunt/FloodWait kerak emas. `done` da `bot_parts` va `fids` yuboriladi."""
+    token, chat = bot
+    live.send(f"✂️ {size / 1048576:.0f} MB — vaqt bo'yicha ~18 MB li qismlarga bo'linmoqda", force=True)
+    parts = await asyncio.to_thread(botparts.split, out, WORK / "segs", float(dur or 0), size)
+    ids, fids = [], []
+    t_up = time.time()
+    done_sent = False
+    try:
+        for i, part in enumerate(parts):
+            live.send(f"⬆️ Telegram'ga (Bot API) yuklanmoqda: qism {i + 1}/{len(parts)} ({part.stat().st_size / 1048576:.1f} MB)")
+            pd, pw, ph = ffprobe(part, "duration"), ffprobe(part, "width", "v:0"), ffprobe(part, "height", "v:0")
+            mid, fid = await asyncio.to_thread(botparts.send_video, token, chat, part, pd or 0, pw or 0, ph or 0)
+            ids.append(mid)
+            fids.append(fid)
+            part.unlink(missing_ok=True)
+        live.done(f"Telegram'ga {len(ids)} qismda yuklandi (Bot API) · {hms(time.time() - t_up)}")
+        live.close()
+        done_sent = True
+        api("done", {**job.ident(), "ok": True, "channel_msg": ids[0], "parts": ids, "fids": fids, "bot_parts": True, "key": "",
+                     "size": size, "height": int(h or 0), "text": live.text(f"✅ Tayyor ({size / 1048576:.0f} MB, {len(ids)} qism)")})
+    except BaseException as e:  # noqa: BLE001
+        # Qisman yuklangan qismlar kanalda qolmasin. `done` natijasi noaniq bo'lsa (tarmoq uzildi) — qismlar TEGILMAYDI (server qabul qilgan bo'lishi mumkin).
+        if not done_sent or isinstance(e, Lost):
+            for m in ids:
+                botparts.delete_message(token, chat, m)
+        raise
+    log(f"  ✅ #{job.id} {len(ids)} qismda Bot API orqali qo'yildi")
+
+
 async def upload_parts(app, job, out, size, live, duration):
     """2 GB dan katta video: kalit-kadr chegaralarida (qayta kodlashsiz) ~1,7 GB li OCHILADIGAN mp4 qismlarga bo'linadi (Telegram'da to'g'ridan-to'g'ri
     ko'riladi, shifrsiz), har qism ketma-ket kanalga video qilib yuklanadi (yuklangach diskdan o'chadi). Qaytadi: xabar raqamlari."""
@@ -698,6 +730,11 @@ async def process(app, job):
         # Eski bosqich matni ("🧩 Bo'laklar mp4 ga yig'ilmoqda...") panelda qolib ketmasin.
         live.send("\U0001F5BC kadr tayyorlanmoqda...", force=True)
         log(f"  yuklab olindi: {size / 1048576:.1f} MB")
+        # "Ilova uchun": R2'siz, Bot API bilan ALOHIDA kanalga vaqt bo'yicha ~18 MiB li qismlarda (hajm cheklovi yo'q).
+        bot = botparts.creds(os.environ.get("ENCODE_TOKEN", "")) if job.target else None
+        if bot:
+            await upload_via_bot(job, out, size, w, h, dur, live, bot)
+            return
         if size > MAX_BYTES:
             if not job.target:
                 raise Fatal(f"fayl {size / 1048576:.0f} MB — Telegram chegarasi 2 GB. Pastroq sifatni tanlang.")

@@ -10,6 +10,7 @@ on:
       - 'worker/**'
       - 'ci/WIPE_DB_ONCE'
       - 'tool/anibla/creds.enc'
+      - 'tool/anibla/botup.enc'
       - 'ci/ENCODE_PAUSE'
       - 'tool/announce/channel.enc'
       - 'tool/encode/gh_token.enc'
@@ -275,6 +276,21 @@ jobs:
               echo "✅ ENCODE_BOT_TOKEN shifrlangan fayldan o'rnatildi"
             else
               echo "⚠️  encode_bot.enc ochilmadi — eski ENCODE_BOT_TOKEN saqlanadi"
+            fi
+          fi
+
+          # Anibla videolari Bot API orqali ALOHIDA kanalga qismlab yuklanadi (`tool/anibla/botparts.py`): bot tokeni va kanal `tool/anibla/botup.enc` da
+          # (ikki qator, AES-256-CBC, `ENCODE_TOKEN` bilan). Worker faqat shu kanaldan qismlarni o'chirish uchun ishlatadi.
+          if [ -f ../tool/anibla/botup.enc ]; then
+            K=$(printf '%s' "${{ secrets.ENCODE_TOKEN }}" | tr -d '[:space:]')
+            AB=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../tool/anibla/botup.enc 2>/dev/null || true)
+            AT=$(printf '%s' "$AB" | sed -n 1p | tr -d '[:space:]'); AC=$(printf '%s' "$AB" | sed -n 2p | tr -d '[:space:]')
+            if [ -n "$AT" ] && [ -n "$AC" ]; then
+              put ANIBLA_PARTS_BOT "$AT"
+              put ANIBLA_PARTS_CH "$AC"
+              echo "✅ ANIBLA_PARTS_BOT/CH shifrlangan fayldan o'rnatildi"
+            else
+              echo "⚠️  botup.enc ochilmadi — eski qiymatlar saqlanadi"
             fi
           fi
 

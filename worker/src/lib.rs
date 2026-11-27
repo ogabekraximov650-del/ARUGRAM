@@ -4022,6 +4022,35 @@ pub(crate) async fn origin_part_rows(env: &Env, origin: &str) -> Vec<(String, i6
     v.into_iter().map(|(_, n, m)| (n, m)).collect()
 }
 
+/// Anibla videosi Bot API orqali ALOHIDA kanalga ~18 MiB li qismlarda yuklanganda (`tool/anibla/botparts.py`) qism xabar raqamlari `tg_files` da shu qadar
+/// siljitib saqlanadi: asosiy kanal xabarlari bilan to'qnashmasin. Kod: `msg >= BOT_OFFSET` — qism Bot API kanalida (`ANIBLA_PARTS_CH`).
+/// EN: message ids of Bot-API parts are stored shifted by this offset in `tg_files` so they never collide with main-channel ids.
+pub(crate) const BOT_OFFSET: i64 = 10_000_000_000;
+
+/// Bot API qismlarining `file_id` jadvali (kodlovchi `getFile` bilan oladi). EN: table of Bot API part file_ids.
+pub(crate) async fn bot_parts_ensure(env: &Env) {
+    let _ = turso_exec(env, "CREATE TABLE IF NOT EXISTS bot_parts (file_name TEXT PRIMARY KEY, fid TEXT NOT NULL)", vec![]).await;
+}
+
+/// Asl videoning qismlari Bot API `file_id` lari (tartib bilan); qismlar Bot API kanalida bo'lmasa yoki to'liq bo'lmasa — bo'sh. EN: ordered Bot API file_ids, empty if not a Bot-API origin.
+pub(crate) async fn origin_fids(env: &Env, origin: &str) -> Vec<String> {
+    let rows = origin_part_rows(env, origin).await;
+    if rows.is_empty() || rows.iter().any(|(_, m)| *m < BOT_OFFSET) {
+        return Vec::new();
+    }
+    let esc: String = origin.chars().flat_map(|c| if matches!(c, '%' | '_' | '\\') { vec!['\\', c] } else { vec![c] }).collect();
+    let res = turso_exec(env, "SELECT file_name, fid FROM bot_parts WHERE file_name LIKE ? ESCAPE '\\'",
+        vec![TursoArg::text(&format!("{esc}.p%"))]).await;
+    let mut v: Vec<(usize, String)> = res.map(|r| rows_of(&r)).unwrap_or_default().into_iter()
+        .filter_map(|r| Some((origin_part_index(origin, r["file_name"].as_str()?)?, r["fid"].as_str()?.to_string())))
+        .collect();
+    v.sort_by_key(|x| x.0);
+    if v.len() != rows.len() {
+        return Vec::new();
+    }
+    v.into_iter().map(|(_, f)| f).collect()
+}
+
 /// Kodlovchiga beriladigan qism xabarlari (tartib bilan); bitta fayl bo'lsa bo'sh ro'yxat. EN: ordered part message ids for the encoder.
 pub(crate) async fn origin_parts(env: &Env, origin: &str) -> Vec<i64> {
     origin_part_rows(env, origin).await.into_iter().map(|(_, m)| m).collect()
@@ -11863,6 +11892,16 @@ async fn tg_forget_file(env: &Env, value: &str) {
     vd::forget(env, name).await;
     // 2 GB dan katta asl video qismlarga bo'lingan bo'lsa (`<nom>.p0`, `.p1`, ...) — hamma qism kanaldan o'chadi.
     for (pname, pmsg) in origin_part_rows(env, name).await {
+        // Bot API qismi: ALOHIDA kanalda (`ANIBLA_PARTS_CH`), shu kanal boti o'chiradi; asosiy kanalga tegilmaydi.
+        if pmsg >= BOT_OFFSET {
+            let (tok, ch) = (tg_secret(env, "ANIBLA_PARTS_BOT"), tg_secret(env, "ANIBLA_PARTS_CH"));
+            if let (false, Ok(chat)) = (tok.is_empty(), ch.parse::<i64>()) {
+                let _ = tg_api_tok(&tok, "deleteMessage", json!({"chat_id": chat, "message_id": pmsg - BOT_OFFSET})).await;
+            }
+            let _ = turso_exec(env, "DELETE FROM bot_parts WHERE file_name=?", vec![TursoArg::text(&pname)]).await;
+            let _ = turso_exec(env, "DELETE FROM tg_files WHERE file_name=?", vec![TursoArg::text(&pname)]).await;
+            continue;
+        }
         let channel = tg_channel_id(env);
         // Shu kanal xabariga boshqa asl video ham qarasa (takroriy qism) — xabar O'CHIRILMAYDI, faqat shu nomning qatori ketadi.
         let shared = turso_exec(env, "SELECT 1 AS x FROM tg_files WHERE msg_id=? AND instr(file_name, ?) <> 1 LIMIT 1",
@@ -11880,10 +11919,12 @@ async fn tg_forget_file(env: &Env, value: &str) {
     let Some(msg_id) = res.ok().and_then(|r| first_row(&r)).and_then(|r| r["msg_id"].as_i64()) else {
         return;
     };
+    // Bot API kanalidagi asl video: xabarlar yuqorida o'chirildi; bu yozuv faqat 0-qismga ishora qiladi.
+    let msg_id = if msg_id >= BOT_OFFSET { 0 } else { msg_id };
     let channel = tg_channel_id(env);
     let shared = turso_exec(env, "SELECT 1 AS x FROM tg_files WHERE msg_id=? AND instr(file_name, ?) <> 1 LIMIT 1",
         vec![TursoArg::int(msg_id), TursoArg::text(name)]).await.ok().and_then(|r| first_row(&r)).is_some();
-    if channel != 0 && !shared {
+    if channel != 0 && !shared && msg_id > 0 {
         let body = json!({"chat_id": channel, "message_id": msg_id});
         // Asosiy botda o'chirish huquqi bo'lmasa — kodlash botining o'zi o'chiradi.
         if tg_api(env, "deleteMessage", body.clone()).await.is_err() && !encbot_token(env).is_empty() {
@@ -12454,6 +12495,7 @@ async fn encode_claim_q(env: &Env, b: &Value, wq: &'static str, now: i64) -> Res
                     "src_h": h,
                     "origin_msg": src["msg_id"],
                     "origin_parts": origin_parts(env, &origin).await,
+                    "origin_fids": origin_fids(env, &origin).await,
                     "origin_vd": src["vd"].as_bool().unwrap_or(false),
                     "origin_url": anibla_url.unwrap_or_default(),
                     "origin_label": anibla_label,
@@ -13379,6 +13421,7 @@ async fn encode_route(mut req: Request, env: &Env, path: &str, method: Method) -
                     "uploaded": uploaded,
                     "origin_msg": src["msg_id"],
                     "origin_parts": origin_parts(env, &origin).await,
+                    "origin_fids": origin_fids(env, &origin).await,
                     "origin_vd": src["vd"].as_bool().unwrap_or(false),
                     "origin_url": anibla_url.unwrap_or_default(),
                     "origin_label": anibla_label,

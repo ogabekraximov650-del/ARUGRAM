@@ -53,6 +53,9 @@ for _src in sorted((HERE.parent / "translate").iterdir()):
 FILES[".github/workflows/anibla.yml"] = HERE.parent / "anibla" / "anibla.workflow.yml"
 FILES["tool/anibla/download.py"] = HERE.parent / "anibla" / "download.py"
 FILES["tool/anibla/stage.py"] = HERE.parent / "anibla" / "stage.py"
+# Bot API qismlari (R2'siz): yuklovchi (`download.py`) va kodlovchi (`run.py`) ishlatadi; `botup.enc` (bot tokeni/kanal) ENCODE_TOKEN bilan shifrlangan.
+FILES["tool/anibla/botparts.py"] = HERE.parent / "anibla" / "botparts.py"
+FILES["tool/anibla/botup.enc"] = HERE.parent / "anibla" / "botup.enc"
 # aniraxuzbot: BITTA workflow (`anibla_bot.yml`) — bitta run = bitta to'liq qism (sifatlar 360p dan ketma-ket), R2 orqali.
 FILES[".github/workflows/anibla_bot.yml"] = HERE.parent / "anibla" / "anibla_bot.workflow.yml"
 # Eski per-sifat workflow'lar: run'lari to'xtatilib o'chiriladi, fayllari olib tashlanadi (bir martalik, keyin hech narsa topilmaydi).

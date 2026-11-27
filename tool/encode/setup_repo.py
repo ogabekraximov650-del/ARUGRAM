@@ -137,6 +137,8 @@ def main():
     files[".github/workflows/anibla.yml"] = ANIBLA / "anibla.workflow.yml"
     files["tool/anibla/download.py"] = ANIBLA / "download.py"
     files["tool/anibla/stage.py"] = ANIBLA / "stage.py"
+    files["tool/anibla/botparts.py"] = ANIBLA / "botparts.py"
+    files["tool/anibla/botup.enc"] = ANIBLA / "botup.enc"
     # "Yangi sessiya" (kodlash botidagi tugma) — ALOHIDA workflow `session.yml`.
     files[".github/workflows/session.yml"] = HERE.parent / "session" / "session.workflow.yml"
     files["tool/session/session.py"] = HERE.parent / "session" / "session.py"

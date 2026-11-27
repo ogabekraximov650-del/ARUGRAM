@@ -2274,12 +2274,15 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
     }
 
     if path == "/api/anibla/done" {
+        // Bot API qismlari (`tool/anibla/botparts.py`): xabar raqamlari asosiy kanal raqamlaridan ajralishi uchun siljitiladi (`BOT_OFFSET`).
+        let bot = b["bot_parts"].as_bool() == Some(true);
+        let off = if bot { crate::BOT_OFFSET } else { 0 };
         let Some(job) = own(env, &b).await else {
             // TOPILGAN XATO (Laputa 2,9 GB: qismlar yuklangach `done` 60 s ichida javob bermadi, yuklovchi qayta yubordi; birinchi chaqiruv serverda
             // bajarilib ish qatori o'chgan edi, ikkinchisi "lost" oldi va yuklovchi KANALDAGI QISMLARNI O'CHIRIB yubordi — qism buzuq qoldi).
             // Endi: ish allaqachon qabul qilingan bo'lsa (kanal xabari `tg_files` da bor) — `dup` deb javob beriladi, yuklovchi hech narsani o'chirmaydi.
             // EN: a retried `done` whose first call already completed must answer `dup`, not `lost`, so the uploader does not delete the channel parts.
-            let msg = jint(&b, "channel_msg");
+            let msg = jint(&b, "channel_msg") + if jint(&b, "channel_msg") > 0 { off } else { 0 };
             if b["ok"].as_bool() == Some(true) && msg > 0 {
                 let seen = turso_exec(env, "SELECT 1 AS x FROM tg_files WHERE msg_id=? LIMIT 1", vec![TursoArg::int(msg)]).await
                     .ok().and_then(|r| first_row(&r)).is_some();
@@ -2305,12 +2308,18 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
         };
         if b["ok"].as_bool() == Some(true) {
             let channel = tg_channel_id(env);
-            let msg = jint(&b, "channel_msg");
+            let msg = jint(&b, "channel_msg") + if jint(&b, "channel_msg") > 0 { off } else { 0 };
             // "Ilova uchun -> Anibla orqali": kanal posti qismning asl videosi bo'ladi
             // va kodlashga navbatga tushadi (botga yuborilgan video bilan bir xil).
             let target: Vec<i64> = job["target"].as_str().unwrap_or("").split('/')
                 .filter_map(|p| p.parse().ok()).collect();
             if target.len() >= 2 && msg > 0 {
+                if bot {
+                    let (np, nf) = (b["parts"].as_array().map(|a| a.len()).unwrap_or(0), b["fids"].as_array().map(|a| a.len()).unwrap_or(0));
+                    if np < 2 || np != nf {
+                        return json_resp(&json!({"error": "bot qismlari to'liq emas"}), 400);
+                    }
+                }
                 // Ikki marta chaqirilsa (yuklovchi javobni kutolmay `done` ni qayta yuborsa) ikkinchi qism YARATILMASIN: ish qatori AVVAL atomik olinadi.
                 // Aks holda bitta video ikki qism bo'lib qo'shilardi va ikkalasi bir xil kanal xabarlariga qarardi — biri tugagach asl video o'chib, ikkinchisi buzilardi.
                 // EN: claim the job row atomically first so a retried `done` cannot register a second episode that shares the same channel messages.
@@ -2326,7 +2335,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 };
                 let origin = format!("orig_bot_{a}_{s}_{n}_{}.mp4", now_ms());
                 // 2 GB dan katta video: qismlar (`<asl>.p0..pN`) va umumiy kalit (butun fayl bo'yicha AES-CTR) yozib qo'yiladi; `encbot_register` asl nomni bog'laydi.
-                let parts: Vec<i64> = b["parts"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).filter(|m| *m > 0).collect()).unwrap_or_default();
+                let parts: Vec<i64> = b["parts"].as_array().map(|a| a.iter().filter_map(|x| x.as_i64()).filter(|m| *m > 0).map(|m| m + off).collect()).unwrap_or_default();
+                let fids: Vec<String> = b["fids"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|f| f.to_string())).collect()).unwrap_or_default();
                 let key = b["key"].as_str().unwrap_or("").trim().to_string();
                 // Kalit bo'sh — qismlar Telegram'da ochiladigan oddiy mp4 (kodlovchi ffmpeg bilan ulaydi); kalit bor — eski, shifrlangan qismlar.
                 if parts.len() > 1 && (key.is_empty() || valid_file_key(&key)) {
@@ -2340,6 +2350,14 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                         "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
                          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
                         vec![TursoArg::text(&origin), TursoArg::int(parts[0]), TursoArg::text(&key)]).await;
+                }
+                if bot && fids.len() == parts.len() {
+                    crate::bot_parts_ensure(env).await;
+                    for (i, f) in fids.iter().enumerate() {
+                        let _ = turso_exec(env,
+                            "INSERT INTO bot_parts (file_name, fid) VALUES (?, ?) ON CONFLICT(file_name) DO UPDATE SET fid=excluded.fid",
+                            vec![TursoArg::text(&origin_part_name(&origin, i)), TursoArg::text(f)]).await;
+                    }
                 }
                 let res = if encbot_titles(env, a, s).await.is_some() {
                     encbot_register(env, a, s, n, &origin, msg, jint(&b, "size"), jint(&b, "height")).await
