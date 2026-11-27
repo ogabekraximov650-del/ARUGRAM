@@ -47,6 +47,6 @@ impl App {
         let g = self.clone();
         let empty_el = empty(VIDEO, "Hali video yo'q", "Yuqoridagi tugma bilan birinchi videoni yuklang", Some(("Yuklash", Rc::new(move || g.create.set(true)))));
         let _ = Tab::Me;
-        self.feed_view(&self.f_mine, self.q_mine(), &self.sc_me, vec![slab, upload, disp("Videolarim", 22.0, WHITE).margin_each(16.0, 4.0, 16.0, 12.0)], empty_el, false, bottom)
+        self.feed_view(&self.f_mine, "mine", self.q_mine(), &self.sc_me, vec![slab, upload, disp("Videolarim", 22.0, WHITE).margin_each(16.0, 4.0, 16.0, 12.0)], empty_el, false, bottom)
     }
 }

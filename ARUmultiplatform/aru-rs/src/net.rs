@@ -30,17 +30,40 @@ fn parse(code: u16, text: &str) -> Result<J, String> {
     }
 }
 
+static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Oxirgi so'rov natijasi (ekranda tashxis uchun ko'rsatiladi).
+pub fn last() -> String {
+    LAST.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn note(method: &str, path: &str, code: &str, bytes: usize, t0: std::time::Instant) {
+    let p: String = path.split('?').next().unwrap_or("").chars().take(30).collect();
+    *LAST.lock().unwrap_or_else(|e| e.into_inner()) = format!("{method} {p} -> {code} · {bytes} bayt · {} ms", t0.elapsed().as_millis());
+}
+
 /// Bloklovchi so'rov (faqat fon oqimida chaqiring: `spawn_bg`).
 pub fn call(method: &str, path: &str, body: &str) -> Result<J, String> {
+    call_text(method, path, body).map(|(j, _)| j)
+}
+
+/// `call`, lekin javob matnini ham qaytaradi (diskka saqlash uchun).
+pub fn call_text(method: &str, path: &str, body: &str) -> Result<(J, String), String> {
     #[cfg(test)]
     let mock = *MOCK.lock().unwrap_or_else(|e| e.into_inner());
     #[cfg(test)]
     if let Some(f) = mock {
         let (c, t) = f(method, path, body);
-        return parse(c, &t);
+        return parse(c, &t).map(|j| (j, t));
     }
+    let t0 = std::time::Instant::now();
     let spec = format!("{method}\n{BASE}{path}\n{TOKEN}\n{body}");
     let r = uzcoders::android::activity_call_ret("http", &spec);
+    if r.is_empty() {
+        note(method, path, "Java javob bermadi", 0, t0);
+        return Err("Ilova ichki xatosi: tarmoq qatlami javob bermadi".into());
+    }
     let (c, t) = r.split_once('\n').unwrap_or(("0", ""));
-    parse(c.trim().parse().unwrap_or(0), t)
+    note(method, path, c.trim(), t.len(), t0);
+    parse(c.trim().parse().unwrap_or(0), t).map(|j| (j, t.to_string()))
 }

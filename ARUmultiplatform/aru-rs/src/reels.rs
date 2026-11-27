@@ -11,7 +11,7 @@ impl App {
     pub fn reels_view(self: &Rc<Self>, top: f32, bottom: f32) -> Element {
         let (w, h) = window_dp();
         let f = &self.f_reels;
-        f.ensure(self.q_reels());
+        f.ensure("reels", self.q_reels());
         let tabs = row(vec![disp("Oqim", 28.0, WHITE)]).padding_each(16.0, top + 10.0, 16.0, 0.0);
         let items = f.items.get();
         if items.is_empty() {
@@ -20,7 +20,7 @@ impl App {
                 column(vec![spinner(34.0, 3.0, SIG)]).center().grow(1.0)
             } else if !f.err.get().is_empty() {
                 let (r, q) = (f.clone(), self.q_reels());
-                column(vec![empty(CLOSE, "Yuklanmadi", &f.err.get(), Some(("Qayta urinish", Rc::new(move || r.fetch(q.clone(), false)))))]).center().grow(1.0)
+                column(vec![empty(CLOSE, "Yuklanmadi", &f.err.get(), Some(("Qayta urinish", Rc::new(move || r.fetch(q.clone(), false, true)))))]).center().grow(1.0)
             } else {
                 column(vec![empty(SHORTS, "Hozircha oqim yo'q", "Tik qisqa video yuklab, birinchi bo'ling", Some(("Oqim yuklash", Rc::new(move || a.pick("reel")))))]).center().grow(1.0)
             };
@@ -31,7 +31,7 @@ impl App {
         let v = items[i].clone();
         // Keyingi sahifa: oxirgi 2 ta qolganda yuklanadi.
         if f.more.get() && i + 2 >= items.len() && !f.loading.get() {
-            f.fetch(self.q_reels(), true);
+            f.fetch(self.q_reels(), true, false);
         }
         let st = self.st.borrow().clone();
         let (vw, vh) = if st.w > 0 && st.h > 0 {

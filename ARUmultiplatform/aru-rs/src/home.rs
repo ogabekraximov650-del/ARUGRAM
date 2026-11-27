@@ -5,6 +5,7 @@ use crate::feed::Feed;
 use crate::icons::*;
 use crate::kit::*;
 use crate::model::*;
+use crate::net;
 use crate::theme::*;
 use uzcoders::prelude::*;
 
@@ -46,20 +47,23 @@ impl App {
     }
 
     /// Ro'yxat: yuklanish, xato, bo'sh holat, sahifalash va tortib yangilash bilan.
-    pub fn feed_view(self: &Rc<Self>, feed: &Rc<Feed>, q: String, sc: &ScrollState, head: Vec<Element>, empty_el: Element, big_first: bool, bottom: f32) -> Element {
+    pub fn feed_view(self: &Rc<Self>, feed: &Rc<Feed>, key: &str, q: String, sc: &ScrollState, head: Vec<Element>, empty_el: Element, big_first: bool, bottom: f32) -> Element {
         let (w, _) = window_dp();
         let cw = w - 24.0;
-        feed.ensure(q.clone());
+        feed.ensure(key, q.clone());
         let (f, q2) = (feed.clone(), q.clone());
-        sc.on_refresh(move || f.fetch(q2.clone(), false));
+        sc.on_refresh(move || f.fetch(q2.clone(), false, true));
         let items = feed.items.get();
         let mut kids = head;
         if items.is_empty() {
-            if feed.loading.get() {
-                kids.push(column(vec![spinner(34.0, 3.0, SIG)]).center().height(240.0));
-            } else if !feed.err.get().is_empty() {
+            let diag = t(net::last(), 11.0, Color::hex(0x6B6B6B));
+            if feed.loading.get() && !feed.stalled() {
+                kids.push(column(vec![spinner(34.0, 3.0, SIG), diag.margin_each(0.0, 14.0, 0.0, 0.0)]).align(Align::Center).padding_each(16.0, 90.0, 16.0, 0.0));
+            } else if feed.stalled() || !feed.err.get().is_empty() {
+                let msg = if feed.stalled() { format!("Javob kelmadi ({} soniya). Internetni tekshiring.", crate::feed::STALL_SECS) } else { feed.err.get() };
                 let (f, q3) = (feed.clone(), q);
-                kids.push(empty(CLOSE, "Yuklanmadi", &feed.err.get(), Some(("Qayta urinish", Rc::new(move || f.fetch(q3.clone(), false))))));
+                kids.push(empty(CLOSE, "Yuklanmadi", &msg, Some(("Qayta urinish", Rc::new(move || f.fetch(q3.clone(), false, true))))));
+                kids.push(column(vec![diag]).align(Align::Center).padding_each(16.0, 0.0, 16.0, 0.0));
             } else {
                 kids.push(empty_el);
             }
@@ -69,7 +73,7 @@ impl App {
             }
             if feed.more.get() {
                 if sc.max_offset() > 0.0 && sc.offset() > sc.max_offset() - 900.0 && !feed.loading.get() {
-                    feed.fetch(q, true);
+                    feed.fetch(q, true, false);
                 }
                 kids.push(column(vec![spinner(26.0, 2.5, SIG)]).center().height(60.0));
             }
@@ -104,7 +108,7 @@ impl App {
         let (feed, q) = if hot { (&self.f_hot, self.q_hot()) } else { (&self.f_new, self.q_new()) };
         let a = self.clone();
         let empty_el = empty(VIDEO, "Hozircha video yo'q", "Birinchi bo'lib video yuklang", Some(("Video yuklash", Rc::new(move || a.create.set(true)))));
-        column(vec![head, tabs, self.feed_view(feed, q, &self.sc_home, Vec::new(), empty_el, !hot, bottom)])
+        column(vec![head, tabs, self.feed_view(feed, if hot { "hot" } else { "new" }, q, &self.sc_home, Vec::new(), empty_el, !hot, bottom)])
     }
 
     /// Obunalar: obuna bo'lingan kanallarning videolari.
@@ -113,7 +117,7 @@ impl App {
         let empty_el = empty(SUBS, "Obunalar yo'q", "Videolarni ko'rib, yoqqan kanalga obuna bo'ling", Some(("Videolarga o'tish", Rc::new(move || a.tab.set(Tab::Home)))));
         column(vec![
             disp("Obunalar", 40.0, WHITE).padding_each(16.0, top + 14.0, 16.0, 10.0),
-            self.feed_view(&self.f_subs, self.q_subs(), &self.sc_subs, Vec::new(), empty_el, false, bottom),
+            self.feed_view(&self.f_subs, "subs", self.q_subs(), &self.sc_subs, Vec::new(), empty_el, false, bottom),
         ])
     }
 
@@ -129,7 +133,7 @@ impl App {
                 return;
             }
             let enc: String = q.bytes().map(|c| if c.is_ascii_alphanumeric() { (c as char).to_string() } else { format!("%{c:02X}") }).collect();
-            g.f_search.fetch(g.q(&format!("sort=new&q={enc}")), false);
+            g.f_search.fetch(g.q(&format!("sort=new&q={enc}")), false, true);
         };
         let go = run.clone();
         let bar = row(vec![back, input(&self.search_text, "Video qidirish").on_submit(run).weight(1.0), gap_box(8.0, 0.0), column(vec![icon(SEARCH, 22.0).color(BG)]).center().width(46.0).height(46.0).radius(14.0).bg(WHITE).on_click(go)])
@@ -142,7 +146,7 @@ impl App {
             let enc: String = q.bytes().map(|c| if c.is_ascii_alphanumeric() { (c as char).to_string() } else { format!("%{c:02X}") }).collect();
             let nothing = empty(SEARCH, "Hech narsa topilmadi", "Boshqa so'z bilan urinib ko'ring", None);
             if self.f_search.asked.get() {
-                self.feed_view(&self.f_search, s.q(&format!("sort=new&q={enc}")), &self.sc_search, Vec::new(), nothing, false, bottom)
+                self.feed_view(&self.f_search, "", s.q(&format!("sort=new&q={enc}")), &self.sc_search, Vec::new(), nothing, false, bottom)
             } else {
                 nothing
             }

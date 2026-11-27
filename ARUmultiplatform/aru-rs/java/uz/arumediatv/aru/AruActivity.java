@@ -55,8 +55,8 @@ public class AruActivity extends UzActivity {
 
     private static HttpURLConnection open(String method, String url, String token) throws IOException {
         HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
-        c.setConnectTimeout(15000);
-        c.setReadTimeout(60000);
+        c.setConnectTimeout(10000);
+        c.setReadTimeout(25000);
         c.setRequestMethod(method);
         if (token != null && token.length() > 0) c.setRequestProperty("X-App-Token", token);
         return c;

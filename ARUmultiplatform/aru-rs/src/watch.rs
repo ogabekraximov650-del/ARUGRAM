@@ -148,7 +148,7 @@ impl App {
         for n in notes.iter() {
             body.push(self.note_row(n, cw).margin_each(14.0, 0.0, 14.0, 0.0));
         }
-        self.f_new.ensure(self.q_new());
+        self.f_new.ensure("new", self.q_new());
         let next: Vec<Video> = self.f_new.items.with(|l| l.iter().filter(|x| x.id != v.id).take(4).cloned().collect());
         if !next.is_empty() {
             body.push(disp("Keyingi", 21.0, WHITE).margin_each(14.0, 14.0, 14.0, 10.0));
