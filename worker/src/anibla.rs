@@ -2245,10 +2245,25 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 status = fresh;
             }
             livewatch::claim(env, livewatch::ANIBLA, chat, status).await;
+            // "Ilova uchun": Ilovada qaysi anime/bo'lim/nechanchi qism bo'lib qo'shilishi — yuklovchi har qism izohiga yozadi.
+            // Qism raqami berilmagan bo'lsa keyingi bo'sh raqam; `done` shu raqamni ishlatadi (`app_n`), shunda izoh va haqiqiy qism mos bo'ladi.
+            let (mut app_label, mut app_n) = (String::new(), 0i64);
+            let tg: Vec<i64> = job["target"].as_str().unwrap_or("").split('/').filter_map(|p| p.parse().ok()).collect();
+            if tg.len() >= 2 {
+                if let Some((an, sn)) = encbot_titles(env, tg[0], tg[1]).await {
+                    let n = match tg.get(2) {
+                        Some(n) => *n,
+                        None => encbot_numbers(env, tg[0], tg[1]).await.iter().max().copied().unwrap_or(0) + 1,
+                    };
+                    app_n = n;
+                    app_label = format!("{an}, {sn} \u{2014} {n}-qism");
+                }
+            }
             return ok(json!({"channel": tg_channel_id(env), "job": {
                 "id": id, "url": job["url"], "caption": job["caption"], "file_name": job["file_name"],
                 "chat": chat, "status_msg": status,
                 "target": job["target"],
+                "app_label": app_label, "app_n": app_n,
                 "attempt": jint(&got, "attempts"),
             }}));
         }
@@ -2331,6 +2346,8 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 let (a, s) = (target[0], target[1]);
                 let n = match target.get(2) {
                     Some(n) => *n,
+                    // Yuklovchi claim vaqtidagi raqamni yuboradi (`app_n`) — qism izohida yozilgan raqam bilan bir xil bo'lsin.
+                    None if jint(&b, "app_n") > 0 => jint(&b, "app_n"),
                     None => encbot_numbers(env, a, s).await.iter().max().copied().unwrap_or(0) + 1,
                 };
                 let origin = format!("orig_bot_{a}_{s}_{n}_{}.mp4", now_ms());

@@ -7,8 +7,10 @@ EN: the Actions runner (polling the queue itself, no worker in the data path) sp
     via Bot API `sendVideo`; the encoder later fetches them with `getFile` (<= 20 MB) and concatenates. Bot token + channel live in `botup.enc` (key: ENCODE_TOKEN).
 RU: ranner Actions sam (polling) rezhet video po VREMENI na ~18 MiB mp4-chasti i shlet kazhduyu cherez Bot API sendVideo; kodirovshchik skachivaet ikh getFile i skleivaet.
 """
+import bisect
 import json
 import os
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -20,9 +22,10 @@ from pathlib import Path
 import stage
 
 HERE = Path(__file__).resolve().parent
-# Bot `getFile` 20 MB gacha beradi: qism 18 MiB atrofida, hech qachon 19 MiB dan oshmaydi.
-TARGET = 18 * 1048576
-LIMIT = 19 * 1048576
+# Bot `getFile` 20 MB (20 000 000 bayt) gacha beradi: qism 20 MB ga IMKON QADAR yaqin, lekin undan oshmaydi.
+# Kesish kalit-kadr chegaralarida paketlar hajmidan hisoblanadi (taxmin `EST`), keyin haqiqiy hajm `MAX_REAL` dan oshmasligi tekshiriladi.
+EST = 19_600_000
+MAX_REAL = 19_950_000
 # `tg_files` da bot qismlarining xabar raqami shu qadar siljitiladi: asosiy kanal xabarlari bilan to'qnashmasin (worker `BOT_OFFSET` bilan bir xil).
 OFFSET = 10_000_000_000
 API = "https://api.telegram.org"
@@ -43,20 +46,117 @@ def creds(key: str, path=None):
     return (tok, int(ch)) if tok and ch.lstrip("-").isdigit() else None
 
 
-def split(src, outdir, duration: float, size: int):
-    """Vaqt bo'yicha >=2 ta qism (har biri <= LIMIT)."""
-    return stage.split_playable(src, outdir, duration, size, target=TARGET, limit=LIMIT)
+def _packets(src):
+    """Hamma oqim paketlari: [(vaqt, hajm)] va video kalit-kadr vaqtlari (ffprobe, qayta kodlamasdan)."""
+    st = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type", "-of", "csv=p=0", str(src)]).decode()
+    kinds = {}
+    for line in st.strip().splitlines():
+        a = line.split(",")
+        if len(a) >= 2 and a[0].isdigit():
+            kinds[int(a[0])] = a[1].strip()
+    vid = next((i for i, k in sorted(kinds.items()) if k == "video"), None)
+    if vid is None:
+        raise RuntimeError("videoda tasvir oqimi yo'q")
+    out = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "packet=stream_index,pts_time,dts_time,size,flags", "-of", "csv=p=0", str(src)]).decode()
+    pk, keys = [], []
+    for line in out.splitlines():
+        a = line.split(",")
+        if len(a) < 5 or not a[0].isdigit() or kinds.get(int(a[0])) not in ("video", "audio"):
+            continue
+        try:
+            t = float(a[1]) if a[1] not in ("", "N/A") else float(a[2])
+            n = int(a[3])
+        except ValueError:
+            continue
+        pk.append((t, n))
+        if int(a[0]) == vid and "K" in a[4]:
+            keys.append(t)
+    pk.sort()
+    return pk, sorted(set(keys))
 
 
-def _multipart(fields: dict, file_field: str, path: Path, filename: str):
+def plan_cuts(pk, keys, est: int):
+    """Kalit-kadr chegaralarida kesish vaqtlari: har qism taxminiy hajmi `est` dan oshmaydigan eng uzun oraliq. Bitta qism chiqsa — o'rtadan ikkiga bo'linadi."""
+    if not keys:
+        raise RuntimeError("kalit kadr topilmadi")
+    times = [p[0] for p in pk]
+    cum = [0]
+    for _, n in pk:
+        cum.append(cum[-1] + n)
+
+    def before(t):
+        return cum[bisect.bisect_left(times, t)]
+
+    cuts, start, i = [], keys[0], 1
+    while i < len(keys):
+        k = keys[i]
+        if before(k) - before(start) <= est:
+            i += 1
+            continue
+        prev = keys[i - 1]
+        cut = prev if prev > start else k  # bitta kalit-kadr oralig'i o'zi katta bo'lsa ham kesamiz
+        cuts.append(cut)
+        start = cut
+        if cut == k:
+            i += 1
+    if not cuts and len(keys) > 2:
+        total = cum[-1]
+        mid = min(keys[1:], key=lambda k: abs(before(k) - total / 2))
+        cuts.append(mid)
+    return cuts
+
+
+def split(src, outdir, duration: float = 0, size: int = 0, est: int = EST, max_real: int = MAX_REAL):
+    """Videoni vaqt bo'yicha (kalit-kadrda, `-c copy`) >=2 ta OCHILADIGAN mp4 qismga bo'ladi; har biri 20 MB ga yaqin va `max_real` dan oshmaydi.
+    Haqiqiy hajm oshib ketsa taxmin kamaytirilib qayta uriniladi."""
+    pk, keys = _packets(src)
+    outdir = Path(outdir)
+    for _ in range(6):
+        cuts = plan_cuts(pk, keys, est)
+        if not cuts:
+            raise RuntimeError("video qismlarga bo'linmadi (kalit kadr kam)")
+        shutil.rmtree(outdir, ignore_errors=True)
+        outdir.mkdir(parents=True)
+        times = ",".join(f"{max(c - 0.0005, 0):.6f}" for c in cuts)
+        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-f", "segment",
+                            "-segment_times", times, "-reset_timestamps", "1", "-segment_format", "mp4",
+                            "-segment_format_options", "movflags=+faststart", str(outdir / "part%03d.mp4")], capture_output=True, text=True)
+        parts = sorted(outdir.glob("part*.mp4"))
+        if r.returncode == 0 and len(parts) > 1:
+            big = max(p.stat().st_size for p in parts)
+            if all(0 < p.stat().st_size <= max_real for p in parts):
+                return parts
+            est = int(est * min(0.97, max_real / big * 0.99))
+        else:
+            est = int(est * 0.9)
+    raise RuntimeError("video ochiladigan qismlarga bo'linmadi")
+
+
+def make_thumb(part):
+    """Qism uchun kichik muqova (JPEG, <= 200 KB, eni <= 320). Bo'lmasa `None`."""
+    part = Path(part)
+    th = Path(str(part) + ".jpg")
+    for ss, q in (("1", "5"), ("0", "5"), ("0", "12")):
+        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", ss, "-i", str(part), "-frames:v", "1", "-vf", "scale='min(320,iw)':-2", "-q:v", q, str(th)],
+                       capture_output=True)
+        if th.exists() and 0 < th.stat().st_size <= 200_000:
+            return th
+    th.unlink(missing_ok=True)
+    return None
+
+
+def _multipart(fields: dict, files):
+    """`files` — [(maydon, yo'l, fayl nomi)]."""
     b = "----aru" + uuid.uuid4().hex
     out = bytearray()
     for k, v in fields.items():
         out += f'--{b}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode()
-    out += (f'--{b}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
-            f"Content-Type: application/octet-stream\r\n\r\n").encode()
-    out += Path(path).read_bytes()
-    out += f"\r\n--{b}--\r\n".encode()
+    for field, path, filename in files:
+        out += (f'--{b}\r\nContent-Disposition: form-data; name="{field}"; filename="{filename}"\r\n'
+                f"Content-Type: application/octet-stream\r\n\r\n").encode()
+        out += Path(path).read_bytes()
+        out += b"\r\n"
+    out += f"--{b}--\r\n".encode()
     return bytes(out), f"multipart/form-data; boundary={b}"
 
 
@@ -88,8 +188,8 @@ def _call(token: str, method: str, data: bytes, ctype: str, tries: int = 8, time
     raise RuntimeError(f"Telegram: {err}")
 
 
-def send_video(token: str, chat: int, path, duration=0, width=0, height=0, caption=""):
-    """Qismni kanalga OCHILADIGAN video qilib yuboradi. Qaytadi: (xabar raqami, file_id)."""
+def send_video(token: str, chat: int, path, duration=0, width=0, height=0, caption="", thumb=None):
+    """Qismni kanalga OCHILADIGAN video qilib (muqova bilan) yuboradi. Qaytadi: (xabar raqami, file_id)."""
     path = Path(path)
     f = {"chat_id": chat, "supports_streaming": "true", "disable_notification": "true"}
     if duration:
@@ -98,7 +198,10 @@ def send_video(token: str, chat: int, path, duration=0, width=0, height=0, capti
         f["width"], f["height"] = int(width), int(height)
     if caption:
         f["caption"] = caption[:1024]
-    body, ctype = _multipart(f, "video", path, path.name)
+    files = [("video", path, path.name)]
+    if thumb and Path(thumb).exists():
+        files.append(("thumbnail", thumb, "thumb.jpg"))
+    body, ctype = _multipart(f, files)
     m = _call(token, "sendVideo", body, ctype)
     media = m.get("video") or m.get("document") or {}
     if not media.get("file_id"):

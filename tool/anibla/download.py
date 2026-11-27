@@ -90,6 +90,9 @@ class Job:
         self.channel = int(r.get("channel") or 0)
         # "Ilova uchun -> Anibla orqali": `anime/bo'lim[/qism]`. Bo'sh bo'lmasa video Telegram'ga qo'yiladi va kodlash navbati `done` da yaratiladi.
         self.target = str(j.get("target") or "").strip()
+        # Ilovada qaysi anime/bo'lim/nechanchi qism bo'lib qo'shilishi (worker `claim` da hisoblaydi) — har qism izohida ko'rsatiladi.
+        self.app_label = str(j.get("app_label") or "").strip()
+        self.app_n = int(j.get("app_n") or 0)
 
     def ident(self):
         return {"runner": RUNNER, "id": self.id, "status_msg": self.status, "chat": self.chat}
@@ -643,6 +646,15 @@ async def upload_video_part(app, job, path, name, caption, live, label):
     return m.id
 
 
+def part_caption(job, i, n):
+    """Har qism ostidagi izoh: Anibla'dagi anime/qism, Ilovada qo'shiladigan anime/bo'lim/qism va bo'lak raqami."""
+    lines = [ln.strip() for ln in job.caption.splitlines() if ln.strip()]
+    anibla = " · ".join(ln for ln in lines if not ln.startswith("\U0001F4F1"))
+    app = job.app_label or next((ln.split(":", 1)[1].strip() for ln in lines if ln.startswith("\U0001F4F1") and ":" in ln), "")
+    out = [f"\U0001F39E Anibla: {anibla}" if anibla else "", f"\U0001F4F1 Ilovada: {app}" if app else "", f"\U0001F4E6 Bo'lak {i}/{n}"]
+    return "\n".join(x for x in out if x)[:1024]
+
+
 async def upload_via_bot(job, out, size, w, h, dur, live, bot):
     """"Ilova uchun": video R2'SIZ va worker orqali o'tmasdan, Bot API bilan ALOHIDA kanalga ~18 MiB li OCHILADIGAN mp4 qismlarda (vaqt bo'yicha) yuklanadi.
     Qismlar Bot API `getFile` (<= 20 MB) bilan qaytarib olinadi — kodlovchiga akkaunt/FloodWait kerak emas. `done` da `bot_parts` va `fids` yuboriladi."""
@@ -656,14 +668,20 @@ async def upload_via_bot(job, out, size, w, h, dur, live, bot):
         for i, part in enumerate(parts):
             live.send(f"⬆️ Telegram'ga (Bot API) yuklanmoqda: qism {i + 1}/{len(parts)} ({part.stat().st_size / 1048576:.1f} MB)")
             pd, pw, ph = ffprobe(part, "duration"), ffprobe(part, "width", "v:0"), ffprobe(part, "height", "v:0")
-            mid, fid = await asyncio.to_thread(botparts.send_video, token, chat, part, pd or 0, pw or 0, ph or 0)
+            th = await asyncio.to_thread(botparts.make_thumb, part)
+            cap = part_caption(job, i + 1, len(parts))
+            try:
+                mid, fid = await asyncio.to_thread(botparts.send_video, token, chat, part, pd or 0, pw or 0, ph or 0, cap, th)
+            finally:
+                if th:
+                    th.unlink(missing_ok=True)
             ids.append(mid)
             fids.append(fid)
             part.unlink(missing_ok=True)
         live.done(f"Telegram'ga {len(ids)} qismda yuklandi (Bot API) · {hms(time.time() - t_up)}")
         live.close()
         done_sent = True
-        api("done", {**job.ident(), "ok": True, "channel_msg": ids[0], "parts": ids, "fids": fids, "bot_parts": True, "key": "",
+        api("done", {**job.ident(), "ok": True, "channel_msg": ids[0], "parts": ids, "fids": fids, "bot_parts": True, "key": "", "app_n": job.app_n,
                      "size": size, "height": int(h or 0), "text": live.text(f"✅ Tayyor ({size / 1048576:.0f} MB, {len(ids)} qism)")})
     except BaseException as e:  # noqa: BLE001
         # Qisman yuklangan qismlar kanalda qolmasin. `done` natijasi noaniq bo'lsa (tarmoq uzildi) — qismlar TEGILMAYDI (server qabul qilgan bo'lishi mumkin).
