@@ -863,7 +863,19 @@ private fun ChatVideoFrame(m: ChatMessage, modifier: Modifier) {
 @Composable
 private fun MediaViewer(m: ChatMessage, onClose: () -> Unit) {
     val isImage = m.mediaType == "image" || m.mediaType == "sticker" || m.mediaType == "gif"
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+        // TO'LIQ EKRAN: dialog oynasi holat paneli va navigatsiya paneli ostigacha cho'ziladi va qora bo'ladi (aks holda tepa-pastda chat ko'rinib turardi).
+        val dlgView = androidx.compose.ui.platform.LocalView.current
+        androidx.compose.runtime.SideEffect {
+            (dlgView.parent as? androidx.compose.ui.window.DialogWindowProvider)?.window?.let { w ->
+                w.setLayout(android.view.ViewGroup.LayoutParams.MATCH_PARENT, android.view.ViewGroup.LayoutParams.MATCH_PARENT)
+                w.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(android.graphics.Color.BLACK))
+                androidx.core.view.WindowCompat.setDecorFitsSystemWindows(w, false)
+                w.statusBarColor = android.graphics.Color.TRANSPARENT
+                w.navigationBarColor = android.graphics.Color.TRANSPARENT
+                if (Build.VERSION.SDK_INT >= 28) w.attributes = w.attributes.also { it.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
+            }
+        }
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             if (isImage) ZoomImage(m) else ViewerVideo(m)
             Box(
