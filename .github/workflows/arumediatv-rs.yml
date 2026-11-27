@@ -1,4 +1,4 @@
-name: ARUMEDIATV (Rust + uzcoders) — build va APK
+name: ARUMEDIATV va ARU (Rust + uzcoders) — build va APK
 
 # `ARUmultiplatform/arumediatv-rs/**` o'zgarganda: testlar -> faqat armeabi-v7a (32 bit) -> aapt2 bilan APK (Gradle'siz) -> Telegram.
 # Kutubxona nusxasi `ARUmultiplatform/uzcoders` da (token kerak emas).
@@ -7,6 +7,7 @@ on:
     branches: [main]
     paths:
       - 'ARUmultiplatform/arumediatv-rs/**'
+      - 'ARUmultiplatform/aru-rs/**'
       - 'ARUmultiplatform/uzcoders/**'
       - 'ARUmultiplatform/android/rust/**'
       - '.github/workflows/arumediatv-rs.yml'
@@ -19,7 +20,29 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Qaysi ilova o'zgargan: faqat shuning build'i ishlaydi (ikkalasi bitta workflow'da — workflow soni 30 dan oshmasin).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      tv: ${{ steps.f.outputs.tv }}
+      aru: ${{ steps.f.outputs.aru }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: f
+        run: |
+          D=$(git diff --name-only HEAD^ HEAD 2>/dev/null || git ls-files)
+          COMMON='^(ARUmultiplatform/uzcoders/|\.github/workflows/arumediatv-rs\.yml)'
+          tv=false; aru=false
+          echo "$D" | grep -qE "$COMMON|^ARUmultiplatform/(arumediatv-rs|android/rust)/" && tv=true
+          echo "$D" | grep -qE "$COMMON|^ARUmultiplatform/aru-rs/" && aru=true
+          echo "tv=$tv" >> "$GITHUB_OUTPUT"
+          echo "aru=$aru" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: needs.changes.outputs.tv == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     # `APP_SIGN_SECRET` (so'rov imzosi siri) Environment secret (android-native.yml bilan bir xil).
@@ -123,5 +146,96 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: arumediatv-rs-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 30
+
+  # ARU — yangi media platforma (faqat uzcoders): testlar, rasmli snapshotlar, kichik APK (armeabi-v7a), Telegramga yuborish.
+  aru:
+    needs: changes
+    if: needs.changes.outputs.aru == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: secret
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/aru-rs -> target"
+
+      - name: Testlar va ekran rasmlari (kompyuterda, boshsiz)
+        working-directory: ARUmultiplatform/aru-rs
+        run: |
+          mkdir -p snaps
+          ARU_SNAPSHOT_DIR="$PWD/snaps" cargo test
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aru-ekranlar-${{ github.run_number }}
+          path: ARUmultiplatform/aru-rs/snaps
+          retention-days: 14
+
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Android uchun yig'ish
+        working-directory: ARUmultiplatform/aru-rs
+        run: |
+          cargo ndk -t armeabi-v7a --platform 28 -o jniLibs build --release
+          ls -la jniLibs/*/
+
+      - name: APK yig'ish va imzolash (aapt2 + d8 + apksigner)
+        id: apk
+        working-directory: ARUmultiplatform/aru-rs
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          PLAT=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
+          "$BT/aapt2" compile --dir res -o res.zip
+          "$BT/aapt2" link -o base.apk -I "$PLAT/android.jar" --manifest AndroidManifest.xml \
+            --min-sdk-version 28 --target-sdk-version 34 --version-code ${{ github.run_number }} res.zip
+          mkdir -p classes dex
+          javac --release 8 -nowarn -encoding UTF-8 -cp "$PLAT/android.jar" -d classes $(find ../uzcoders/crates/uzcoders-android/java -name '*.java')
+          java -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 --release --min-api 28 --lib "$PLAT/android.jar" --output dex $(find classes -name '*.class')
+          (cd dex && zip -q ../base.apk classes.dex)
+          mkdir -p apk/lib && cp -r jniLibs/* apk/lib/
+          (cd apk && zip -q -r -0 ../base.apk lib)
+          "$BT/zipalign" -p -f 4 base.apk aligned.apk
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          "$BT/apksigner" sign --ks ../../ci/release.keystore --ks-key-alias arumedia \
+            --ks-pass pass:arumedia --key-pass pass:arumedia \
+            --out "$OUT/aru-${{ github.run_number }}.apk" aligned.apk
+          "$BT/apksigner" verify --print-certs "$OUT"/*.apk | head -3
+          ls -la "$OUT"
+          unzip -l "$OUT"/*.apk | grep -E "libaru|AndroidManifest|classes.dex"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" "ARU build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aru-${{ github.run_number }}
           path: ${{ steps.apk.outputs.dir }}
           retention-days: 30

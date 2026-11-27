@@ -1,0 +1,16 @@
+# ARU — media platforma (Rust + uzcoders)
+
+Noldan, faqat `uzcoders` kutubxonasida yozilgan ilova (boshqa kutubxona yo'q). Uslub: qora plita, oq (teskari) faol belgi, bitta signal rangi (to'q sariq), logotipdagi 22% burchak.
+
+| Fayl | Nima |
+|---|---|
+| `src/lib.rs` | ilova holati, pastki menyu, orqaga tugmasi, testlar |
+| `src/home.rs` | Bosh (mozaika, ro'yxat) va Obunalar |
+| `src/reels.rs` | Oqim (tik video, amallar pastda, fikrlar suzib yuradi) |
+| `src/watch.rs` | Video ko'rish (vaqtga bog'langan fikrlar) |
+| `src/me.rs`, `src/create.rs` | Profil (kanal) va "Yaratish" oynasi |
+| `src/art.rs` | namuna rasmlar (kodda chiziladi, fayl yo'q) |
+| `src/data.rs` | namuna kontent — keyin Telegram bot va kanal bilan almashtiriladi |
+| `assets/` | 3 ta kichraytirilgan shrift (Latin + Kirill, ~86 KB) va logotip (4 KB) |
+
+Yig'ish va testlar FAQAT GitHub Actions'da: `.github/workflows/arumediatv-rs.yml` ichidagi `aru` job (testlar, ekran rasmlari artifact `aru-ekranlar-<run>`, APK `aru-<run>`).
