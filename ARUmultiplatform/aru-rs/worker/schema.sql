@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS videos (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  channel TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL DEFAULT 'video/mp4',
+  size INTEGER NOT NULL,
+  parts INTEGER NOT NULL,
+  duration INTEGER NOT NULL DEFAULT 0,
+  views INTEGER NOT NULL DEFAULT 0,
+  done INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS videos_done_created ON videos (done, created DESC);
+CREATE TABLE IF NOT EXISTS parts (
+  video TEXT NOT NULL,
+  n INTEGER NOT NULL,
+  file_id TEXT NOT NULL,
+  msg INTEGER NOT NULL,
+  size INTEGER NOT NULL,
+  PRIMARY KEY (video, n)
+);

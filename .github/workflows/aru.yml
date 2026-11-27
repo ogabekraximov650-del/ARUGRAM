@@ -1,0 +1,235 @@
+name: ARU (Rust + uzcoders) — ilova, worker va testlar
+
+# `ARUmultiplatform/aru-rs/**` o'zgarganda: ilova (testlar, ekran rasmlari, kichik APK -> Telegram) va/yoki worker `aru-api` (deploy + E2E).
+# Kutubxona nusxasi `ARUmultiplatform/uzcoders` da. Bot tokeni va kanal ID'si — `aru-rs/bot.enc` (ENCODE_TOKEN bilan shifrlangan).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/aru-rs/**'
+      - 'ARUmultiplatform/uzcoders/**'
+      - '.github/workflows/aru.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: aru
+  cancel-in-progress: true
+
+jobs:
+  # Qaysi qism o'zgargan: ilova yoki worker (keraksiz yig'ish bo'lmasin).
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      app: ${{ steps.f.outputs.app }}
+      wk: ${{ steps.f.outputs.wk }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+      - id: f
+        run: |
+          D=$(git diff --name-only HEAD^ HEAD 2>/dev/null || git ls-files)
+          COMMON='^(ARUmultiplatform/uzcoders/|\.github/workflows/aru\.yml)'
+          app=false; wk=false
+          echo "$D" | grep -qE "$COMMON" && app=true
+          echo "$D" | grep -E '^ARUmultiplatform/aru-rs/' | grep -vqE '^ARUmultiplatform/aru-rs/worker/' && app=true
+          echo "$D" | grep -qE '^(\.github/workflows/aru\.yml|ARUmultiplatform/aru-rs/(worker/|bot\.enc))' && wk=true
+          echo "app=$app" >> "$GITHUB_OUTPUT"
+          echo "wk=$wk" >> "$GITHUB_OUTPUT"
+
+  # ARU — yangi media platforma (faqat uzcoders): testlar, rasmli snapshotlar, kichik APK (armeabi-v7a), Telegramga yuborish.
+  app:
+    needs: changes
+    if: needs.changes.outputs.app == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: secret
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/aru-rs -> target"
+
+      - name: Testlar va ekran rasmlari (kompyuterda, boshsiz)
+        working-directory: ARUmultiplatform/aru-rs
+        run: |
+          mkdir -p snaps
+          ARU_SNAPSHOT_DIR="$PWD/snaps" cargo test
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aru-ekranlar-${{ github.run_number }}
+          path: ARUmultiplatform/aru-rs/snaps
+          retention-days: 14
+
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Android uchun yig'ish
+        working-directory: ARUmultiplatform/aru-rs
+        run: |
+          cargo ndk -t armeabi-v7a --platform 28 -o jniLibs build --release
+          ls -la jniLibs/*/
+
+      - name: APK yig'ish va imzolash (aapt2 + d8 + apksigner)
+        id: apk
+        working-directory: ARUmultiplatform/aru-rs
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          PLAT=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
+          "$BT/aapt2" compile --dir res -o res.zip
+          "$BT/aapt2" link -o base.apk -I "$PLAT/android.jar" --manifest AndroidManifest.xml \
+            --min-sdk-version 28 --target-sdk-version 34 --version-code ${{ github.run_number }} res.zip
+          mkdir -p classes dex
+          javac --release 8 -nowarn -encoding UTF-8 -cp "$PLAT/android.jar" -d classes $(find ../uzcoders/crates/uzcoders-android/java -name '*.java')
+          java -cp "$BT/lib/d8.jar" com.android.tools.r8.D8 --release --min-api 28 --lib "$PLAT/android.jar" --output dex $(find classes -name '*.class')
+          (cd dex && zip -q ../base.apk classes.dex)
+          mkdir -p apk/lib && cp -r jniLibs/* apk/lib/
+          (cd apk && zip -q -r -0 ../base.apk lib)
+          "$BT/zipalign" -p -f 4 base.apk aligned.apk
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          "$BT/apksigner" sign --ks ../../ci/release.keystore --ks-key-alias arumedia \
+            --ks-pass pass:arumedia --key-pass pass:arumedia \
+            --out "$OUT/aru-${{ github.run_number }}.apk" aligned.apk
+          "$BT/apksigner" verify --print-certs "$OUT"/*.apk | head -3
+          ls -la "$OUT"
+          unzip -l "$OUT"/*.apk | grep -E "libaru|AndroidManifest|classes.dex"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" "ARU build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aru-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 30
+
+  # Cloudflare worker `aru-api` (Rust -> WASM + D1): testlar, deploy, sirlar (bot.enc + APP_SIGN_SECRET) va haqiqiy E2E (Telegram kanaliga yozib, o'qib, o'chiradi).
+  worker:
+    needs: changes
+    if: needs.changes.outputs.wk == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: secret
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/aru-rs/worker
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/aru-rs/worker -> target"
+
+      - name: Testlar (xost) va wasm tekshiruvi
+        run: |
+          cargo test --lib
+          cargo check --target wasm32-unknown-unknown
+
+      - name: worker-build
+        run: cargo install worker-build --locked
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+
+      - name: wrangler
+        run: npm install -g wrangler
+
+      - name: D1 bazasi (bo'lmasa yaratiladi) va jadvallar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          id() { wrangler d1 list --json | jq -r '.[] | select(.name=="aru-db") | .uuid'; }
+          ID=$(id)
+          if [ -z "$ID" ]; then wrangler d1 create aru-db; ID=$(id); fi
+          [ -n "$ID" ] || { echo "D1 bazasi yaratilmadi"; exit 1; }
+          sed -i "s/DB_ID/$ID/" wrangler.toml
+          wrangler d1 execute aru-db --remote --file=schema.sql
+
+      - name: Build (WASM)
+        run: worker-build --release
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: wrangler deploy
+
+      - name: Sirlar
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          B=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../bot.enc)
+          T=$(printf '%s' "$B" | sed -n 1p | tr -d '[:space:]')
+          C=$(printf '%s' "$B" | sed -n 2p | tr -d '[:space:]')
+          [ -n "$T" ] && [ -n "$C" ] || { echo "bot.enc ochilmadi"; exit 1; }
+          printf '%s' "$T" | wrangler secret put BOT_TOKEN
+          printf '%s' "$C" | wrangler secret put CHANNEL_ID
+          printf '%s' "$APP_SIGN_SECRET" | wrangler secret put APP_TOKEN
+
+      - name: E2E (haqiqiy yuklash, o'qish va o'chirish)
+        env:
+          APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
+        run: |
+          set -euo pipefail
+          U=https://aru-api.uzcom.workers.dev
+          H="X-App-Token: $APP_SIGN_SECRET"
+          for i in 1 2 3 4 5 6; do curl -fsS "$U/api/health" && break || sleep 5; done; echo
+          # 20 MB ga yaqin bo'lak (18 MiB) + kichik bo'lak: bo'laklar ulanishi va Range tekshiriladi
+          head -c 18874368 /dev/urandom > p0; head -c 1500000 /dev/urandom > p1; cat p0 p1 > all
+          SIZE=$(stat -c %s all)
+          ID=$(curl -fsS -H "$H" -H 'Content-Type: application/json' -d "{\"title\":\"E2E sinov\",\"channel\":\"test\",\"size\":$SIZE,\"parts\":2}" "$U/api/upload" | jq -r .id)
+          echo "video: $ID"
+          curl -fsS -H "$H" -X PUT --data-binary @p0 "$U/api/upload/$ID/0"; echo
+          curl -fsS -H "$H" -X PUT --data-binary @p1 "$U/api/upload/$ID/1"; echo
+          curl -fsS -H "$H" -H 'Content-Type: application/json' -d '{"duration":60}' "$U/api/upload/$ID/done"; echo
+          curl -fsS "$U/api/videos" | jq -e --arg id "$ID" '.videos | map(.id) | index($id) != null' >/dev/null
+          # 1) boshidan: 206, birinchi bo'lak
+          curl -fsS -H 'Range: bytes=0-' -D h0 -o r0 "$U/api/video/$ID/stream"
+          grep -qi '^HTTP/.* 206' h0
+          cmp r0 p0
+          # 2) bo'laklar chegarasidan o'tadigan joy: ikkinchi bo'lakdan
+          curl -fsS -H "Range: bytes=18874368-" -o r1 "$U/api/video/$ID/stream"
+          cmp r1 p1
+          # 3) o'rtadan kichik oraliq
+          curl -fsS -H 'Range: bytes=1000-1999' -o r2 "$U/api/video/$ID/stream"
+          [ "$(cmp -s r2 <(tail -c +1001 all | head -c 1000) && echo ok)" = ok ]
+          curl -fsS -H "$H" -X DELETE "$U/api/video/$ID"; echo
+          curl -sS -o /dev/null -w '%{http_code}\n' "$U/api/video/$ID" | grep -q 404
+          echo "E2E muvaffaqiyatli"

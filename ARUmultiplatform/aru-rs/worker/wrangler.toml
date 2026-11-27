@@ -1,0 +1,13 @@
+name = "aru-api"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-11-01"
+workers_dev = true
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+# `database_id` ni CI deploy vaqtida to'ldiradi (DB yo'q bo'lsa yaratadi).
+[[d1_databases]]
+binding = "DB"
+database_name = "aru-db"
+database_id = "DB_ID"
