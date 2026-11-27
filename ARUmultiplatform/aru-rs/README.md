@@ -4,14 +4,14 @@ Noldan, faqat `uzcoders` kutubxonasida yozilgan ilova (boshqa kutubxona yo'q). U
 
 | Fayl | Nima |
 |---|---|
-| `src/lib.rs` | ilova holati, pastki menyu, orqaga tugmasi, testlar |
-| `src/home.rs` | Bosh (mozaika, ro'yxat) va Obunalar |
-| `src/reels.rs` | Oqim (tik video, amallar pastda, fikrlar suzib yuradi) |
-| `src/watch.rs` | Video ko'rish (vaqtga bog'langan fikrlar) |
-| `src/me.rs`, `src/create.rs` | Profil (kanal) va "Yaratish" oynasi |
-| `src/art.rs` | namuna rasmlar (kodda chiziladi, fayl yo'q) |
-| `src/data.rs` | namuna kontent — keyin Telegram bot va kanal bilan almashtiriladi |
-| `assets/` | 3 ta kichraytirilgan shrift (Latin + Kirill, ~86 KB) va logotip (4 KB) |
+| `src/lib.rs`, `src/app.rs` | kirish nuqtasi, pastki menyu; ilova holati va mantiq (kirish, like, obuna, fikr, pleyer, yuklash) |
+| `src/home.rs`, `src/reels.rs`, `src/watch.rs`, `src/profile.rs`, `src/create.rs` | Bosh/Obunalar/Qidiruv, Oqim, Ko'rish, Profil, Yaratish + sarlavha + yuklash holati + birinchi kirish |
+| `src/feed.rs`, `src/thumbs.rs`, `src/model.rs`, `src/json.rs`, `src/net.rs`, `src/media.rs`, `src/ident.rs` | ro'yxat sahifalash, muqova rasmlari, modellar, JSON, tarmoq (Java orqali), pleyer/yuklash ko'prigi, kanal kimligi |
+| `java/.../AruActivity.java` | HTTP, bo'lakli yuklash (muqova va davomiylik shu yerda olinadi), MediaPlayer (oqimli manba) — tashqi kutubxonasiz |
+| `assets/` | 3 ta kichraytirilgan shrift (~86 KB) va logotip (4 KB) |
+| `bot.enc`, `db.enc` | Telegram bot/kanal va Supabase kalitlari (ENCODE_TOKEN bilan shifrlangan) |
+
+Namuna ma'lumot YO'Q: hamma narsa worker'dan. Testlarda faqat tarmoq o'rniga sinov javobi (`src/tests.rs`).
 
 Yig'ish va testlar FAQAT GitHub Actions'da: `.github/workflows/aru.yml`: `app` (testlar, ekran rasmlari artifact `aru-ekranlar-<run>`, APK `aru-<run>`) va `worker` (deploy + E2E).
 
