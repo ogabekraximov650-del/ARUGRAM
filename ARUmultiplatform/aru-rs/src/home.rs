@@ -79,7 +79,7 @@ impl App {
         let photo = pic(Art::Dunes, 22.0, vec![Self::chip_on_pic(PHOTO, "2 458"), Self::caption("Qizilqum quyoshi", "@oshxona_sirlari")]).width(hw).height(137.0);
         let post = column(vec![
             row(vec![icon(POST, 15.0).color(BG), gap_box(5.0, 0.0), b("Post", 12.0, BG)]).align(Align::Center),
-            disp("Rejasiz sayohat — eng yaxshisi", 22.0, BG).margin_each(0.0, 8.0, 0.0, 0.0),
+            disp("Rejasiz sayohat — eng yaxshisi", 19.0, BG).margin_each(0.0, 8.0, 0.0, 0.0),
             spacer(),
             b("@sardor_k", 11.5, BG),
         ])
