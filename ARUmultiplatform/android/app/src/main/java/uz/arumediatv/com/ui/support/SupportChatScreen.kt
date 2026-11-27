@@ -86,6 +86,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -705,11 +706,9 @@ private fun UploadingBubble(label: String, progress: Float) {
 private fun MediaBlock(m: ChatMessage) {
     val ctx = LocalContext.current
     when (m.mediaType) {
-        "image" -> TgImage(m.mediaUrl, Modifier.size(width = 230.dp, height = 230.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.25f)), maxPx = 640)
-        "video" -> Box(Modifier.size(width = 230.dp, height = 150.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
-            ChatVideoFrame(m, Modifier.fillMaxSize())
+        "image" -> AspectImage(m.mediaUrl, 230, 640)
+        "video" -> VideoBubble(m) {
             Box(Modifier.size(48.dp).clip(CircleShape).background(Color.Black.copy(alpha = 0.5f)), contentAlignment = Alignment.Center) { Icon(Icons.Filled.PlayArrow, "Video", tint = Color.White, modifier = Modifier.size(32.dp)) }
-            if (m.mediaMs > 0) Text(formatClock(m.mediaMs), color = Color.White, fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 6.dp, vertical = 2.dp))
         }
         "round" -> Box(Modifier.size(200.dp).clip(CircleShape).background(Color.Black), contentAlignment = Alignment.Center) {
             ChatVideoFrame(m, Modifier.fillMaxSize())
@@ -807,6 +806,47 @@ object VoicePlayer {
     }
 }
 
+/** Chatdagi rasm O'Z NISBATIDA (eng uzun tomoni `maxDp`): avval 230x230 kvadratga kesilardi (Rust ilovadagidek). Yuklanguncha kvadrat joy. */
+@Composable
+private fun AspectImage(url: String, maxDp: Int, maxPx: Int) {
+    var bmp by remember(url) { mutableStateOf(AppServices.images.peek(url)) }
+    LaunchedEffect(url) { if (bmp == null && url.isNotEmpty()) bmp = AppServices.images.load(url, maxPx, network = true) }
+    val b = bmp
+    if (b == null || b.width <= 0 || b.height <= 0) {
+        Box(Modifier.size(maxDp.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black.copy(alpha = 0.25f)))
+    } else {
+        val k = minOf(maxDp.toFloat() / b.width, maxDp.toFloat() / b.height)
+        val img = remember(b) { b.asImageBitmap() }
+        Image(img, null, contentScale = ContentScale.FillBounds, modifier = Modifier.size((b.width * k).dp, (b.height * k).dp).clip(RoundedCornerShape(12.dp)))
+    }
+}
+
+/** Chatdagi video: boshidagi kadr O'Z NISBATIDA (eng uzun tomoni 230 dp); kadr hali yo'q bo'lsa 230x150. [overlay] — play belgisi. */
+@Composable
+private fun VideoBubble(m: ChatMessage, overlay: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit) {
+    val item = remember(m.mediaUrl) {
+        uz.arumediatv.com.data.HistoryItem(
+            animeId = 0, seasonId = 0, episodeNo = 0, sectionNo = 0, title = "", photoUrl = "", positionMs = 100,
+            durationMs = 0, views = 0, updatedAt = 0, videoUrl = m.mediaUrl,
+        )
+    }
+    var bmp by remember(m.mediaUrl) { mutableStateOf(AppServices.thumbs.peek(item)) }
+    LaunchedEffect(m.mediaUrl) {
+        if (bmp == null) bmp = AppServices.thumbs.cached(item)
+        AppServices.thumbs.load(item)?.let { bmp = it }
+    }
+    val b = bmp
+    val (w, h) = if (b != null && b.width > 0 && b.height > 0) {
+        val k = minOf(230f / b.width, 230f / b.height)
+        (b.width * k) to (b.height * k)
+    } else 230f to 150f
+    Box(Modifier.size(w.dp, h.dp).clip(RoundedCornerShape(12.dp)).background(Color.Black), contentAlignment = Alignment.Center) {
+        if (b != null) Image(remember(b) { b.asImageBitmap() }, null, contentScale = ContentScale.FillBounds, modifier = Modifier.fillMaxSize())
+        overlay()
+        if (m.mediaMs > 0) Text(formatClock(m.mediaMs), color = Color.White, fontSize = 11.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 6.dp, vertical = 2.dp))
+    }
+}
+
 /** Videoning BOSHIDAGI kadr (100 ms) — Flutter `ChatVideoThumb`: kadr serverga yuklanmaydi, har kim o'zida yasaydi va shifrlab saqlaydi. */
 @Composable
 private fun ChatVideoFrame(m: ChatMessage, modifier: Modifier) {
@@ -893,8 +933,8 @@ private fun ViewerVideo(m: ChatMessage) {
             }
             return@Box
         }
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
+        Box(Modifier.fillMaxSize()) {
+            Box(Modifier.fillMaxSize()) {
                 PlayerSurface(player, Modifier.fillMaxSize())
                 // Butun kadr bosiladi — faqat play/pause (chiqib ketmaydi).
                 Box(
@@ -925,7 +965,10 @@ private fun ViewerVideo(m: ChatMessage) {
             }
             val total = player.durationMs.coerceAtLeast(0)
             val shown = (drag ?: player.positionMs.toFloat()).coerceIn(0f, max(total, 1L).toFloat())
-            Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+            Column(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
+                    .clip(RoundedCornerShape(26.dp)).background(Color(0xCC111111)).padding(horizontal = 14.dp, vertical = 6.dp),
+            ) {
                 androidx.compose.material3.Slider(
                     value = if (total <= 0) 0f else shown, valueRange = 0f..max(total, 1L).toFloat(),
                     onValueChange = { drag = it },
