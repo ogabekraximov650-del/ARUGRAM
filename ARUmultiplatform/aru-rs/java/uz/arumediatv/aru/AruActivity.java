@@ -237,34 +237,66 @@ public class AruActivity extends UzActivity {
 
     // ───────────── Pleyer (MediaPlayer + bo'lak-bo'lak o'qish) ─────────────
 
-    /** Worker'dan Range bilan o'qiydi: har so'rovda bo'lakning qolgan qismi keladi va xotirada saqlanadi. */
+    /** Worker'dan Range bilan oqim sifatida o'qiydi: ketma-ket o'qishda ulanish uzilmaydi, sakrashda qayta ochiladi. */
     private static final class Src extends MediaDataSource {
         final String url;
         final long total;
-        byte[] buf;
-        long start = -1;
+        HttpURLConnection conn;
+        InputStream in;
+        long at = -1;
 
         Src(String url, long total) {
             this.url = url;
             this.total = total;
         }
 
+        private void drop() {
+            try {
+                if (in != null) in.close();
+            } catch (Throwable e) {
+                // e'tiborsiz
+            }
+            if (conn != null) conn.disconnect();
+            in = null;
+            conn = null;
+        }
+
+        private void openAt(long pos) throws IOException {
+            drop();
+            HttpURLConnection c = open("GET", url, "");
+            c.setReadTimeout(60000);
+            c.setRequestProperty("Range", "bytes=" + pos + "-");
+            int code = c.getResponseCode();
+            if (code != 206) {
+                c.disconnect();
+                throw new IOException("HTTP " + code);
+            }
+            conn = c;
+            in = new java.io.BufferedInputStream(c.getInputStream(), 65536);
+            at = pos;
+        }
+
         public synchronized int readAt(long pos, byte[] b, int off, int size) throws IOException {
             if (pos >= total) return -1;
-            if (buf == null || pos < start || pos >= start + buf.length) {
-                HttpURLConnection c = open("GET", url, "");
-                c.setReadTimeout(120000);
-                c.setRequestProperty("Range", "bytes=" + pos + "-");
-                int code = c.getResponseCode();
-                if (code != 206 && code != 200) throw new IOException("HTTP " + code);
-                byte[] d = readAll(c.getInputStream(), 24 * 1024 * 1024);
-                c.disconnect();
-                buf = d;
-                start = code == 206 ? pos : 0;
-                if (d.length == 0) return -1;
+            // Oldinga kichik sakrash: o'tkazib yuboriladi; orqaga yoki katta sakrash: yangi so'rov.
+            if (in != null && pos > at && pos - at < 262144) {
+                long skip = pos - at;
+                while (skip > 0) {
+                    long n = in.skip(skip);
+                    if (n <= 0) break;
+                    skip -= n;
+                    at += n;
+                }
             }
-            int n = (int) Math.min(size, start + buf.length - pos);
-            System.arraycopy(buf, (int) (pos - start), b, off, n);
+            if (in == null || pos != at) openAt(pos);
+            int n = in.read(b, off, size);
+            if (n < 0) {
+                // Bo'lak tugadi: keyingisi uchun yangi so'rov.
+                openAt(pos);
+                n = in.read(b, off, size);
+                if (n < 0) return -1;
+            }
+            at += n;
             return n;
         }
 
@@ -272,8 +304,8 @@ public class AruActivity extends UzActivity {
             return total;
         }
 
-        public void close() {
-            buf = null;
+        public synchronized void close() {
+            drop();
         }
     }
 

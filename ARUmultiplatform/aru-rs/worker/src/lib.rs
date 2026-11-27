@@ -364,17 +364,38 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
                 None => (0, total.saturating_sub(1), false),
             };
             let Some((k, off, base)) = locate(&sizes, start) else { return reply(&json!({ "error": "video bo'sh" }), 404) };
-            let data = tg_get(&secret(env, "BOT_TOKEN")?, ps[k]["file_id"].as_str().unwrap_or("")).await?;
-            if data.len() as u64 != sizes[k] {
-                return reply(&json!({ "error": "bo'lak hajmi mos emas" }), 502);
-            }
             // Bitta so'rovda faqat shu bo'lak beriladi (206 kamroq bayt qaytarishi mumkin); mijoz keyingisini o'zi so'raydi.
             let last = end.min(base + sizes[k] - 1);
-            let body = data[off as usize..=(last - base) as usize].to_vec();
-            let mut r = Response::from_bytes(body)?.with_status(if partial { 206 } else { 200 });
+            let (rel_start, rel_end) = (off, last - base);
+            let token = secret(env, "BOT_TOKEN")?;
+            let f = tg_call(&token, "getFile", &json!({ "file_id": ps[k]["file_id"].as_str().unwrap_or("") })).await?;
+            let tpath = f["file_path"].as_str().ok_or_else(|| rerr("Telegram file_path bermadi"))?;
+            // Telegram fayl serveri Range'ni qo'llaydi: kerakli qismi so'raladi va mijozga oqim bilan uzatiladi (to'liq bo'lak kutilmaydi).
+            let mut rh = Headers::new();
+            rh.set("Range", &format!("bytes={rel_start}-{rel_end}"))?;
+            let mut init = RequestInit::new();
+            init.with_headers(rh);
+            let mut up = Fetch::Request(Request::new_with_init(&format!("{TG}/file/bot{token}/{tpath}"), &init)?).send().await?;
+            let code = up.status_code();
+            if !(200..300).contains(&code) {
+                return reply(&json!({ "error": format!("Telegram fayl HTTP {code}") }), 502);
+            }
+            let len = rel_end - rel_start + 1;
+            let mut r = if code == 206 {
+                Response::from_stream(up.stream()?)?
+            } else {
+                // Zaxira: Telegram Range'ni e'tiborsiz qoldirsa, to'liq bo'lakdan kerakli qismi kesiladi.
+                let data = up.bytes().await?;
+                if (data.len() as u64) != sizes[k] {
+                    return reply(&json!({ "error": "bo'lak hajmi mos emas" }), 502);
+                }
+                Response::from_bytes(data[rel_start as usize..=rel_end as usize].to_vec())?
+            };
+            r = r.with_status(if partial { 206 } else { 200 });
             let h = r.headers_mut();
             h.set("Content-Type", &mime)?;
             h.set("Accept-Ranges", "bytes")?;
+            h.set("Content-Length", &len.to_string())?;
             h.set("Cache-Control", "public, max-age=86400")?;
             if partial || last < total.saturating_sub(1) {
                 h.set("Content-Range", &format!("bytes {start}-{last}/{total}"))?;

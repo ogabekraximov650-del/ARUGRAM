@@ -16,7 +16,7 @@ pub fn logo(size: f32) -> Element {
     thread_local! {
         static L: Rc<Image> = Rc::new(decode_png(include_bytes!("../assets/logo.png")).expect("logo"));
     }
-    L.with(|l| image(l, size, size))
+    L.with(|l| image(l, size, size).width(size).height(size))
 }
 
 /// Kvadrat "plita" belgi: harf plita ichidan o'yilgandek. Burchak radiusi — logotipdagi 22%.
