@@ -166,18 +166,6 @@ jobs:
       - name: wrangler
         run: npm install -g wrangler
 
-      - name: D1 bazasi (bo'lmasa yaratiladi) va jadvallar
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          id() { wrangler d1 list --json | jq -r '.[] | select(.name=="aru-db") | .uuid'; }
-          ID=$(id)
-          if [ -z "$ID" ]; then wrangler d1 create aru-db; ID=$(id); fi
-          [ -n "$ID" ] || { echo "D1 bazasi yaratilmadi"; exit 1; }
-          sed -i "s/DB_ID/$ID/" wrangler.toml
-          wrangler d1 execute aru-db --remote --file=schema.sql
-
       - name: Build (WASM)
         run: worker-build --release
 

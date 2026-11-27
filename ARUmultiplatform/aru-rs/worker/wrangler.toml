@@ -6,8 +6,8 @@ workers_dev = true
 [build]
 command = "cargo install -q worker-build && worker-build --release"
 
-# `database_id` ni CI deploy vaqtida to'ldiradi (DB yo'q bo'lsa yaratadi).
+# D1 bazasi `aru-db` Cloudflare'da qo'lda yaratilgan (CI tokenida D1 huquqi yo'q); jadvallar — schema.sql.
 [[d1_databases]]
 binding = "DB"
 database_name = "aru-db"
-database_id = "DB_ID"
+database_id = "5c0f43da-001d-4c7c-887a-c94c8d7f3572"
