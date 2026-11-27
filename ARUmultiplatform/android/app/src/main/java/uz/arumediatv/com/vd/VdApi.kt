@@ -36,7 +36,16 @@ object VdApi {
         mem[name]?.takeIf { it.ready }?.let { return it }
         // Tayyor ("ready") fayl o'zgarmaydi (hajm va kalit qat'iy): telefonda saqlangan bo'lsa serverga bormaymiz.
         stored(ctx, name)?.takeIf { it.ready }?.let { return it }
-        val r = Http.client.callJson("$base/api/vd/info", "POST", JSONObject().put("names", JSONArray().put(name)), bearer)
+        val body = JSONObject().put("names", JSONArray().put(name))
+        var r = Http.client.callJson("$base/api/vd/info", "POST", body, bearer)
+        // Server vaqtincha xato bersa (5xx / 429: band, cheklov) qayta uriniladi. Ilgari bitta xato "yangi tizimda yo'q" deb hisoblanib, video
+        // eski worker yo'liga o'tardi va u yerda fayl YO'Q (503) — ketma-ket qismlarda video ochilmay qolardi (ilovadan chiqib kirish kerak edi).
+        var attempt = 0
+        while (!r.ok && r.code != 0 && (r.code >= 500 || r.code == 429) && attempt < 3) {
+            attempt++
+            try { Thread.sleep(600L * attempt) } catch (_: InterruptedException) { break }
+            r = Http.client.callJson("$base/api/vd/info", "POST", body, bearer)
+        }
         if (r.ok) {
             val f = r.json?.optJSONObject("files")?.optJSONObject(name) ?: return null
             val i = Info(name, f.optLong("size"), f.optString("key"), f.optString("state"), f.optInt("chunks"), f.optInt("stored"))
