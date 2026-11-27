@@ -35,7 +35,7 @@ jobs:
           app=false; wk=false
           echo "$D" | grep -qE "$COMMON" && app=true
           echo "$D" | grep -E '^ARUmultiplatform/aru-rs/' | grep -vqE '^ARUmultiplatform/aru-rs/worker/' && app=true
-          echo "$D" | grep -qE '^(\.github/workflows/aru\.yml|ARUmultiplatform/aru-rs/(worker/|bot\.enc))' && wk=true
+          echo "$D" | grep -qE '^(\.github/workflows/aru\.yml|ARUmultiplatform/aru-rs/(worker/|bot\.enc|db\.enc))' && wk=true
           echo "app=$app" >> "$GITHUB_OUTPUT"
           echo "wk=$wk" >> "$GITHUB_OUTPUT"
 
@@ -130,7 +130,7 @@ jobs:
           path: ${{ steps.apk.outputs.dir }}
           retention-days: 30
 
-  # Cloudflare worker `aru-api` (Rust -> WASM + D1): testlar, deploy, sirlar (bot.enc + APP_SIGN_SECRET) va haqiqiy E2E (Telegram kanaliga yozib, o'qib, o'chiradi).
+  # Cloudflare worker `aru-api` (Rust -> WASM + Supabase): testlar, deploy, sirlar (bot.enc + APP_SIGN_SECRET) va haqiqiy E2E (Telegram kanaliga yozib, o'qib, o'chiradi).
   worker:
     needs: changes
     if: needs.changes.outputs.wk == 'true'
@@ -183,12 +183,16 @@ jobs:
           APP_SIGN_SECRET: ${{ secrets.APP_SIGN_SECRET }}
         run: |
           K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
-          B=$(K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in ../bot.enc)
-          T=$(printf '%s' "$B" | sed -n 1p | tr -d '[:space:]')
-          C=$(printf '%s' "$B" | sed -n 2p | tr -d '[:space:]')
-          [ -n "$T" ] && [ -n "$C" ] || { echo "bot.enc ochilmadi"; exit 1; }
+          dec() { K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K -in "$1"; }
+          B=$(dec ../bot.enc); D=$(dec ../db.enc)
+          line() { printf '%s' "$1" | sed -n "$2p" | tr -d '[:space:]'; }
+          T=$(line "$B" 1); C=$(line "$B" 2); U=$(line "$D" 1); A=$(line "$D" 2); Q=$(line "$D" 3)
+          [ -n "$T" ] && [ -n "$C" ] && [ -n "$U" ] && [ -n "$A" ] && [ -n "$Q" ] || { echo "bot.enc yoki db.enc ochilmadi"; exit 1; }
           printf '%s' "$T" | wrangler secret put BOT_TOKEN
           printf '%s' "$C" | wrangler secret put CHANNEL_ID
+          printf '%s' "$U" | wrangler secret put SB_URL
+          printf '%s' "$A" | wrangler secret put SB_ANON
+          printf '%s' "$Q" | wrangler secret put DB_KEY
           printf '%s' "$APP_SIGN_SECRET" | wrangler secret put APP_TOKEN
 
       - name: E2E (haqiqiy yuklash, o'qish va o'chirish)

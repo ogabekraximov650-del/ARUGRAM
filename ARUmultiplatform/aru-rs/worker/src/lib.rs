@@ -1,5 +1,5 @@
 //! ARU API (Rust -> WASM, Cloudflare Worker). Videolar Telegram kanaliga <=19 MiB bo'laklarda yoziladi (bot `getFile` 20 MB gacha beradi),
-//! ro'yxat va bo'laklar jadvali D1 bazasida. Bot tokeni FAQAT shu yerda (secret `BOT_TOKEN`, `CHANNEL_ID`).
+//! ro'yxat va bo'laklar jadvali Supabase (Postgres, funksiyalar orqali) bazasida. Bot tokeni FAQAT shu yerda (secret `BOT_TOKEN`, `CHANNEL_ID`); baza: `SB_URL`, `SB_ANON`, `DB_KEY`.
 //!
 //! GET    /api/health
 //! GET    /api/videos?limit=24&before=<ms>          — tayyor videolar (yangisi birinchi)
@@ -10,7 +10,6 @@
 //! POST   /api/upload/<id>/done  {duration}                                 (X-App-Token)
 //! DELETE /api/video/<id>                                                   (X-App-Token)
 
-use serde::Deserialize;
 use serde_json::{json, Value};
 use worker::wasm_bindgen::JsValue;
 use worker::*;
@@ -138,54 +137,35 @@ async fn tg_get(token: &str, file_id: &str) -> Result<Vec<u8>> {
     r.bytes().await
 }
 
-// ───────────────────────── D1 ─────────────────────────
+// ───────────────────────── Supabase (PostgREST RPC) ─────────────────────────
 
-fn js(s: &str) -> JsValue {
-    JsValue::from_str(s)
-}
-
-fn jn(n: i64) -> JsValue {
-    JsValue::from_f64(n as f64)
-}
-
-#[derive(Deserialize)]
-struct VideoRow {
-    id: String,
-    title: String,
-    channel: String,
-    mime: String,
-    size: f64,
-    parts: f64,
-    duration: f64,
-    views: f64,
-    done: f64,
-    created: f64,
-}
-
-impl VideoRow {
-    fn json(&self) -> Value {
-        json!({
-            "id": self.id, "title": self.title, "channel": self.channel, "mime": self.mime,
-            "size": self.size as i64, "parts": self.parts as i64, "duration": self.duration as i64,
-            "views": self.views as i64, "created": self.created as i64,
-        })
+/// Postgres funksiyasini chaqiradi. Ochiq funksiyalar faqat anon kalit bilan; yozish/maxfiy funksiyalar qo'shimcha `k` (DB_KEY) so'raydi.
+async fn rpc(env: &Env, f: &str, body: Value) -> Result<Value> {
+    let (base, anon) = (secret(env, "SB_URL")?, secret(env, "SB_ANON")?);
+    let mut h = Headers::new();
+    h.set("Content-Type", "application/json")?;
+    h.set("apikey", anon.trim())?;
+    h.set("Authorization", &format!("Bearer {}", anon.trim()))?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post).with_headers(h).with_body(Some(JsValue::from_str(&body.to_string())));
+    let mut r = Fetch::Request(Request::new_with_init(&format!("{}/rest/v1/rpc/{f}", base.trim()), &init)?).send().await?;
+    let ok = (200..300).contains(&r.status_code());
+    let text = r.text().await?;
+    if !ok {
+        return Err(rerr(format!("baza: {}", text.chars().take(300).collect::<String>())));
     }
+    if text.trim().is_empty() {
+        return Ok(Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|_| rerr("bazadan tushunarsiz javob"))
 }
 
-#[derive(Deserialize)]
-struct PartRow {
-    n: f64,
-    file_id: String,
-    msg: f64,
-    size: f64,
+fn dbkey(env: &Env) -> Result<String> {
+    Ok(secret(env, "DB_KEY")?.trim().to_string())
 }
 
-async fn video(db: &D1Database, id: &str) -> Result<Option<VideoRow>> {
-    db.prepare("SELECT id,title,channel,mime,size,parts,duration,views,done,created FROM videos WHERE id=?1").bind(&[js(id)])?.first::<VideoRow>(None).await
-}
-
-async fn parts(db: &D1Database, id: &str) -> Result<Vec<PartRow>> {
-    db.prepare("SELECT n,file_id,msg,size FROM parts WHERE video=?1 ORDER BY n").bind(&[js(id)])?.all().await?.results::<PartRow>()
+fn int(v: &Value) -> i64 {
+    v.as_i64().unwrap_or(0)
 }
 
 // ───────────────────────── marshrutlar ─────────────────────────
@@ -198,21 +178,15 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
     if writes && !authorized(&req, env) {
         return reply(&json!({ "error": "ruxsat yo'q" }), 401);
     }
-    let db = env.d1("DB")?;
     match (method, seg.as_slice()) {
         (Method::Get, ["api", "health"]) => reply(&json!({ "ok": true, "name": "aru-api" }), 200),
 
         (Method::Get, ["api", "videos"]) => {
             let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
-            let limit = q.get("limit").and_then(|v| v.parse::<i64>().ok()).unwrap_or(24).clamp(1, 100);
+            let lim = q.get("limit").and_then(|v| v.parse::<i64>().ok()).unwrap_or(24).clamp(1, 100);
             let before = q.get("before").and_then(|v| v.parse::<i64>().ok()).unwrap_or(i64::MAX / 4);
-            let rows = db
-                .prepare("SELECT id,title,channel,mime,size,parts,duration,views,done,created FROM videos WHERE done=1 AND created<?1 ORDER BY created DESC LIMIT ?2")
-                .bind(&[jn(before), jn(limit)])?
-                .all()
-                .await?
-                .results::<VideoRow>()?;
-            let mut r = reply(&json!({ "videos": rows.iter().map(VideoRow::json).collect::<Vec<_>>() }), 200)?;
+            let rows = rpc(env, "aru_videos", json!({ "lim": lim, "before": before })).await?;
+            let mut r = reply(&json!({ "videos": rows }), 200)?;
             r.headers_mut().set("Cache-Control", "public, max-age=15")?;
             Ok(r)
         }
@@ -225,18 +199,25 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
                 return reply(&json!({ "error": "title, size va parts to'g'ri emas" }), 400);
             }
             let id = new_id();
-            let now = Date::now().as_millis() as i64;
-            db.prepare("INSERT INTO videos(id,title,channel,mime,size,parts,done,created) VALUES(?1,?2,?3,?4,?5,?6,0,?7)")
-                .bind(&[js(&id), js(&title), js(b["channel"].as_str().unwrap_or("")), js(b["mime"].as_str().unwrap_or("video/mp4")), jn(size), jn(n), jn(now)])?
-                .run()
-                .await?;
+            rpc(
+                env,
+                "aru_video_new",
+                json!({
+                    "k": dbkey(env)?, "vid": id, "ttl": title, "ch": b["channel"].as_str().unwrap_or(""),
+                    "mm": b["mime"].as_str().unwrap_or("video/mp4"), "sz": size, "np": n, "ts": Date::now().as_millis() as i64,
+                }),
+            )
+            .await?;
             reply(&json!({ "id": id }), 200)
         }
 
         (Method::Put, ["api", "upload", id, n]) => {
             let n: i64 = n.parse().map_err(|_| rerr("bo'lak raqami noto'g'ri"))?;
-            let Some(v) = video(&db, id).await? else { return reply(&json!({ "error": "video topilmadi" }), 404) };
-            if v.done != 0.0 || n < 0 || n as f64 >= v.parts {
+            let v = rpc(env, "aru_video", json!({ "vid": id })).await?;
+            if v.is_null() {
+                return reply(&json!({ "error": "video topilmadi" }), 404);
+            }
+            if v["done"].as_bool() == Some(true) || n < 0 || n >= int(&v["parts"]) {
                 return reply(&json!({ "error": "bo'lak raqami yoki holat noto'g'ri" }), 400);
             }
             let bytes = req.bytes().await?;
@@ -245,39 +226,38 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
             }
             let (token, chat) = (secret(env, "BOT_TOKEN")?, secret(env, "CHANNEL_ID")?);
             let (fid, msg) = tg_put(&token, chat.trim(), &format!("{id}_{n}.bin"), &bytes).await?;
-            db.prepare("INSERT OR REPLACE INTO parts(video,n,file_id,msg,size) VALUES(?1,?2,?3,?4,?5)").bind(&[js(id), jn(n), js(&fid), jn(msg), jn(bytes.len() as i64)])?.run().await?;
+            rpc(env, "aru_part_put", json!({ "k": dbkey(env)?, "vid": id, "pn": n, "fid": fid, "mid": msg, "sz": bytes.len() as i64 })).await?;
             reply(&json!({ "ok": true, "n": n, "size": bytes.len() }), 200)
         }
 
         (Method::Post, ["api", "upload", id, "done"]) => {
             let b: Value = req.json().await.unwrap_or(Value::Null);
-            let Some(v) = video(&db, id).await? else { return reply(&json!({ "error": "video topilmadi" }), 404) };
-            let ps = parts(&db, id).await?;
-            let sum: f64 = ps.iter().map(|p| p.size).sum();
-            if ps.len() as f64 != v.parts || sum != v.size {
-                return reply(&json!({ "error": "bo'laklar to'liq emas", "yuklangan": ps.len(), "kerak": v.parts as i64 }), 409);
-            }
-            db.prepare("UPDATE videos SET done=1, duration=?2 WHERE id=?1").bind(&[js(id), jn(b["duration"].as_i64().unwrap_or(0).max(0))])?.run().await?;
-            reply(&json!({ "ok": true }), 200)
+            let r = rpc(env, "aru_video_done", json!({ "k": dbkey(env)?, "vid": id, "dur": b["duration"].as_i64().unwrap_or(0).clamp(0, 1_000_000) })).await?;
+            let ok = r["ok"].as_bool() == Some(true);
+            reply(&r, if ok { 200 } else { 409 })
         }
 
         (Method::Get, ["api", "video", id]) => {
-            let Some(v) = video(&db, id).await? else { return reply(&json!({ "error": "video topilmadi" }), 404) };
-            let ps = parts(&db, id).await?;
-            let mut m = v.json();
-            m["done"] = json!(v.done != 0.0);
-            m["part_sizes"] = json!(ps.iter().map(|p| p.size as i64).collect::<Vec<_>>());
-            reply(&m, 200)
+            let v = rpc(env, "aru_video", json!({ "vid": id })).await?;
+            if v.is_null() {
+                return reply(&json!({ "error": "video topilmadi" }), 404);
+            }
+            reply(&v, 200)
         }
 
         (Method::Get, ["api", "video", id, "stream"]) => {
-            let Some(v) = video(&db, id).await? else { return reply(&json!({ "error": "video topilmadi" }), 404) };
-            if v.done == 0.0 {
+            let v = rpc(env, "aru_video", json!({ "vid": id })).await?;
+            if v.is_null() {
+                return reply(&json!({ "error": "video topilmadi" }), 404);
+            }
+            if v["done"].as_bool() != Some(true) {
                 return reply(&json!({ "error": "video hali tayyor emas" }), 409);
             }
-            let ps = parts(&db, id).await?;
-            let sizes: Vec<u64> = ps.iter().map(|p| p.size as u64).collect();
+            let ps = rpc(env, "aru_parts", json!({ "k": dbkey(env)?, "vid": id })).await?;
+            let ps = ps.as_array().cloned().unwrap_or_default();
+            let sizes: Vec<u64> = ps.iter().map(|p| int(&p["size"]) as u64).collect();
             let total: u64 = sizes.iter().sum();
+            let mime = v["mime"].as_str().unwrap_or("video/mp4").to_string();
             let range = req.headers().get("Range").ok().flatten();
             let (start, end, partial) = match range.as_deref().and_then(|h| parse_range(h, total)) {
                 Some((a, b)) => (a, b, true),
@@ -289,7 +269,7 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
                 None => (0, total.saturating_sub(1), false),
             };
             let Some((k, off, base)) = locate(&sizes, start) else { return reply(&json!({ "error": "video bo'sh" }), 404) };
-            let data = tg_get(&secret(env, "BOT_TOKEN")?, &ps[k].file_id).await?;
+            let data = tg_get(&secret(env, "BOT_TOKEN")?, ps[k]["file_id"].as_str().unwrap_or("")).await?;
             if data.len() as u64 != sizes[k] {
                 return reply(&json!({ "error": "bo'lak hajmi mos emas" }), 502);
             }
@@ -298,7 +278,7 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
             let body = data[off as usize..=(last - base) as usize].to_vec();
             let mut r = Response::from_bytes(body)?.with_status(if partial { 206 } else { 200 });
             let h = r.headers_mut();
-            h.set("Content-Type", &v.mime)?;
+            h.set("Content-Type", &mime)?;
             h.set("Accept-Ranges", "bytes")?;
             h.set("Cache-Control", "public, max-age=86400")?;
             if partial || last < total.saturating_sub(1) {
@@ -312,21 +292,20 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
         }
 
         (Method::Delete, ["api", "video", id]) => {
-            if video(&db, id).await?.is_none() {
+            if rpc(env, "aru_video", json!({ "vid": id })).await?.is_null() {
                 return reply(&json!({ "error": "video topilmadi" }), 404);
             }
             let (token, chat) = (secret(env, "BOT_TOKEN")?, secret(env, "CHANNEL_ID")?);
-            let ps = parts(&db, id).await?;
+            let msgs = rpc(env, "aru_video_del", json!({ "k": dbkey(env)?, "vid": id })).await?;
+            let msgs = msgs.as_array().cloned().unwrap_or_default();
             // Bitta so'rovda subrequest cheklovi bor: 40 tagacha xabar o'chiriladi (qolganlari kanalda qoladi).
             let mut gone = 0;
-            for p in ps.iter().take(40) {
-                if tg_call(&token, "deleteMessage", &json!({ "chat_id": chat.trim(), "message_id": p.msg as i64 })).await.is_ok() {
+            for m in msgs.iter().take(40) {
+                if tg_call(&token, "deleteMessage", &json!({ "chat_id": chat.trim(), "message_id": int(m) })).await.is_ok() {
                     gone += 1;
                 }
             }
-            db.prepare("DELETE FROM parts WHERE video=?1").bind(&[js(id)])?.run().await?;
-            db.prepare("DELETE FROM videos WHERE id=?1").bind(&[js(id)])?.run().await?;
-            reply(&json!({ "ok": true, "o_chirilgan_xabar": gone, "bo_laklar": ps.len() }), 200)
+            reply(&json!({ "ok": true, "o_chirilgan_xabar": gone, "bo_laklar": msgs.len() }), 200)
         }
 
         _ => reply(&json!({ "error": "topilmadi" }), 404),

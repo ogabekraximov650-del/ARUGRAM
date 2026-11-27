@@ -1,21 +1,9 @@
-CREATE TABLE IF NOT EXISTS videos (
-  id TEXT PRIMARY KEY,
-  title TEXT NOT NULL,
-  channel TEXT NOT NULL DEFAULT '',
-  mime TEXT NOT NULL DEFAULT 'video/mp4',
-  size INTEGER NOT NULL,
-  parts INTEGER NOT NULL,
-  duration INTEGER NOT NULL DEFAULT 0,
-  views INTEGER NOT NULL DEFAULT 0,
-  done INTEGER NOT NULL DEFAULT 0,
-  created INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS videos_done_created ON videos (done, created DESC);
-CREATE TABLE IF NOT EXISTS parts (
-  video TEXT NOT NULL,
-  n INTEGER NOT NULL,
-  file_id TEXT NOT NULL,
-  msg INTEGER NOT NULL,
-  size INTEGER NOT NULL,
-  PRIMARY KEY (video, n)
-);
+-- ARU bazasi (Supabase loyihasi "ARU", ref czsqveeefsakppfvytpq). Migratsiya `aru_videos` sifatida qo'llangan.
+-- Jadvallar ochiq emas (RLS yoqilgan, anon/authenticated huquqi olingan): hamma narsa SECURITY DEFINER funksiyalar orqali.
+-- Yozish va maxfiy o'qish funksiyalari `k` (private.cfg dagi 'key' = worker secret DB_KEY) so'raydi.
+--   public.aru_videos(lim, before)            — tayyor videolar ro'yxati (ochiq)
+--   public.aru_video(vid)                     — video + bo'laklar hajmi (ochiq; file_id chiqmaydi)
+--   public.aru_parts(k, vid)                  — bo'laklar file_id (faqat worker)
+--   public.aru_video_new / aru_part_put / aru_video_done / aru_video_del (k bilan)
+-- Jadvallar: public.videos(id,title,channel,mime,size,parts,duration,views,done,created), public.parts(video,n,file_id,msg,size), private.cfg(name,value).
+-- To'liq SQL matni Supabase migratsiyalar ro'yxatida (`list_migrations`).
