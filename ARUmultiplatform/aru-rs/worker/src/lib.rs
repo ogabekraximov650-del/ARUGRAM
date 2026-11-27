@@ -2,7 +2,9 @@
 //! ro'yxat va bo'laklar jadvali Supabase (Postgres, funksiyalar orqali) bazasida. Bot tokeni FAQAT shu yerda (secret `BOT_TOKEN`, `CHANNEL_ID`); baza: `SB_URL`, `SB_ANON`, `DB_KEY`.
 //!
 //! GET    /api/health
-//! GET    /api/videos?limit=24&before=<ms>          — tayyor videolar (yangisi birinchi)
+//! GET    /api/videos?kind=&q=&author=&followed_by=&sort=new|views&limit=&offset=&me=   — tayyor videolar
+//! POST   /api/user {id,name} · GET /api/channel/<id>?me= · POST /api/follow {uid,target,on}
+//! POST   /api/video/<id>/like|view · GET|POST /api/video/<id>/notes · GET /api/video/<id>/thumb
 //! GET    /api/video/<id>                           — video va bo'laklar hajmi
 //! GET    /api/video/<id>/stream                    — bo'laklarni ulab beradi (Range qo'llanadi)
 //! POST   /api/upload      {title,channel,size,parts,mime}  -> {id}        (X-App-Token)
@@ -170,6 +172,22 @@ fn int(v: &Value) -> i64 {
 
 // ───────────────────────── marshrutlar ─────────────────────────
 
+fn q_str(q: &std::collections::HashMap<String, String>, k: &str) -> String {
+    q.get(k).cloned().unwrap_or_default().chars().take(100).collect()
+}
+
+fn q_int(q: &std::collections::HashMap<String, String>, k: &str, d: i64) -> i64 {
+    q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d)
+}
+
+/// Telegram'dan fayl olib, kesh sarlavhalari bilan beradi (muqova rasmi uchun).
+async fn file_response(bytes: Vec<u8>, mime: &str, cache: &str) -> Result<Response> {
+    let mut r = Response::from_bytes(bytes)?;
+    r.headers_mut().set("Content-Type", mime)?;
+    r.headers_mut().set("Cache-Control", cache)?;
+    cors(r)
+}
+
 async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
     let path = url.path().to_string();
     let seg: Vec<&str> = path.trim_matches('/').split('/').collect();
@@ -178,17 +196,38 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
     if writes && !authorized(&req, env) {
         return reply(&json!({ "error": "ruxsat yo'q" }), 401);
     }
+    let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
+    let me = q_str(&q, "me");
     match (method, seg.as_slice()) {
         (Method::Get, ["api", "health"]) => reply(&json!({ "ok": true, "name": "aru-api" }), 200),
 
+        // Kanal (foydalanuvchi) yaratish / nomini yangilash.
+        (Method::Post, ["api", "user"]) => {
+            let b: Value = req.json().await.map_err(|_| rerr("noto'g'ri JSON"))?;
+            let r = rpc(env, "aru_user", json!({ "k": dbkey(env)?, "me": b["id"].as_str().unwrap_or(""), "nm": b["name"].as_str().unwrap_or("") })).await?;
+            reply(&r, 200)
+        }
+
+        (Method::Get, ["api", "channel", id]) => {
+            let r = rpc(env, "aru_channel", json!({ "cid": id, "me": me })).await?;
+            if r.is_null() {
+                return reply(&json!({ "error": "kanal topilmadi" }), 404);
+            }
+            reply(&r, 200)
+        }
+
         (Method::Get, ["api", "videos"]) => {
-            let q: std::collections::HashMap<String, String> = url.query_pairs().into_owned().collect();
-            let lim = q.get("limit").and_then(|v| v.parse::<i64>().ok()).unwrap_or(24).clamp(1, 100);
-            let before = q.get("before").and_then(|v| v.parse::<i64>().ok()).unwrap_or(i64::MAX / 4);
-            let rows = rpc(env, "aru_videos", json!({ "lim": lim, "before": before })).await?;
-            let mut r = reply(&json!({ "videos": rows }), 200)?;
-            r.headers_mut().set("Cache-Control", "public, max-age=15")?;
-            Ok(r)
+            let rows = rpc(
+                env,
+                "aru_videos",
+                json!({
+                    "me": me, "kd": q_str(&q, "kind"), "q": q_str(&q, "q"), "author": q_str(&q, "author"),
+                    "followed_by": q_str(&q, "followed_by"), "srt": q_str(&q, "sort"),
+                    "lim": q_int(&q, "limit", 24).clamp(1, 100), "off": q_int(&q, "offset", 0).max(0),
+                }),
+            )
+            .await?;
+            reply(&json!({ "videos": rows }), 200)
         }
 
         (Method::Post, ["api", "upload"]) => {
@@ -203,12 +242,23 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
                 env,
                 "aru_video_new",
                 json!({
-                    "k": dbkey(env)?, "vid": id, "ttl": title, "ch": b["channel"].as_str().unwrap_or(""),
+                    "k": dbkey(env)?, "vid": id, "ttl": title, "me": b["uid"].as_str().unwrap_or(""), "kd": b["kind"].as_str().unwrap_or("video"),
                     "mm": b["mime"].as_str().unwrap_or("video/mp4"), "sz": size, "np": n, "ts": Date::now().as_millis() as i64,
                 }),
             )
             .await?;
             reply(&json!({ "id": id }), 200)
+        }
+
+        (Method::Put, ["api", "upload", id, "thumb"]) => {
+            let bytes = req.bytes().await?;
+            if bytes.is_empty() || bytes.len() > 2 * 1024 * 1024 {
+                return reply(&json!({ "error": "muqova 1 bayt..2 MiB bo'lishi kerak" }), 413);
+            }
+            let (token, chat) = (secret(env, "BOT_TOKEN")?, secret(env, "CHANNEL_ID")?);
+            let (fid, msg) = tg_put(&token, chat.trim(), &format!("{id}_thumb.jpg"), &bytes).await?;
+            rpc(env, "aru_thumb_set", json!({ "k": dbkey(env)?, "vid": id, "fid": fid, "mid": msg })).await?;
+            reply(&json!({ "ok": true }), 200)
         }
 
         (Method::Put, ["api", "upload", id, n]) => {
@@ -238,11 +288,56 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
         }
 
         (Method::Get, ["api", "video", id]) => {
-            let v = rpc(env, "aru_video", json!({ "vid": id })).await?;
+            let v = rpc(env, "aru_video", json!({ "vid": id, "me": me })).await?;
             if v.is_null() {
                 return reply(&json!({ "error": "video topilmadi" }), 404);
             }
             reply(&v, 200)
+        }
+
+        (Method::Get, ["api", "video", id, "thumb"]) => {
+            let fid = rpc(env, "aru_thumb_get", json!({ "k": dbkey(env)?, "vid": id })).await?;
+            let Some(fid) = fid.as_str() else { return reply(&json!({ "error": "muqova yo'q" }), 404) };
+            let data = tg_get(&secret(env, "BOT_TOKEN")?, fid).await?;
+            file_response(data, "image/jpeg", "public, max-age=604800").await
+        }
+
+        (Method::Post, ["api", "video", id, "like"]) => {
+            let b: Value = req.json().await.map_err(|_| rerr("noto'g'ri JSON"))?;
+            let n = rpc(env, "aru_like", json!({ "k": dbkey(env)?, "vid": id, "me": b["uid"].as_str().unwrap_or(""), "flag": b["on"].as_bool().unwrap_or(true) })).await?;
+            reply(&json!({ "likes": n }), 200)
+        }
+
+        (Method::Post, ["api", "video", id, "view"]) => {
+            rpc(env, "aru_view", json!({ "k": dbkey(env)?, "vid": id })).await?;
+            reply(&json!({ "ok": true }), 200)
+        }
+
+        (Method::Get, ["api", "video", id, "notes"]) => {
+            let n = rpc(env, "aru_notes", json!({ "vid": id })).await?;
+            reply(&json!({ "notes": n }), 200)
+        }
+
+        (Method::Post, ["api", "video", id, "notes"]) => {
+            let b: Value = req.json().await.map_err(|_| rerr("noto'g'ri JSON"))?;
+            rpc(
+                env,
+                "aru_note_add",
+                json!({ "k": dbkey(env)?, "vid": id, "me": b["uid"].as_str().unwrap_or(""), "tm": b["at"].as_i64().unwrap_or(0), "txt": b["text"].as_str().unwrap_or(""), "ts": Date::now().as_millis() as i64 }),
+            )
+            .await?;
+            reply(&json!({ "ok": true }), 200)
+        }
+
+        (Method::Post, ["api", "follow"]) => {
+            let b: Value = req.json().await.map_err(|_| rerr("noto'g'ri JSON"))?;
+            let n = rpc(
+                env,
+                "aru_follow",
+                json!({ "k": dbkey(env)?, "me": b["uid"].as_str().unwrap_or(""), "target": b["target"].as_str().unwrap_or(""), "flag": b["on"].as_bool().unwrap_or(true) }),
+            )
+            .await?;
+            reply(&json!({ "followers": n }), 200)
         }
 
         (Method::Get, ["api", "video", id, "stream"]) => {
@@ -296,7 +391,7 @@ async fn route(mut req: Request, env: &Env, url: &Url) -> Result<Response> {
                 return reply(&json!({ "error": "video topilmadi" }), 404);
             }
             let (token, chat) = (secret(env, "BOT_TOKEN")?, secret(env, "CHANNEL_ID")?);
-            let msgs = rpc(env, "aru_video_del", json!({ "k": dbkey(env)?, "vid": id })).await?;
+            let msgs = rpc(env, "aru_video_del", json!({ "k": dbkey(env)?, "vid": id, "me": me })).await?;
             let msgs = msgs.as_array().cloned().unwrap_or_default();
             // Bitta so'rovda subrequest cheklovi bor: 40 tagacha xabar o'chiriladi (qolganlari kanalda qoladi).
             let mut gone = 0;

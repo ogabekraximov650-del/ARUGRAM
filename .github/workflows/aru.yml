@@ -206,12 +206,27 @@ jobs:
           # 20 MB ga yaqin bo'lak (18 MiB) + kichik bo'lak: bo'laklar ulanishi va Range tekshiriladi
           head -c 18874368 /dev/urandom > p0; head -c 1500000 /dev/urandom > p1; cat p0 p1 > all
           SIZE=$(stat -c %s all)
-          ID=$(curl -fsS -H "$H" -H 'Content-Type: application/json' -d "{\"title\":\"E2E sinov\",\"channel\":\"test\",\"size\":$SIZE,\"parts\":2}" "$U/api/upload" | jq -r .id)
+          ME=e2etest0123456789
+          J='Content-Type: application/json'
+          curl -fsS -H "$H" -H "$J" -d "{\"id\":\"$ME\",\"name\":\"E2E kanal\"}" "$U/api/user" | jq -e '.name=="E2E kanal"' >/dev/null
+          ID=$(curl -fsS -H "$H" -H "$J" -d "{\"title\":\"E2E sinov\",\"uid\":\"$ME\",\"kind\":\"video\",\"size\":$SIZE,\"parts\":2}" "$U/api/upload" | jq -r .id)
+          # boshqa foydalanuvchi nomidan yozish rad etilishi kerak (kanal yo'q)
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -H "$J" -d '{"title":"x","uid":"yoqfoydalanuvchi1","size":1,"parts":1}' "$U/api/upload")" != 200 ]
           echo "video: $ID"
           curl -fsS -H "$H" -X PUT --data-binary @p0 "$U/api/upload/$ID/0"; echo
           curl -fsS -H "$H" -X PUT --data-binary @p1 "$U/api/upload/$ID/1"; echo
-          curl -fsS -H "$H" -H 'Content-Type: application/json' -d '{"duration":60}' "$U/api/upload/$ID/done"; echo
-          curl -fsS "$U/api/videos" | jq -e --arg id "$ID" '.videos | map(.id) | index($id) != null' >/dev/null
+          head -c 20000 /dev/urandom > th; curl -fsS -H "$H" -X PUT --data-binary @th "$U/api/upload/$ID/thumb"; echo
+          curl -fsS -H "$H" -H "$J" -d '{"duration":60}' "$U/api/upload/$ID/done"; echo
+          curl -fsS "$U/api/videos?me=$ME" | jq -e --arg id "$ID" '.videos | map(select(.id==$id and .channel=="E2E kanal" and .has_thumb==true)) | length == 1' >/dev/null
+          curl -fsS "$U/api/videos?q=sinov&author=$ME" | jq -e --arg id "$ID" '.videos | map(.id) | index($id) != null' >/dev/null
+          curl -fsS "$U/api/video/$ID/thumb" -o thr; cmp th thr
+          # like / fikr / ko'rish / obuna
+          curl -fsS -H "$H" -H "$J" -d "{\"uid\":\"$ME\",\"on\":true}" "$U/api/video/$ID/like" | jq -e '.likes==1' >/dev/null
+          curl -fsS -H "$H" -H "$J" -d "{\"uid\":\"$ME\",\"at\":12,\"text\":\"salom\"}" "$U/api/video/$ID/notes"; echo
+          curl -fsS "$U/api/video/$ID/notes" | jq -e '.notes | length==1 and .[0].body=="salom" and .[0].at==12' >/dev/null
+          curl -fsS -H "$H" -X POST "$U/api/video/$ID/view"; echo
+          curl -fsS "$U/api/video/$ID?me=$ME" | jq -e '.liked==true and .likes==1 and .notes==1 and .views==1 and .done==true' >/dev/null
+          curl -fsS "$U/api/channel/$ME" | jq -e '.videos==1 and .name=="E2E kanal"' >/dev/null
           # 1) boshidan: 206, birinchi bo'lak
           curl -fsS -H 'Range: bytes=0-' -D h0 -o r0 "$U/api/video/$ID/stream"
           grep -qi '^HTTP/.* 206' h0
@@ -222,6 +237,8 @@ jobs:
           # 3) o'rtadan kichik oraliq
           curl -fsS -H 'Range: bytes=1000-1999' -o r2 "$U/api/video/$ID/stream"
           [ "$(cmp -s r2 <(tail -c +1001 all | head -c 1000) && echo ok)" = ok ]
-          curl -fsS -H "$H" -X DELETE "$U/api/video/$ID"; echo
+          # boshqa foydalanuvchi o'chira olmaydi, egasi o'chiradi
+          [ "$(curl -s -o /dev/null -w '%{http_code}' -H "$H" -X DELETE "$U/api/video/$ID?me=boshqafoydalanuvchi")" != 200 ]
+          curl -fsS -H "$H" -X DELETE "$U/api/video/$ID?me=$ME"; echo
           curl -sS -o /dev/null -w '%{http_code}\n' "$U/api/video/$ID" | grep -q 404
           echo "E2E muvaffaqiyatli"
