@@ -1,6 +1,5 @@
 //! Qayta ishlatiladigan kichik vidjetlar.
 
-use crate::art::{art, Art};
 use crate::theme::*;
 use std::rc::Rc;
 use uzcoders::prelude::*;
@@ -57,11 +56,33 @@ pub fn pill(label: &str, on: bool) -> Element {
     column(vec![b(label, 13.5, if on { BG } else { WHITE })]).center().height(36.0).padding_xy(14.0, 0.0).radius(12.0).bg(if on { WHITE } else { S2 })
 }
 
-/// Muqovali karta: rasm + ustiga qatlamlar, `r` burchak radiusi.
-pub fn pic(a: Art, r: f32, layers: Vec<Element>) -> Element {
-    let mut v = vec![image_fill(&art(a))];
+/// Muqovali karta: video rasmi (yoki bo'sh joy) + ustiga qatlamlar; `rw:rh` — rasm nisbati.
+pub fn cover(id: &str, has: bool, rw: u32, rh: u32, r: f32, layers: Vec<Element>) -> Element {
+    let base = match if has { crate::thumbs::thumb(id, rw, rh) } else { None } {
+        Some(img) => image_fill(&img),
+        None => column(vec![icon(crate::icons::PLAY, 34.0).color(Color::hex(0x3A3A3A))]).center().bg(S2),
+    };
+    let mut v = vec![base];
     v.extend(layers);
     stack(v).radius(r).round_clip(r).bg(S2)
+}
+
+/// Bo'sh holat: belgi, sarlavha, izoh va (ixtiyoriy) tugma.
+pub fn empty(path: &'static str, title: &str, sub: &str, action: Option<(&str, Rc<dyn Fn()>)>) -> Element {
+    let mut kids = vec![
+        column(vec![icon(path, 30.0).color(DIM)]).center().width(64.0).height(64.0).radius(18.0).bg(S2),
+        b(title, 17.0, WHITE).margin_each(0.0, 14.0, 0.0, 0.0),
+        t(sub, 13.5, MUTE).margin_each(0.0, 6.0, 0.0, 0.0),
+    ];
+    if let Some((label, cb)) = action {
+        kids.push(column(vec![b(label, 14.0, BG)]).center().height(42.0).padding_xy(20.0, 0.0).radius(14.0).bg(WHITE).margin_each(0.0, 16.0, 0.0, 0.0).on_click(move || cb()));
+    }
+    column(kids).align(Align::Center).padding(32.0)
+}
+
+/// Matn kiritish maydoni (qora plita uslubida).
+pub fn input(state: &State<String>, hint: &str) -> Element {
+    field(state).hint(hint).color(WHITE).hint_color(MUTE).accent(SIG).bg(S2).border(1.0, LINE).radius(14.0)
 }
 
 /// O'yilgan burchak: pastki-chap burchakda sahifa foni rangidagi plita; ichiga matn qo'yiladi.
@@ -87,8 +108,8 @@ pub fn dur_tab(dur: &str) -> Element {
     at_bottom_left(notch(64.0, 28.0, 14.0, column(vec![b(dur, 12.5, WHITE)]).center()))
 }
 
-/// Vaqt chizg'ichi: tirqishlar; bosilsa/surilsa `pos` (0..1) o'zgaradi.
-pub fn ruler(pos: &State<f32>, ticks: usize, tall: f32, w: f32) -> Element {
+/// Vaqt chizg'ichi: tirqishlar; bosilsa/surilsa `pos` (0..1) o'zgaradi, `on_move(x, qo'yib_yuborildi)` chaqiriladi.
+pub fn ruler(pos: &State<f32>, ticks: usize, tall: f32, w: f32, on_move: Rc<dyn Fn(f32, bool)>) -> Element {
     let p = pos.get();
     let kids: Vec<Element> = (0..ticks)
         .map(|i| {
@@ -98,7 +119,11 @@ pub fn ruler(pos: &State<f32>, ticks: usize, tall: f32, w: f32) -> Element {
         })
         .collect();
     let s = pos.clone();
-    row(kids).align(Align::End).justify(Justify::SpaceBetween).width(w).height(tall + 10.0).on_drag(move |x, _| s.set(x.clamp(0.0, 1.0)))
+    row(kids).align(Align::End).justify(Justify::SpaceBetween).width(w).height(tall + 10.0).on_drag(move |x, up| {
+        let x = x.clamp(0.0, 1.0);
+        s.set(x);
+        on_move(x, up);
+    })
 }
 
 /// "mm:ss" ko'rinishi.
@@ -107,10 +132,3 @@ pub fn clock(secs: f32) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-/// "24:01" -> soniyalar.
-pub fn dur_secs(d: &str) -> f32 {
-    let mut it = d.split(':');
-    let m: f32 = it.next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
-    let s: f32 = it.next().and_then(|x| x.parse().ok()).unwrap_or(0.0);
-    m * 60.0 + s
-}
