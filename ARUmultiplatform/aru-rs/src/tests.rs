@@ -22,10 +22,12 @@ const VIDEOS: &str = r#"{"videos":[
  {"id":"a3","title":"Uyda tez ovqat","kind":"video","uid":"me123456","channel":"Sinov kanal","size":900000,"duration":900,"views":2000000,"created":3,"has_thumb":false,"likes":9,"notes":1,"liked":true}
 ]}"#;
 
+const REELS: &str = r#"{"videos":[{"id":"a2","title":"Tog'da tong","kind":"reel","uid":"u2u2u2u2","channel":"Oshxona","size":900000,"duration":45,"views":300,"created":2,"has_thumb":false,"likes":0,"notes":0,"liked":false}]}"#;
+
 fn mock(method: &str, path: &str, _body: &str) -> (u16, String) {
     let _ = method;
     if path.starts_with("/api/videos") {
-        (200, VIDEOS.to_string())
+        (200, if path.contains("kind=reel") { REELS.to_string() } else { VIDEOS.to_string() })
     } else if path.starts_with("/api/user") {
         (200, r#"{"id":"me123456","name":"Sinov kanal"}"#.into())
     } else if path.starts_with("/api/channel") {
@@ -113,14 +115,14 @@ fn bosh_sahifa_haqiqiy_royxat() {
     let _ = texts(&mut ui);
     pump();
     assert!(has(&mut ui, "Qirq kun ichida"));
-    assert!(has(&mut ui, "Uyda tez ovqat"));
+    assert!(has(&mut ui, "Tog'da tong"));
     assert!(has(&mut ui, "24:01"));
     assert!(has(&mut ui, "12,4 ming"));
     snap(&mut ui, "1_bosh");
     app.hot.set(true);
     let _ = texts(&mut ui);
     pump();
-    assert!(has(&mut ui, "Uyda tez ovqat"));
+    assert!(has(&mut ui, "Tog'da tong"));
 }
 
 #[test]
