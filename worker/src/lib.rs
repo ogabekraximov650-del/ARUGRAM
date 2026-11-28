@@ -1589,6 +1589,7 @@ async fn init_db(env: &Env) -> bool {
         // ── ANIBLA YUKLASH NAVBATI (kodlash botining uchinchi bo'limi, `anibla.rs`) ──
         (anibla::DDL[0], vec![]),
         (anibla::DDL[1], vec![]),
+        (anibla::DDL[2], vec![]),
         // ── YANGI QISM E'LONI (`announce.rs`) ──
         (announce::DDL[0], vec![]),
         (announce::DDL[1], vec![]),
@@ -4027,9 +4028,16 @@ pub(crate) async fn origin_part_rows(env: &Env, origin: &str) -> Vec<(String, i6
 /// EN: message ids of Bot-API parts are stored shifted by this offset in `tg_files` so they never collide with main-channel ids.
 pub(crate) const BOT_OFFSET: i64 = 10_000_000_000;
 
-/// Bot API qismlarining `file_id` jadvali (kodlovchi `getFile` bilan oladi). EN: table of Bot API part file_ids.
-pub(crate) async fn bot_parts_ensure(env: &Env) {
-    let _ = turso_exec(env, "CREATE TABLE IF NOT EXISTS bot_parts (file_name TEXT PRIMARY KEY, fid TEXT NOT NULL)", vec![]).await;
+/// Bot API kanalidagi qism xabarlarini o'chiradi (`deleteMessages` — bitta so'rovda 100 tagacha: worker'da subrequest chegarasi bor). EN: bulk-deletes Bot-API part messages.
+pub(crate) async fn anibla_parts_delete(env: &Env, ids: &[i64]) {
+    let (tok, ch) = (tg_secret(env, "ANIBLA_PARTS_BOT"), tg_secret(env, "ANIBLA_PARTS_CH"));
+    let Ok(chat) = ch.parse::<i64>() else { return };
+    if tok.is_empty() {
+        return;
+    }
+    for chunk in ids.chunks(100) {
+        let _ = tg_api_tok(&tok, "deleteMessages", json!({"chat_id": chat, "message_ids": chunk})).await;
+    }
 }
 
 /// Asl videoning qismlari Bot API `file_id` lari (tartib bilan); qismlar Bot API kanalida bo'lmasa yoki to'liq bo'lmasa — bo'sh. EN: ordered Bot API file_ids, empty if not a Bot-API origin.
@@ -11891,15 +11899,11 @@ async fn tg_forget_file(env: &Env, value: &str) {
     // Yangi tizimdagi (18 MiB bo'lakli) nusxa ham ketadi.
     vd::forget(env, name).await;
     // 2 GB dan katta asl video qismlarga bo'lingan bo'lsa (`<nom>.p0`, `.p1`, ...) — hamma qism kanaldan o'chadi.
+    let mut bot_ids: Vec<i64> = Vec::new();
     for (pname, pmsg) in origin_part_rows(env, name).await {
-        // Bot API qismi: ALOHIDA kanalda (`ANIBLA_PARTS_CH`), shu kanal boti o'chiradi; asosiy kanalga tegilmaydi.
+        // Bot API qismi: ALOHIDA kanalda (`ANIBLA_PARTS_CH`); xabarlar pastda ommaviy o'chiriladi, asosiy kanalga tegilmaydi.
         if pmsg >= BOT_OFFSET {
-            let (tok, ch) = (tg_secret(env, "ANIBLA_PARTS_BOT"), tg_secret(env, "ANIBLA_PARTS_CH"));
-            if let (false, Ok(chat)) = (tok.is_empty(), ch.parse::<i64>()) {
-                let _ = tg_api_tok(&tok, "deleteMessage", json!({"chat_id": chat, "message_id": pmsg - BOT_OFFSET})).await;
-            }
-            let _ = turso_exec(env, "DELETE FROM bot_parts WHERE file_name=?", vec![TursoArg::text(&pname)]).await;
-            let _ = turso_exec(env, "DELETE FROM tg_files WHERE file_name=?", vec![TursoArg::text(&pname)]).await;
+            bot_ids.push(pmsg - BOT_OFFSET);
             continue;
         }
         let channel = tg_channel_id(env);
@@ -11913,6 +11917,15 @@ async fn tg_forget_file(env: &Env, value: &str) {
             }
         }
         let _ = turso_exec(env, "DELETE FROM tg_files WHERE file_name=?", vec![TursoArg::text(&pname)]).await;
+    }
+    if !bot_ids.is_empty() {
+        anibla_parts_delete(env, &bot_ids).await;
+        let esc: String = name.chars().flat_map(|c| if matches!(c, '%' | '_' | '\\') { vec!['\\', c] } else { vec![c] }).collect();
+        let pat = format!("{esc}.p%");
+        let _ = turso_batch(env, &[
+            ("DELETE FROM bot_parts WHERE file_name LIKE ? ESCAPE '\\'", vec![TursoArg::text(&pat)]),
+            ("DELETE FROM tg_files WHERE file_name LIKE ? ESCAPE '\\'", vec![TursoArg::text(&pat)]),
+        ]).await;
     }
     let res = turso_exec(env, "SELECT msg_id FROM tg_files WHERE file_name=?",
         vec![TursoArg::text(name)]).await;

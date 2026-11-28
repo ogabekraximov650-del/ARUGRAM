@@ -1690,7 +1690,7 @@ pub(crate) async fn on_callback(env: &Env, chat: i64, _msg_id: i64, data: &str) 
 // `/api/anibla/claim` qilib, videolarni KETMA-KET yuklaydi. Cron ham har
 // 10 daqiqada `kick` qiladi (run o'lsa yoki ishga tushmay qolsa).
 
-pub(crate) const DDL: [&str; 2] = [
+pub(crate) const DDL: [&str; 3] = [
     // state: queued | running | error.
     "CREATE TABLE IF NOT EXISTS anibla_jobs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1707,7 +1707,11 @@ pub(crate) const DDL: [&str; 2] = [
         error TEXT DEFAULT ''
     )",
     "CREATE INDEX IF NOT EXISTS idx_anibla_q ON anibla_jobs(state, queued_at)",
+    // Bot API orqali yuklangan asl video qismlarining `file_id` lari (`tool/anibla/botparts.py`; kodlovchi `getFile` bilan oladi).
+    BOT_PARTS_DDL,
 ];
+
+pub(crate) const BOT_PARTS_DDL: &str = "CREATE TABLE IF NOT EXISTS bot_parts (file_name TEXT PRIMARY KEY, fid TEXT NOT NULL)";
 
 /// Bitta video uchun ijara (run o'lsa shundan keyin qayta olinadi).
 const LEASE_MS: i64 = 130 * 60 * 1000;
@@ -2356,6 +2360,33 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                 let fids: Vec<String> = b["fids"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(|f| f.to_string())).collect()).unwrap_or_default();
                 let key = b["key"].as_str().unwrap_or("").trim().to_string();
                 // Kalit bo'sh — qismlar Telegram'da ochiladigan oddiy mp4 (kodlovchi ffmpeg bilan ulaydi); kalit bor — eski, shifrlangan qismlar.
+                if bot {
+                    // MUHIM (2026-11): worker'da bitta so'rovga ~50 ta tashqi so'rov (subrequest) chegarasi bor. Avval har qism alohida yozilardi (23 qism + 23 file_id + ...) —
+                    // chegaradan oshib asl video yozuvi va qism YARATILMAY qolardi. Endi hammasi BITTA paketda; yiqilsa ish xato bilan navbatga qaytadi va kanal qismlari o'chadi.
+                    const Q_PART: &str = "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '') ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id";
+                    const Q_ORIG: &str = "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, '') ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=''";
+                    const Q_FID: &str = "INSERT INTO bot_parts (file_name, fid) VALUES (?, ?) ON CONFLICT(file_name) DO UPDATE SET fid=excluded.fid";
+                    let mut st: Vec<(&str, Vec<TursoArg>)> = vec![(BOT_PARTS_DDL, vec![])];
+                    for (i, m) in parts.iter().enumerate() {
+                        st.push((Q_PART, vec![TursoArg::text(&origin_part_name(&origin, i)), TursoArg::int(*m)]));
+                    }
+                    st.push((Q_ORIG, vec![TursoArg::text(&origin), TursoArg::int(parts[0])]));
+                    for (i, f) in fids.iter().enumerate() {
+                        st.push((Q_FID, vec![TursoArg::text(&origin_part_name(&origin, i)), TursoArg::text(f)]));
+                    }
+                    if let Err(e) = crate::turso_batch(env, &st).await {
+                        let why: String = format!("qismlar bazaga yozilmadi: {e}").chars().take(280).collect();
+                        let ids: Vec<i64> = parts.iter().map(|m| m - off).collect();
+                        crate::anibla_parts_delete(env, &ids).await;
+                        let _ = turso_exec(env,
+                            "INSERT INTO anibla_jobs (url, caption, file_name, chat, status_msg, queued_at, state, error, target) VALUES (?,?,?,?,?,?,'error',?,?)",
+                            vec![TursoArg::text(job["url"].as_str().unwrap_or("")), TursoArg::text(job["caption"].as_str().unwrap_or("")),
+                                 TursoArg::text(job["file_name"].as_str().unwrap_or("")), TursoArg::int(chat), TursoArg::int(jint(&job, "status_msg")),
+                                 TursoArg::int(jint(&job, "queued_at")), TursoArg::text(&why), TursoArg::text(job["target"].as_str().unwrap_or(""))]).await;
+                        { let body = status(format!("\u{274C} {}\n\u{1F4CB} Navbatdan qayta urinish mumkin.", html_escape(&why))); mirror(body.clone()).await; let _ = encbot_api(env, "editMessageText", body).await; }
+                        return json_resp(&json!({"error": "baza"}), 500);
+                    }
+                } else
                 if parts.len() > 1 && (key.is_empty() || valid_file_key(&key)) {
                     for (i, m) in parts.iter().enumerate() {
                         let _ = turso_exec(env,
@@ -2367,14 +2398,6 @@ pub(crate) async fn route(mut req: Request, env: &Env, path: &str, method: Metho
                         "INSERT INTO tg_files (file_name, msg_id, file_key) VALUES (?, ?, ?)
                          ON CONFLICT(file_name) DO UPDATE SET msg_id=excluded.msg_id, file_key=excluded.file_key",
                         vec![TursoArg::text(&origin), TursoArg::int(parts[0]), TursoArg::text(&key)]).await;
-                }
-                if bot && fids.len() == parts.len() {
-                    crate::bot_parts_ensure(env).await;
-                    for (i, f) in fids.iter().enumerate() {
-                        let _ = turso_exec(env,
-                            "INSERT INTO bot_parts (file_name, fid) VALUES (?, ?) ON CONFLICT(file_name) DO UPDATE SET fid=excluded.fid",
-                            vec![TursoArg::text(&origin_part_name(&origin, i)), TursoArg::text(f)]).await;
-                    }
                 }
                 let res = if encbot_titles(env, a, s).await.is_some() {
                     encbot_register(env, a, s, n, &origin, msg, jint(&b, "size"), jint(&b, "height")).await
