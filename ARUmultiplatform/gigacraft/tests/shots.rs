@@ -215,6 +215,37 @@ fn ekran_rasmlari() {
         app.game.mobs.clear();
     }
 
+    // 7e. Oy: qora osmon, kraterli relyef, past og'irlik
+    {
+        app.game.request = Some(gigacraft::game::Req::Dim(1));
+        app.step(W, H, 0.016);
+        assert_eq!(app.game.dim, 1);
+        wait_loaded(&mut app, 300);
+        app.game.time = sky::PHASE_DAY;
+        app.game.player.pitch = 0.15;
+        app.game.mode = Mode::Play;
+        for _ in 0..90 {
+            app.step(W, H, 0.016);
+        }
+        app.draw(W, H);
+        let moon = app.read_pixels(W, H);
+        save("15-oy", &moon);
+        let top = px(&moon, W / 2, 6);
+        assert!(luma(top) < 40.0, "Oy osmoni qora bo'lishi kerak: {top:?}");
+        let mut distinct = std::collections::HashSet::new();
+        for y in (H / 2..H).step_by(9) {
+            for x in (0..W).step_by(9) {
+                let c = px(&moon, x, y);
+                distinct.insert(((c[0] / 10.0) as i32, (c[1] / 10.0) as i32, (c[2] / 10.0) as i32));
+            }
+        }
+        assert!(distinct.len() > 12, "Oy yuzasi bir xil: {}", distinct.len());
+        app.game.request = Some(gigacraft::game::Req::Dim(0));
+        app.step(W, H, 0.016);
+        assert_eq!(app.game.dim, 0);
+        wait_loaded(&mut app, 300);
+    }
+
     // 8. Yuqori atmosfera (20 km) va 9. kosmosdan sayyora (10 000 km)
     app.game.quality = 0;
     app.game.player.fly_level = 7;

@@ -19,6 +19,8 @@ pub const EDGE_MARGIN: i64 = 40;
 #[derive(Clone, Copy)]
 pub struct Gen {
     pub seed: u32,
+    /// O'lcham: 0 — Yer (haqiqiy xarita), 1 — Oy (kraterlar, suvsiz, daraxtsiz).
+    pub dim: u8,
 }
 
 /// Bir ustun (16x16 blok) uchun sirt ma'lumoti.
@@ -95,7 +97,24 @@ pub struct Spire {
 
 impl Gen {
     pub fn new(seed: u32) -> Gen {
-        Gen { seed }
+        Gen { seed, dim: 0 }
+    }
+
+    pub fn with_dim(seed: u32, dim: u8) -> Gen {
+        Gen { seed, dim }
+    }
+
+    /// Oy relyefi: keng tekisliklar va tog'lar, har xil kattalikdagi kraterlar. Suv va o'simlik yo'q.
+    fn moon_terrain(&self, d: D3) -> Terr {
+        let broad = self.fb(d, 701, 2500.0, 4) - 0.5;
+        let detail = self.fb(d, 702, 80.0, 3) - 0.5;
+        let c1 = vnoise3(self.seed.wrapping_add(703), d[0] * R / 900.0, d[1] * R / 900.0, d[2] * R / 900.0);
+        let c2 = vnoise3(self.seed.wrapping_add(704), d[0] * R / 260.0, d[1] * R / 260.0, d[2] * R / 260.0);
+        let bowl1 = smoothstep(0.64, 0.78, c1);
+        let bowl2 = smoothstep(0.68, 0.80, c2);
+        let rim = smoothstep(0.58, 0.64, c1) * (1.0 - smoothstep(0.64, 0.70, c1));
+        let h = broad * 160.0 + detail * 10.0 - bowl1 * 60.0 - bowl2 * 20.0 + rim * 14.0;
+        Terr { h: h.floor() as i64 + 40, kind: STONE, bio: 0, wl: -1_000_000 }
     }
 
     fn fb(&self, d: D3, salt: u32, wl: f64, oct: u32) -> f32 {
@@ -108,6 +127,9 @@ impl Gen {
 
     /// Haqiqiy Yer xaritasi bo'yicha relyef: okean, ko'llar, daryolar, tog'lar, biomlar.
     pub fn terrain(&self, d: D3) -> Terr {
+        if self.dim == 1 {
+            return self.moon_terrain(d);
+        }
         let sm = earth::get().sample_full(d);
         let (el, bio) = (sm.el, sm.bio);
         let hills = self.fb(d, 101, 1400.0, 4);
@@ -174,6 +196,9 @@ impl Gen {
 
     /// Daryo kanalidagi oqim yo'nalishi (dunyo koordinatalarida, birlik), kanalda bo'lmasa `None`.
     pub fn river_flow(&self, d: D3) -> Option<D3> {
+        if self.dim == 1 {
+            return None;
+        }
         let (lat, lon) = earth::lat_lon(d);
         let r = rivers::get().near(lat, lon)?;
         if r.dist >= r.half {
@@ -222,6 +247,9 @@ impl Gen {
     }
 
     pub fn tree_in_cell(&self, f: u8, cx: i64, cz: i64) -> Option<Tree> {
+        if self.dim == 1 {
+            return None;
+        }
         let salt = self.seed.wrapping_add(11 + f as u32 * 977);
         let hh = hash2(salt, cx, cz);
         let x = cx * TREE_CELL + (hh % TREE_CELL as u32) as i64;
@@ -358,6 +386,9 @@ impl Gen {
 
     /// Uy (qishloq) joylashuvi: katak ichida ehtimol bilan, tekis quruqlikda.
     pub fn house_in_cell(&self, f: u8, cx: i64, cz: i64) -> Option<House> {
+        if self.dim == 1 {
+            return None;
+        }
         let salt = self.seed.wrapping_add(31 + f as u32 * 977);
         let hh = hash2(salt, cx, cz);
         if hh % 9 != 0 {
@@ -845,5 +876,31 @@ mod tests {
         let col = g.column(cp.f, cp.u, cp.v);
         let b = g.fill_chunk(cp, &col);
         assert!(b.contains(&COBBLE) && b.contains(&AIR));
+    }
+
+    #[test]
+    fn oy_relyefi_suvsiz_daraxtsiz_va_kraterli() {
+        let g = Gen::with_dim(1, 1);
+        let (mut lo, mut hi) = (i64::MAX, i64::MIN);
+        for k in 0..4000i64 {
+            let d = dir((k % 6) as u8, 3_000_000.0 + k as f64 * 7919.0, 5_000_000.0 + k as f64 * 104729.0 % 9_000_000.0);
+            let t = g.terrain(d);
+            assert_eq!(t.kind, STONE);
+            assert!(t.wl < t.h, "Oyda suv bo'lmasligi kerak");
+            lo = lo.min(t.h);
+            hi = hi.max(t.h);
+        }
+        assert!(hi - lo > 80, "relyef tekis: {lo}..{hi}");
+        assert!(lo > -400 && hi < 400, "{lo}..{hi}");
+        for cx in 0..50 {
+            assert!(g.tree_in_cell(1, 100 + cx, 100).is_none());
+        }
+        assert!(g.river_flow([0.0, 1.0, 0.0]).is_none());
+        // ustun va bo'lak to'ldirish ishlaydi
+        let col = g.column(2, 1_000_000, 1_000_000);
+        assert!(col.s.iter().all(|&s| s > SEA_R - 400 && s < SEA_R + 400));
+        let w = crate::world::World::new_dim(1, 1);
+        let cp = CP { f: 2, u: 1_000_000, v: 1_000_000, r: (col.s[0] / 16) as i32 };
+        assert!(w.chunk(cp).b.iter().any(|&b| b == STONE));
     }
 }

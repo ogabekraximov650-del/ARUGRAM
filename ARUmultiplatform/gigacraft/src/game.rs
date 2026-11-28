@@ -3,6 +3,7 @@ use crate::audio::Sfx;
 use crate::blocks::*;
 use crate::entity::{self, Mob, Particle};
 use crate::items::{self, Inventory, Item, Stack};
+use crate::net::Net;
 use crate::math::*;
 use crate::mesh::Vertex;
 use crate::planet::*;
@@ -23,6 +24,15 @@ pub enum Role {
     Joy { c: (f32, f32), k: (f32, f32) },
     Look,
     Btn(Btn),
+}
+
+/// Ilova (App) bajarishi kerak bo'lgan so'rovlar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Req {
+    /// O'lchamni almashtirish (0 — Yer, 1 — Oy).
+    Dim(u8),
+    /// Saqlash o'rnini almashtirish (1..=3).
+    Slot(u8),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -91,6 +101,11 @@ pub struct Game {
     speed_t: f32,
     jump_t: f32,
     pub dim: u8,
+    pub request: Option<Req>,
+    pub slot: u8,
+    pub net: Option<Net>,
+    /// O'lchamlar bo'yicha oxirgi joy (boshqa o'lchamga o'tib, qaytganda tiklanadi).
+    pub dim_pos: [Option<D3>; 2],
 }
 
 /// O'yin sessiyalari orasida saqlanadigan holat.
@@ -118,6 +133,11 @@ pub type ChestKey = (u8, i64, i64, i64);
 
 pub fn chest_key(c: &Cell) -> ChestKey {
     (c.f, c.u, c.v, c.r)
+}
+
+/// O'lchamga bog'langan sandiq kaliti (Oy sandiqlari Yernikiga aralashmasin).
+pub fn chest_key_dim(c: &Cell, dim: u8) -> ChestKey {
+    (c.f + 8 * dim, c.u, c.v, c.r)
 }
 
 /// Boshlanish joyi: Toshkent (41.3° sh.k., 69.28° sh.u.) yoki eng yaqin quruqlik.
@@ -202,6 +222,10 @@ impl Game {
             speed_t: 0.0,
             jump_t: 0.0,
             dim: 0,
+            request: None,
+            slot: 1,
+            net: None,
+            dim_pos: [None, None],
         };
         if let Some(s) = saved {
             g.player.pos = s.pos;
@@ -278,7 +302,7 @@ impl Game {
                     Some(CraftHit::Inv(i)) => items::click_slot(&mut self.inv.s[i], &mut self.cursor),
                     Some(CraftHit::Grid(i)) => {
                         if self.station == Station::Chest {
-                            if let Some(ch) = self.chest_cell.and_then(|c| self.chests.get_mut(&chest_key(&c))) {
+                            if let Some(ch) = self.chest_cell.and_then(|c| self.chests.get_mut(&chest_key_dim(&c, self.dim))) {
                                 items::click_slot(&mut ch[i], &mut self.cursor);
                             }
                         } else {
@@ -387,10 +411,79 @@ impl Game {
             PauseAct::Day => self.time = sky::PHASE_DAY,
             PauseAct::Sunset => self.time = sky::PHASE_SUNSET,
             PauseAct::Night => self.time = sky::PHASE_NIGHT,
+            PauseAct::Dim => {
+                self.request = Some(Req::Dim(1 - self.dim));
+                self.mode = Mode::Play;
+            }
+            PauseAct::Slot => {
+                self.request = Some(Req::Slot(self.slot % 3 + 1));
+                self.mode = Mode::Play;
+            }
+            PauseAct::Net => self.toggle_net(),
             PauseAct::SensDown => self.sens = ((self.sens - 0.2) * 10.0).round() / 10.0,
             PauseAct::SensUp => self.sens = ((self.sens + 0.2) * 10.0).round() / 10.0,
         }
         self.sens = self.sens.clamp(0.4, 2.5);
+    }
+
+    /// Tarmoq rejimini yoqadi/o'chiradi.
+    pub fn toggle_net(&mut self) {
+        if self.net.is_some() {
+            self.net = None;
+            self.world.set_logging(false);
+            self.say("TARMOQ O'CHIRILDI");
+        } else {
+            match Net::lan() {
+                Ok(n) => {
+                    self.net = Some(n);
+                    self.world.set_logging(true);
+                    self.say("TARMOQ YOQILDI: BOSHQA QURILMALAR O'ZI ULANADI");
+                }
+                Err(_) => self.say("TARMOQNI OCHIB BO'LMADI"),
+            }
+        }
+    }
+
+    /// Tarmoq: holatni yuboradi, kelgan o'zgarishlarni qo'llaydi.
+    fn net_tick(&mut self, dt: f32) {
+        let Some(net) = self.net.as_mut() else { return };
+        for (c, b) in self.world.take_outbox() {
+            net.send_edit(self.dim, c, b);
+        }
+        let inc = net.tick(dt, self.dim, self.player.pos, self.player.camera_basis_flat().2);
+        for e in inc {
+            if e.dim == self.dim {
+                let d = self.world.set_block_remote(&e.cell, e.block);
+                self.dirty.extend(d);
+            }
+        }
+    }
+
+    /// O'lchamni almashtirgandan keyin: yangi dunyo, o'yinchi shu o'lchamdagi joyga.
+    pub fn enter_world(&mut self, world: Arc<World>, dim: u8) {
+        self.dim_pos[self.dim as usize] = Some(self.player.pos);
+        self.world = world;
+        self.dim = dim;
+        self.mobs.clear();
+        self.parts.clear();
+        self.crops.clear();
+        self.touches.clear();
+        self.target = None;
+        self.dirty.clear();
+        let on = self.net.is_some();
+        self.world.set_logging(on);
+        let spawn = find_spawn(&self.world);
+        self.spawn = spawn;
+        let pos = self.dim_pos[dim as usize].unwrap_or(spawn);
+        self.player = Player::new(pos);
+        self.player.flying = false;
+        self.prev_pos = pos;
+        self.step_pos = pos;
+        self.airborne = false;
+        self.loading = 0.0;
+        self.rain = 0.0;
+        self.rain_to = 0.0;
+        self.say(if dim == 1 { "OY: OG'IRLIK 6 BARAVAR KAM, HAVO YO'Q" } else { "YERGA QAYTDINGIZ" });
     }
 
     pub fn eye_dir(&self) -> D3 {
@@ -556,7 +649,7 @@ impl Game {
 
     /// Sandiqni ochadi. Hali ochilmagan o'ljali sandiq birinchi marta ochilganda oddiy sandiqqa aylanadi va o'lja bilan to'ladi.
     fn open_chest(&mut self, cell: Cell) {
-        let key = chest_key(&cell);
+        let key = chest_key_dim(&cell, self.dim);
         if self.world.block(&cell) == LOOTCHEST {
             let h = crate::noise::hash3(77, cell.u, cell.r, cell.v);
             let mut loot: Vec<Stack> = vec![
@@ -782,9 +875,11 @@ impl Game {
             Some((t, left)) if left - dt > 0.0 => Some((t, left - dt)),
             _ => None,
         };
+        self.net_tick(dt);
         if self.mode != Mode::Play || !ready {
             return;
         }
+        self.player.gravity = if self.dim == 1 { 1.0 / 6.0 } else { 1.0 };
         self.time = (self.time + dt / DAY_SECS).fract();
         let r = self.layout().joy_r;
         let mut mv = [0.0f32, 0.0];
@@ -1038,12 +1133,15 @@ impl Game {
         self.weather_t -= dt;
         if self.weather_t <= 0.0 {
             self.weather_t = 90.0 + entity::rnd(&mut self.rng) * 200.0;
-            self.rain_to = if entity::rnd(&mut self.rng) < 0.3 { 1.0 } else { 0.0 };
+            self.rain_to = if self.dim == 0 && entity::rnd(&mut self.rng) < 0.3 { 1.0 } else { 0.0 };
         }
         self.rain += (self.rain_to - self.rain) * (dt * 0.15).min(1.0);
     }
 
     fn try_spawn(&mut self) {
+        if self.dim == 1 {
+            return;
+        }
         let ppos = self.player.pos;
         let night = sky::state(self.time, d_f32(self.player.up())).night;
         let (passive, hostile) = (self.mobs.iter().filter(|m| !entity::hostile(m.kind)).count(), self.mobs.iter().filter(|m| entity::hostile(m.kind)).count());
@@ -1069,7 +1167,8 @@ impl Game {
 
     /// Jonzotlar va zarrachalar mesh'i (o'yinchi atrofida).
     pub fn dynamic(&self) -> Option<(D3, Vec<Vertex>)> {
-        if self.mobs.is_empty() && self.parts.is_empty() {
+        let peers: Vec<(u32, crate::net::Peer)> = self.net.as_ref().map(|n| n.peers.iter().filter(|(_, p)| p.dim == self.dim).map(|(i, p)| (*i, *p)).collect()).unwrap_or_default();
+        if self.mobs.is_empty() && self.parts.is_empty() && peers.is_empty() {
             return None;
         }
         let anchor = self.player.pos;
@@ -1077,6 +1176,12 @@ impl Game {
         for m in &self.mobs {
             if d_len(d_sub(m.pos, anchor)) < 300.0 {
                 entity::mob_vertices(m, anchor, &mut v);
+            }
+        }
+        for (id, p) in &peers {
+            if d_len(d_sub(p.pos, anchor)) < 400.0 {
+                let h = |k: u32| ((id.wrapping_mul(2654435761).rotate_left(k) >> 8) & 0xFF) as f32 / 255.0;
+                entity::peer_vertices(p.pos, p.fwd, [0.25 + 0.7 * h(3), 0.25 + 0.7 * h(11), 0.25 + 0.7 * h(19)], anchor, &mut v);
             }
         }
         entity::particle_vertices(&self.parts, anchor, &mut v);
@@ -1127,7 +1232,7 @@ impl Game {
                     station: self.station,
                     inv: self.inv.s,
                     grid: self.grid,
-                    chest: self.chest_cell.and_then(|c| self.chests.get(&chest_key(&c)).copied()).unwrap_or([Stack::EMPTY; 27]),
+                    chest: self.chest_cell.and_then(|c| self.chests.get(&chest_key_dim(&c, self.dim)).copied()).unwrap_or([Stack::EMPTY; 27]),
                     result: self.craft_result(),
                     cursor: self.cursor,
                     fuel: self.fuel_left,
@@ -1137,6 +1242,9 @@ impl Game {
                 None
             },
             cursor_pos: self.cursor_pos,
+            dim: self.dim,
+            slot: self.slot,
+            net: self.net.as_ref().map(|n| n.visible(self.dim)),
             rain: self.rain,
             status: {
                 let mut v = Vec::new();
@@ -1843,6 +1951,72 @@ mod tests {
             g.update(0.05, true);
         }
         assert!(g.vitals.health < hp0, "zombi urmadi");
+    }
+
+    #[test]
+    fn oyga_otish_past_ogirlik_va_qaytish() {
+        let earth = Arc::new(World::new(1));
+        let mut g = Game::new(earth.clone(), None);
+        for _ in 0..60 {
+            g.update(0.016, true);
+        }
+        assert!(g.player.on_ground, "Yerda tushib turishi kerak");
+        let e_pos = g.player.pos;
+        let moon = Arc::new(World::new_dim(1, 1));
+        g.enter_world(moon.clone(), 1);
+        assert_eq!(g.dim, 1);
+        assert!(!Arc::ptr_eq(&g.world, &earth));
+        for _ in 0..120 {
+            g.update(0.016, true);
+        }
+        assert!(g.player.on_ground, "Oyda yer ustida turishi kerak");
+        assert!((g.player.gravity - 1.0 / 6.0).abs() < 1e-9);
+        // sakrash balandligi Yerdagidan ancha katta
+        let base = d_len(g.player.pos);
+        g.touches.push(Touch { id: 9, role: Role::Btn(Btn::Jump), last: (0.0, 0.0) });
+        let mut apex = 0.0f64;
+        for _ in 0..100 {
+            g.update(0.016, true);
+            apex = apex.max(d_len(g.player.pos) - base);
+        }
+        assert!(apex > 9.0, "Oyda sakrash {apex} blok (Yerda ~2.5)");
+        assert!(g.mobs.is_empty(), "Oyda jonzot yo'q");
+        // Yerga qaytish: oldingi joy tiklanadi
+        g.touches.clear();
+        g.enter_world(earth, 0);
+        assert!(d_len(d_sub(g.player.pos, e_pos)) < 50.0, "Yerdagi joy tiklanmadi");
+        assert_eq!(g.player.gravity, 1.0);
+    }
+
+    #[test]
+    fn pauza_tugmalari_sorov_beradi() {
+        let mut g = game_on_floor();
+        g.mode = Mode::Pause;
+        g.pause_action(PauseAct::Dim);
+        assert_eq!(g.request, Some(Req::Dim(1)));
+        g.request = None;
+        g.slot = 3;
+        g.pause_action(PauseAct::Slot);
+        assert_eq!(g.request, Some(Req::Slot(1)));
+        assert_eq!(g.ui_state().slot, 3);
+    }
+
+    #[test]
+    fn tarmoq_jurnali_va_tashqi_ozgarish() {
+        let mut g = game_on_floor();
+        g.world.set_logging(true);
+        g.update(0.016, true);
+        let t = g.target.expect("pol");
+        g.world.set_block(&t.cell, GLASS);
+        let out = g.world.take_outbox();
+        assert_eq!(out, vec![(t.cell, GLASS)]);
+        // tashqi o'zgarish jurnalga yozilmaydi
+        g.world.set_block_remote(&t.cell, BRICK);
+        assert!(g.world.take_outbox().is_empty());
+        assert_eq!(g.world.block(&t.cell), BRICK);
+        g.world.set_logging(false);
+        g.world.set_block(&t.cell, STONE);
+        assert!(g.world.take_outbox().is_empty());
     }
 
     #[test]

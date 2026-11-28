@@ -299,6 +299,26 @@ fn parts(kind: u8) -> Vec<Part> {
     }
 }
 
+/// Boshqa o'yinchi (tarmoq): odam shaklidagi quti-model; `shirt` — kiyim rangi.
+pub fn peer_vertices(pos: D3, fwd: D3, shirt: [f32; 3], anchor: D3, out: &mut Vec<Vertex>) {
+    let up = d_norm(pos);
+    let f = d_norm(d_sub(fwd, d_mul(up, d_dot(fwd, up))));
+    if !f.iter().all(|x| x.is_finite()) {
+        return;
+    }
+    let right = d_norm(d_cross(up, f));
+    let skin = [0.90, 0.72, 0.58];
+    for (i, (off, half, _, _)) in parts(ZOMBIE).into_iter().enumerate() {
+        let col = match i {
+            0 => shirt,
+            1 | 2 | 3 => skin,
+            _ => [0.18, 0.20, 0.45],
+        };
+        let c = d_add(pos, d_add(d_mul(right, off[0] as f64), d_add(d_mul(up, off[1] as f64), d_mul(f, off[2] as f64))));
+        push_box(out, anchor, c, (right, up, f), [half[0] as f64, half[1] as f64, half[2] as f64], col);
+    }
+}
+
 pub fn mob_vertices(m: &Mob, anchor: D3, out: &mut Vec<Vertex>) {
     let up = m.up();
     let right = d_norm(d_cross(up, m.fwd));

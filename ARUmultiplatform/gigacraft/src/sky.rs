@@ -39,6 +39,19 @@ pub fn overcast(mut s: SkyState, k: f32) -> SkyState {
     s
 }
 
+/// Havosiz osmon (Oy): qora osmon va yulduzlar, quyosh nuri kuchli, soya tomoni qorong'i.
+pub fn airless(mut s: SkyState) -> SkyState {
+    s.top = [0.0, 0.0, 0.004];
+    s.hor = [0.0, 0.0, 0.006];
+    s.fog = [0.0, 0.0, 0.006];
+    s.amb = [0.10, 0.10, 0.13];
+    s.night = 1.0;
+    if s.light_col[0] > 0.1 {
+        s.light_col = [1.15, 1.12, 1.05];
+    }
+    s
+}
+
 /// `t` — kun fazasi [0,1); `up` — o'yinchi turgan joyning "tepa" yo'nalishi (sayyora markazidan tashqariga).
 /// t=0.25 va up=(0,1,0) bo'lsa — tush.
 pub fn state(t: f32, up: V3) -> SkyState {

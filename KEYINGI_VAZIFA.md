@@ -7868,6 +7868,15 @@ Talab (foydalanuvchi): Anibla orqali qo'shilganda fayllar R2'ga emas, **Bot API 
 
 `ARUmultiplatform/gigacraft/` (Rust + OpenGL ES, tashqi crate'siz). CI: `.github/workflows/gigacraft.yml` — testlar, APK, Release `gigacraft-latest` va Telegram "Saqlangan xabarlar".
 
-Qo'shilgan: `items.rs` (buyumlar, 36 katakli inventar, asboblar va chidamlilik, yasash/pishirish retseptlari), yangi bloklar (bruschatka, 4 xil ruda, oyna, g'isht, ustaxona, pech, sandiq, chiroq, bug'doy 4 bosqich), `gen.rs` (g'orlar, rudalar chuqurlik bo'yicha, qishloq uylari, yer osti qal'alari), `mesh.rs` (oyna shaffofligi, past ekin, yer osti qorong'iligi — chuqurlikka qarab), `entity.rs` (sigir/qo'y/tovuq/zombi, zarrachalar, quti-modellar), `audio.rs` (kodning o'zida sintez; Android'da AAudio `dlopen` orqali), ob-havo (yomg'ir), saqlash `GCS5` (inventar bilan; eski `GCS4` o'qiladi).
+Birinchi qism: `items.rs` (buyumlar, 36 katakli inventar, asboblar, retseptlar, pech), yangi bloklar, `gen.rs` (g'orlar, rudalar, qishloq uylari, yer osti qal'alari), `mesh.rs` (oyna, past ekin, yer osti qorong'iligi), `entity.rs` (jonzotlar, zarrachalar), `audio.rs` (sintez; Android'da AAudio `dlopen`), yomg'ir.
 
-Qilinmagan: redstone, sehr/iksirlar, boshqa o'lchamlar, ko'p o'yinchi, bir nechta saqlash o'rni; sandiq — saqlash joyi emas, ochilganda o'lja beradi; chiroq atrofni yoritmaydi (faqat o'zi yonadi).
+Ikkinchi qism:
+- Yurish: qattiq blok ichida qolsa yuqoriga chiqariladi; pog'onaga chiqishda kamera silliq (`step_smooth`); atrofdagi ustunlar chizilmaguncha yurish to'xtaydi (`ground_ready`, 5 s dan oshmaydi) — hali yuklanmagan yerga kirib ketmaslik uchun.
+- Sandiq: 27 katak, ombor sifatida (`Game.chests`, saqlashda `GCS6`); uy/qal'adagi `LOOTCHEST` birinchi ochilganda o'lja bilan to'ladi.
+- Sehr stoli (`ENCHANT`, oltin quymaga: samaradorlik/o'tkirlik), iksirlar (shifo, tezlik, sakrash), hayvon ko'payishi (bug'doy), chiroq yorug'ligi (`LAMP_R`=14 blok, `World::lamps_near`).
+- `redstone.rs`: tutqich -> sim -> redstone chiroq (6 qo'shni bo'yicha tarmoq).
+- Oy o'lchami: `Gen.dim=1` (kraterli, suvsiz), og'irlik 1/6, havosiz qora osmon (`sky::airless`); pauza menyusidan almashtiriladi. Tahrirlar o'lcham bo'yicha alohida (`worldN.other`).
+- Saqlash o'rinlari 1..3 (`world.bin`, `world2.bin`, `world3.bin`, faol o'rin `slot.txt`).
+- `net.rs`: bitta Wi-Fi'dagi ko'p o'yinchi (UDP broadcast, port 47321): o'yinchi holati va blok o'zgarishlari; server kerak emas. Manifestda INTERNET ruxsati.
+
+Qilinmagan: sehr/iksir uchun alohida retsept kitobi, internet orqali (Wi-Fi'dan tashqari) ko'p o'yinchi, Nether/End kabi qo'shimcha o'lchamlar (faqat Oy).

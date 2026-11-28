@@ -112,6 +112,12 @@ pub enum PauseAct {
     Night,
     SensDown,
     SensUp,
+    /// O'lcham: Yer <-> Oy.
+    Dim,
+    /// Saqlash o'rni (1..3).
+    Slot,
+    /// Mahalliy tarmoq (Wi-Fi) ko'p o'yinchi.
+    Net,
 }
 
 pub struct Layout {
@@ -207,16 +213,16 @@ impl Layout {
 
     // --- Pauza menyusi ---
     pub fn panel(&self) -> (f32, f32, f32, f32) {
-        let (pw, ph) = (900.0 * self.s, 900.0 * self.s);
+        let (pw, ph) = (900.0 * self.s, 1030.0 * self.s);
         ((self.w - pw) * 0.5, (self.h - ph) * 0.5, pw, ph)
     }
 
     pub fn pause_btn(&self, a: PauseAct) -> (f32, f32, f32, f32) {
         let (px, py, pw, _) = self.panel();
         let s = self.s;
-        let (m, bh) = (50.0 * s, 110.0 * s);
+        let (m, bh) = (50.0 * s, 84.0 * s);
         let inner = pw - 2.0 * m;
-        let row = |i: f32| py + 170.0 * s + i * (bh + 28.0 * s);
+        let row = |i: f32| py + 140.0 * s + i * (bh + 18.0 * s);
         match a {
             PauseAct::Resume => (px + m, row(0.0), inner, bh),
             PauseAct::Mode => (px + m, row(1.0), inner, bh),
@@ -226,12 +232,15 @@ impl Layout {
             PauseAct::Night => (px + m + 2.0 * inner / 3.0 + 14.0 * s, row(3.0), inner / 3.0 - 14.0 * s, bh),
             PauseAct::SensDown => (px + m, row(4.0), 150.0 * s, bh),
             PauseAct::SensUp => (px + m + inner - 150.0 * s, row(4.0), 150.0 * s, bh),
+            PauseAct::Dim => (px + m, row(5.0), inner, bh),
+            PauseAct::Slot => (px + m, row(6.0), inner, bh),
+            PauseAct::Net => (px + m, row(7.0), inner, bh),
         }
     }
 
     pub fn pause_at(&self, x: f32, y: f32) -> Option<PauseAct> {
         use PauseAct::*;
-        [Resume, Mode, Quality, Day, Sunset, Night, SensDown, SensUp].into_iter().find(|&a| {
+        [Resume, Mode, Quality, Day, Sunset, Night, SensDown, SensUp, Dim, Slot, Net].into_iter().find(|&a| {
             let (bx, by, bw, bh) = self.pause_btn(a);
             x >= bx && x <= bx + bw && y >= by && y <= by + bh
         })
@@ -344,6 +353,10 @@ pub struct UiState {
     pub rain: f32,
     /// Faol iksir ta'sirlari (matn).
     pub status: String,
+    pub dim: u8,
+    pub slot: u8,
+    /// Tarmoq yoqilgan bo'lsa — ko'rinayotgan boshqa o'yinchilar soni.
+    pub net: Option<usize>,
     pub sel: usize,
     pub flying: bool,
     pub fly_level: usize,
@@ -374,7 +387,8 @@ fn plate(h: &mut Hud, sq: Sq, fill: Col, line: Col, pressed: bool) {
 
 fn button(h: &mut Hud, x: f32, y: f32, w: f32, bh: f32, s: f32, label: &str, fill: Col, fg: Col) {
     h.rrect(x, y, w, bh, bh * 0.223, fill);
-    h.text_c(x + w * 0.5, y + bh * 0.5, 44.0 * s, label, fg);
+    let fs = if label.chars().count() > 24 { 34.0 } else { 44.0 };
+    h.text_c(x + w * 0.5, y + bh * 0.5, fs * s, label, fg);
 }
 
 pub fn draw(h: &mut Hud, l: &Layout, u: &UiState) {
@@ -705,7 +719,7 @@ fn draw_pause(h: &mut Hud, l: &Layout, u: &UiState) {
     let (px, py, pw, ph) = l.panel();
     h.rrect(px, py, pw, ph, 56.0 * s, rgba(18, 16, 28, 245));
     h.rrect_line(px, py, pw, ph, 56.0 * s, 4.0, rgba(255, 255, 255, 60));
-    h.text_c(px + pw * 0.5, py + 85.0 * s, 70.0 * s, "PAUZA", WHITE);
+    h.text_c(px + pw * 0.5, py + 75.0 * s, 64.0 * s, "PAUZA", WHITE);
     let dark = rgba(40, 38, 58, 255);
     let b = |h: &mut Hud, a: PauseAct, label: &str, fill: Col, fg: Col| {
         let (x, y, w, bh) = l.pause_btn(a);
@@ -717,6 +731,13 @@ fn draw_pause(h: &mut Hud, l: &Layout, u: &UiState) {
     b(h, PauseAct::Day, "KUN", dark, WHITE);
     b(h, PauseAct::Sunset, "KECH", dark, WHITE);
     b(h, PauseAct::Night, "TUN", dark, WHITE);
+    b(h, PauseAct::Dim, if u.dim == 0 { "OLCHAM: YER  ->  OY" } else { "OLCHAM: OY  ->  YER" }, dark, WHITE);
+    b(h, PauseAct::Slot, &format!("SAQLASH O'RNI: {}  (KEYINGISI)", u.slot), dark, WHITE);
+    let net_label = match u.net {
+        None => "TARMOQ: O'CHIQ".to_string(),
+        Some(n) => format!("TARMOQ: YOQILGAN  ({} O'YINCHI)", n),
+    };
+    b(h, PauseAct::Net, &net_label, if u.net.is_some() { SIG } else { dark }, WHITE);
     b(h, PauseAct::SensDown, "-", dark, WHITE);
     b(h, PauseAct::SensUp, "+", dark, WHITE);
     let (sx, sy, sw, sh) = l.pause_btn(PauseAct::SensDown);
@@ -790,7 +811,7 @@ mod tests {
     fn menyu_va_blok_oynasi_tugmalari() {
         for &(w, h) in &[(2400.0f32, 1080.0f32), (1600.0, 720.0)] {
             let l = Layout::new(w, h);
-            for a in [PauseAct::Resume, PauseAct::Mode, PauseAct::Quality, PauseAct::Day, PauseAct::Sunset, PauseAct::Night, PauseAct::SensDown, PauseAct::SensUp] {
+            for a in [PauseAct::Resume, PauseAct::Mode, PauseAct::Quality, PauseAct::Day, PauseAct::Sunset, PauseAct::Night, PauseAct::SensDown, PauseAct::SensUp, PauseAct::Dim, PauseAct::Slot, PauseAct::Net] {
                 let (x, y, bw, bh) = l.pause_btn(a);
                 assert_eq!(l.pause_at(x + bw * 0.5, y + bh * 0.5), Some(a));
                 let (px, py, pw, ph) = l.panel();

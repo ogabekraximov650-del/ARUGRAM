@@ -18,6 +18,7 @@ pub mod items;
 pub mod lod;
 pub mod math;
 pub mod mesh;
+pub mod net;
 pub mod noise;
 pub mod planet;
 pub mod player;

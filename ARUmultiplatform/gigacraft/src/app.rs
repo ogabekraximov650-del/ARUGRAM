@@ -51,29 +51,52 @@ pub struct App {
     since_save: f32,
     started: Instant,
     pub fov: f32,
+    slot: u8,
+    /// Hozir faol bo'lmagan o'lchamning blok tahrirlari.
+    edits_other: Vec<u8>,
+    workers: usize,
 }
 
-fn save_path(dir: &str) -> String {
-    format!("{dir}/world.bin")
+/// Saqlash o'rni fayli (1-o'rin eski `world.bin` bilan bir xil).
+fn save_path(dir: &str, slot: u8) -> String {
+    if slot <= 1 {
+        format!("{dir}/world.bin")
+    } else {
+        format!("{dir}/world{slot}.bin")
+    }
+}
+
+/// Faol bo'lmagan o'lcham tahrirlari fayli.
+fn other_path(dir: &str, slot: u8) -> String {
+    format!("{dir}/world{slot}.other")
+}
+
+fn slot_file(dir: &str) -> String {
+    format!("{dir}/slot.txt")
+}
+
+fn read_slot(dir: &str) -> u8 {
+    std::fs::read_to_string(slot_file(dir)).ok().and_then(|t| t.trim().parse::<u8>().ok()).map_or(1, |n| n.clamp(1, 3))
+}
+
+fn cache_name(dim: u8) -> String {
+    if dim == 0 {
+        format!("v{CACHE_VERSION}-s{SEED}")
+    } else {
+        format!("v{CACHE_VERSION}-s{SEED}-d{dim}")
+    }
 }
 
 impl App {
     /// GL konteksti joriy bo'lishi shart. `dir` — saqlash papkasi (bo'sh bo'lsa saqlanmaydi).
     pub fn new(dir: &str) -> Result<App, String> {
-        let world = Arc::new(World::new(SEED));
-        let mut saved = None;
-        if !dir.is_empty() {
-            if let Ok(bytes) = std::fs::read(save_path(dir)) {
-                if let Some((s, edits)) = decode_save(&bytes) {
-                    world.load_edits(edits);
-                    saved = Some(s);
-                }
-            }
-        }
+        let slot = if dir.is_empty() { 1 } else { read_slot(dir) };
+        let (world, saved, edits_other) = Self::load_slot(dir, slot);
         crate::audio::start();
         let atlas = Atlas::build(FONT, 48.0).ok_or("shrift atlasi qurilmadi")?;
         let renderer = Renderer::new(&atlas)?;
         let mut game = Game::new(world.clone(), saved);
+        game.slot = slot;
         if !dir.is_empty() {
             let crash = format!("{dir}/crash.txt");
             let flag = format!("{dir}/running.flag");
@@ -87,11 +110,7 @@ impl App {
             let _ = std::fs::write(&flag, b"1");
         }
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(2).saturating_sub(1).clamp(1, 3);
-        let disk = if dir.is_empty() {
-            None
-        } else {
-            Some((format!("{dir}/cache"), format!("v{CACHE_VERSION}-s{SEED}")))
-        };
+        let disk = if dir.is_empty() { None } else { Some((format!("{dir}/cache"), cache_name(game.dim))) };
         let streamer = Streamer::new(world, workers, disk);
         Ok(App {
             game,
@@ -112,7 +131,81 @@ impl App {
             since_save: 0.0,
             started: Instant::now(),
             fov: 1.15,
+            slot,
+            edits_other,
+            workers,
         })
+    }
+
+    /// Saqlash o'rnini o'qiydi: (dunyo, saqlangan holat, faol bo'lmagan o'lcham tahrirlari).
+    fn load_slot(dir: &str, slot: u8) -> (Arc<World>, Option<crate::game::Saved>, Vec<u8>) {
+        let mut saved = None;
+        let mut world = Arc::new(World::new(SEED));
+        let mut other = Vec::new();
+        if !dir.is_empty() {
+            if let Ok(bytes) = std::fs::read(save_path(dir, slot)) {
+                if let Some((s, edits)) = decode_save(&bytes) {
+                    world = Arc::new(World::new_dim(SEED, s.dim));
+                    world.load_edits(edits);
+                    saved = Some(s);
+                }
+            }
+            if let Ok(b) = std::fs::read(other_path(dir, slot)) {
+                other = b;
+            }
+        }
+        (world, saved, other)
+    }
+
+    /// Dunyo almashganda: eski mesh va oqimni tashlab, yangisini boshlaydi.
+    fn reset_scene(&mut self, world: Arc<World>, dim: u8) {
+        for (_, mut m) in self.scene.drain() {
+            m.free();
+        }
+        self.stale.clear();
+        self.last_used.clear();
+        self.anchor = [f64::MAX; 3];
+        self.last_anchor = [f64::MAX; 3];
+        self.quality_applied = usize::MAX;
+        self.since_stream = 10.0;
+        let disk = if self.dir.is_empty() { None } else { Some((format!("{}/cache", self.dir), cache_name(dim))) };
+        self.streamer = Streamer::new(world, self.workers, disk);
+        self.started = Instant::now();
+    }
+
+    /// O'lchamni almashtiradi (Yer <-> Oy).
+    fn switch_dim(&mut self, d: u8) {
+        if d == self.game.dim {
+            return;
+        }
+        let cur_edits = self.game.world.save_edits();
+        let world = Arc::new(World::new_dim(SEED, d));
+        world.load_edits(&self.edits_other);
+        self.edits_other = cur_edits;
+        self.game.enter_world(world.clone(), d);
+        self.reset_scene(world, d);
+        self.save();
+    }
+
+    /// Saqlash o'rnini almashtiradi: hozirgisi saqlanadi, yangisi yuklanadi (bo'sh bo'lsa yangi dunyo).
+    fn switch_slot(&mut self, n: u8) {
+        if n == self.slot || self.dir.is_empty() {
+            return;
+        }
+        self.save();
+        self.slot = n;
+        let _ = std::fs::write(slot_file(&self.dir), n.to_string());
+        let (world, saved, other) = Self::load_slot(&self.dir, n);
+        let (fov, quality) = (self.fov, self.game.quality);
+        let mut game = Game::new(world.clone(), saved);
+        game.slot = n;
+        game.quality = quality;
+        game.toast = Some((format!("SAQLASH O'RNI {n}"), 3.0));
+        self.game = game;
+        self.fov = fov;
+        self.edits_other = other;
+        let dim = self.game.dim;
+        self.reset_scene(world, dim);
     }
 
     pub fn touch(&mut self, e: TouchEv) {
@@ -144,9 +237,13 @@ impl App {
             return;
         }
         let bytes = encode_save(&self.game.saved(), &self.game.world.save_edits());
-        let tmp = format!("{}.tmp", save_path(&self.dir));
+        let path = save_path(&self.dir, self.slot);
+        let tmp = format!("{path}.tmp");
         if std::fs::write(&tmp, bytes).is_ok() {
-            let _ = std::fs::rename(&tmp, save_path(&self.dir));
+            let _ = std::fs::rename(&tmp, &path);
+        }
+        if !self.edits_other.is_empty() || std::path::Path::new(&other_path(&self.dir, self.slot)).exists() {
+            let _ = std::fs::write(other_path(&self.dir, self.slot), &self.edits_other);
         }
         self.since_save = 0.0;
     }
@@ -353,6 +450,12 @@ impl App {
         let ready = self.game.loading >= 1.0;
         self.game.ground_ready = self.ground_loaded();
         self.game.update(dt, ready);
+        if let Some(r) = self.game.request.take() {
+            match r {
+                crate::game::Req::Dim(d) => self.switch_dim(d),
+                crate::game::Req::Slot(n) => self.switch_slot(n),
+            }
+        }
         for s in self.game.sfx.drain(..) {
             crate::audio::play(s);
         }
@@ -369,7 +472,7 @@ impl App {
         let ready = self.game.loading >= 1.0;
         let pl = &self.game.player;
         let up = d_f32(pl.up());
-        let sky_state = sky::overcast(sky::state(self.game.time, up), self.game.rain);
+        let sky_state = if self.game.dim == 1 { sky::airless(sky::state(self.game.time, up)) } else { sky::overcast(sky::state(self.game.time, up), self.game.rain) };
         let alt = pl.altitude().max(0.0);
         let horizon = self.horizon();
         let (r, cu, f) = pl.camera_basis();
@@ -379,7 +482,7 @@ impl App {
             up: d_f32(cu),
             fwd: d_f32(f),
             local_up: up,
-            atm: (-alt / 60_000.0).exp() as f32,
+            atm: if self.game.dim == 1 { 0.0 } else { (-alt / 60_000.0).exp() as f32 },
             fov: self.fov + if pl.running { 0.07 } else { 0.0 },
             w,
             h,

@@ -29,17 +29,46 @@ pub struct World {
     cols: Mutex<HashMap<(u8, i32, i32), Arc<ColInfo>>>,
     dirty: Mutex<HashSet<CP>>,
     tick: AtomicU64,
+    /// Tarmoq uchun: mahalliy blok o'zgarishlari jurnali (faqat yoqilganda yoziladi).
+    outbox: Mutex<Vec<(Cell, u8)>>,
+    logging: std::sync::atomic::AtomicBool,
 }
 
 impl World {
     pub fn new(seed: u32) -> World {
+        World::new_dim(seed, 0)
+    }
+
+    pub fn new_dim(seed: u32, dim: u8) -> World {
         World {
-            gen: Gen::new(seed),
+            gen: Gen::with_dim(seed, dim),
             chunks: RwLock::new(HashMap::new()),
             cols: Mutex::new(HashMap::new()),
             dirty: Mutex::new(HashSet::new()),
             tick: AtomicU64::new(1),
+            outbox: Mutex::new(Vec::new()),
+            logging: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    pub fn set_logging(&self, on: bool) {
+        self.logging.store(on, Ordering::Relaxed);
+        if !on {
+            self.outbox.lock().unwrap().clear();
+        }
+    }
+
+    /// Jurnaldagi mahalliy o'zgarishlarni olib, tozalaydi.
+    pub fn take_outbox(&self) -> Vec<(Cell, u8)> {
+        std::mem::take(&mut *self.outbox.lock().unwrap())
+    }
+
+    /// Tarmoqdan kelgan o'zgarish: jurnalga yozilmaydi (aks holda qaytib ketadi).
+    pub fn set_block_remote(&self, c: &Cell, v: u8) -> Vec<(u8, i32, i32)> {
+        let was = self.logging.swap(false, Ordering::Relaxed);
+        let r = self.set_block(c, v);
+        self.logging.store(was, Ordering::Relaxed);
+        r
     }
 
     fn now(&self) -> u64 {
@@ -84,6 +113,12 @@ impl World {
         let old = self.chunk(cp);
         if old.b[i] == v {
             return Vec::new();
+        }
+        if self.logging.load(Ordering::Relaxed) {
+            let mut o = self.outbox.lock().unwrap();
+            if o.len() < 20_000 {
+                o.push((*c, v));
+            }
         }
         let mut nb = old.b.clone();
         nb[i] = v;
