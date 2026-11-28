@@ -1,5 +1,5 @@
 //! Nur otish: qaysi blokka qaralayotganini topadi (egri sayyora uchun kichik qadamlar bilan yurib).
-use crate::blocks::solid;
+use crate::blocks::targetable;
 use crate::math::*;
 use crate::planet::*;
 use crate::world::World;
@@ -16,7 +16,7 @@ pub struct Hit {
 /// `o` nuqtadan `d` (birlik) yo'nalishda `max` blokkacha. Boshlang'ich blok qattiq bo'lsa `None`.
 pub fn raycast(w: &World, o: D3, d: D3, max: f64) -> Option<Hit> {
     let mut prev = cell_at(o);
-    if solid(w.block(&prev)) {
+    if targetable(w.block(&prev)) {
         return None;
     }
     let step = 0.1;
@@ -24,7 +24,7 @@ pub fn raycast(w: &World, o: D3, d: D3, max: f64) -> Option<Hit> {
     while t <= max {
         let c = cell_at(d_add(o, d_mul(d, t)));
         if c != prev {
-            if solid(w.block(&c)) {
+            if targetable(w.block(&c)) {
                 return Some(Hit { cell: c, place: prev, dist: t as f32 });
             }
             prev = c;

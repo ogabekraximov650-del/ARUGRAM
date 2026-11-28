@@ -57,7 +57,7 @@ impl World {
     pub fn section_range(&self, f: u8, cu: i32, cv: i32) -> (i32, i32) {
         let col = self.col(f, cu, cv);
         let (lo, hi) = col.span();
-        ((lo - 2).div_euclid(16) as i32, (hi.max(col.wmax()) + 75).div_euclid(16) as i32)
+        ((lo - 48).div_euclid(16) as i32, (hi.max(col.wmax()) + 75).div_euclid(16) as i32)
     }
 
     pub fn chunk(&self, cp: CP) -> Arc<Chunk> {

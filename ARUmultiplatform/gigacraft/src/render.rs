@@ -399,6 +399,7 @@ impl Renderer {
         fog_dist: f32,
         meshes: &[&GpuMesh],
         highlight: Option<&(D3, Vec<Vertex>)>,
+        dynamic: Option<&(D3, Vec<Vertex>)>,
         shadow_meshes: &[&GpuMesh],
         stale: &[&GpuMesh],
     ) -> Stats {
@@ -510,6 +511,19 @@ impl Renderer {
             }
         }
         unsafe { glDisable(POLYGON_OFFSET_FILL) };
+        // Jonzotlar va zarrachalar: har kadr qayta yuklanadigan, to'liq qoplovchi quti-modellar
+        if let Some((origin, verts)) = dynamic {
+            let o = [(origin[0] - v.pos[0]) as f32, (origin[1] - v.pos[1]) as f32, (origin[2] - v.pos[2]) as f32];
+            unsafe {
+                glBindBuffer(ARRAY_BUFFER, self.dyn_vbo);
+                glUniform1f(self.wu.alpha, 1.0);
+                glUniform3f(self.wu.off, o[0], o[1], o[2]);
+            }
+            buffer_data(ARRAY_BUFFER, verts, DYNAMIC_DRAW);
+            self.set_world_attribs(self.dyn_vbo);
+            unsafe { glDrawElements(TRIANGLES, (verts.len() / 4 * 6) as i32, UNSIGNED_SHORT, std::ptr::null()) };
+            st.tris += verts.len() / 2;
+        }
         // Suv: yarim shaffof, chuqurlikka yozmaydi
         unsafe {
             glEnable(BLEND);

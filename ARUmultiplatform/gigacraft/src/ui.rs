@@ -1,5 +1,6 @@
 //! Interfeys: tugmalar joylashuvi (barcha o'lchamlar 1080 balandlikka nisbatan o'lchanadi), teginish nuqtasini aniqlash va chizish.
 use crate::blocks::{self, PLACEABLE};
+use crate::items::{self, Item, Stack};
 use crate::hud::*;
 use crate::stream::QUALITY_NAMES;
 
@@ -35,6 +36,49 @@ pub enum Mode {
     Inv,
     Pause,
     Dead,
+    /// Omon qolish inventari / ustaxona / pech oynasi.
+    Craft,
+}
+
+/// Yasash oynasi turi.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Station {
+    /// Inventar: 2x2.
+    Hand,
+    /// Ustaxona: 3x3.
+    Table,
+    /// Pech: bitta kirish katagi.
+    Furnace,
+}
+
+impl Station {
+    pub fn grid(self) -> usize {
+        match self {
+            Station::Hand => 2,
+            Station::Table => 3,
+            Station::Furnace => 1,
+        }
+    }
+}
+
+/// Yasash oynasidagi teginish nishoni.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CraftHit {
+    Close,
+    Inv(usize),
+    Grid(usize),
+    Result,
+}
+
+/// Yasash oynasini chizish uchun nusxa.
+#[derive(Clone)]
+pub struct CraftView {
+    pub station: Station,
+    pub inv: [Stack; items::SLOTS],
+    pub grid: [Stack; 9],
+    pub result: Stack,
+    pub cursor: Stack,
+    pub fuel: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -188,11 +232,65 @@ impl Layout {
         let (px, py, pw, _) = self.inv_panel();
         let s = self.s;
         let cols = 6usize;
-        let gap = 24.0 * s;
+        let gap = 20.0 * s;
         let cw = (pw - 2.0 * 50.0 * s - gap * (cols as f32 - 1.0)) / cols as f32;
-        let ch = 250.0 * s;
+        let ch = 170.0 * s;
         let (c, r) = (i % cols, i / cols);
-        (px + 50.0 * s + c as f32 * (cw + gap), py + 160.0 * s + r as f32 * (ch + gap), cw, ch)
+        (px + 50.0 * s + c as f32 * (cw + gap), py + 150.0 * s + r as f32 * (ch + gap), cw, ch)
+    }
+
+    // --- Yasash oynasi (omon qolish) ---
+    pub fn craft_panel(&self) -> (f32, f32, f32, f32) {
+        let (pw, ph) = (1360.0 * self.s, 1000.0 * self.s);
+        ((self.w - pw) * 0.5, (self.h - ph) * 0.5, pw, ph)
+    }
+
+    pub fn craft_slot_size(&self) -> (f32, f32) {
+        (104.0 * self.s, 114.0 * self.s)
+    }
+
+    pub fn craft_inv_slot(&self, i: usize) -> (f32, f32) {
+        let (px, py, pw, _) = self.craft_panel();
+        let (_, step) = self.craft_slot_size();
+        let x0 = px + (pw - 9.0 * step) * 0.5;
+        let (row, col) = if i < 9 { (3usize, i) } else { ((i - 9) / 9, (i - 9) % 9) };
+        let extra = if row == 3 { 24.0 * self.s } else { 0.0 };
+        (x0 + col as f32 * step, py + 500.0 * self.s + row as f32 * step + extra)
+    }
+
+    pub fn craft_grid_slot(&self, st: Station, i: usize) -> (f32, f32) {
+        let (px, py, _, _) = self.craft_panel();
+        let (_, step) = self.craft_slot_size();
+        let g = st.grid();
+        (px + 150.0 * self.s + (i % g) as f32 * step, py + 140.0 * self.s + (i / g) as f32 * step)
+    }
+
+    pub fn craft_result_slot(&self) -> (f32, f32) {
+        let (px, py, _, _) = self.craft_panel();
+        let (_, step) = self.craft_slot_size();
+        (px + 780.0 * self.s, py + 140.0 * self.s + step)
+    }
+
+    pub fn craft_close(&self) -> Sq {
+        let (px, py, pw, _) = self.craft_panel();
+        Sq { cx: px + pw - 70.0 * self.s, cy: py + 70.0 * self.s, r: 50.0 * self.s }
+    }
+
+    pub fn craft_at(&self, x: f32, y: f32, st: Station) -> Option<CraftHit> {
+        if self.craft_close().hit(x, y) {
+            return Some(CraftHit::Close);
+        }
+        let (sz, _) = self.craft_slot_size();
+        let inside = |p: (f32, f32)| x >= p.0 && x <= p.0 + sz && y >= p.1 && y <= p.1 + sz;
+        if inside(self.craft_result_slot()) {
+            return Some(CraftHit::Result);
+        }
+        for i in 0..st.grid() * st.grid() {
+            if inside(self.craft_grid_slot(st, i)) {
+                return Some(CraftHit::Grid(i));
+            }
+        }
+        (0..items::SLOTS).find(|&i| inside(self.craft_inv_slot(i))).map(CraftHit::Inv)
     }
 
     pub fn inv_at(&self, x: f32, y: f32) -> Option<usize> {
@@ -215,7 +313,11 @@ impl Layout {
 /// Chizish uchun holat nusxasi.
 pub struct UiState {
     pub mode: Mode,
-    pub hotbar: [u8; 9],
+    pub slots: [Stack; 9],
+    pub held: Item,
+    pub craft: Option<CraftView>,
+    pub cursor_pos: (f32, f32),
+    pub rain: f32,
     pub sel: usize,
     pub flying: bool,
     pub fly_level: usize,
@@ -291,15 +393,18 @@ pub fn draw(h: &mut Hud, l: &Layout, u: &UiState) {
         let (x, y, w, _) = l.slot_rect(i);
         let on = i == u.sel;
         h.rrect(x, y, w, w, w * 0.223, if on { WHITE } else { rgba(14, 14, 14, 215) });
-        if u.hotbar[i] != blocks::AIR {
-            h.cube_icon(x + w * 0.5, y + w * 0.54 + 6.0 * s, w * 0.30, u.hotbar[i]);
+        item_icon(h, x + w * 0.5, y + w * 0.54 + 6.0 * s, w * 0.30, u.slots[i].item);
+        if u.survival && u.slots[i].n > 1 {
+            h.text_c(x + w * 0.74, y + w * 0.84, 30.0 * s, &format!("{}", u.slots[i].n), if on { BLACK } else { WHITE });
         }
         h.text(x + 12.0 * s, y + 6.0 * s, 24.0 * s, &format!("{}", i + 1), if on { BLACK } else { rgba(200, 200, 200, 255) });
     }
-    let nm = blocks::name(u.hotbar[u.sel]);
-    let nw = h.text_width(nm, 46.0 * s);
-    h.rrect((l.w - nw) * 0.5 - 34.0 * s, l.slot_y - 100.0 * s, nw + 68.0 * s, 66.0 * s, 26.0 * s, rgba(0, 0, 0, 170));
-    h.text_c(l.w * 0.5, l.slot_y - 67.0 * s, 46.0 * s, nm, WHITE);
+    let nm = items::name(u.held);
+    if !nm.is_empty() {
+        let nw = h.text_width(nm, 46.0 * s);
+        h.rrect((l.w - nw) * 0.5 - 34.0 * s, l.slot_y - 100.0 * s - if u.survival { 56.0 * s } else { 0.0 }, nw + 68.0 * s, 66.0 * s, 26.0 * s, rgba(0, 0, 0, 170));
+        h.text_c(l.w * 0.5, l.slot_y - 67.0 * s - if u.survival { 56.0 * s } else { 0.0 }, 46.0 * s, nm, WHITE);
+    }
     // Joystik
     let (jc, kn) = match u.joy {
         Some((c, k)) => (c, k),
@@ -332,17 +437,21 @@ pub fn draw(h: &mut Hud, l: &Layout, u: &UiState) {
     h.quad([(bx - 40.0 * s, by + 46.0 * s), (bx - 28.0 * s, by + 54.0 * s), (bx + 44.0 * s, by - 28.0 * s), (bx + 32.0 * s, by - 38.0 * s)], BLACK);
     h.quad([(bx - 8.0 * s, by - 52.0 * s), (bx + 52.0 * s, by - 50.0 * s), (bx + 54.0 * s, by + 8.0 * s), (bx + 30.0 * s, by - 18.0 * s)], BLACK);
     plate(h, l.place, SIG, SIG, is_down(Btn::Place));
-    h.cube_icon(l.place.cx, l.place.cy + 10.0 * s, 60.0 * s, u.hotbar[u.sel]);
+    item_icon(h, l.place.cx, l.place.cy + 6.0 * s, 60.0 * s, u.held);
     // Xabar
     if let Some(t) = &u.toast {
         let tw = h.text_width(t, 40.0 * s);
         h.rrect((l.w - tw) * 0.5 - 30.0 * s, 200.0 * s, tw + 60.0 * s, 70.0 * s, 24.0 * s, rgba(0, 0, 0, 170));
         h.text_c(l.w * 0.5, 235.0 * s, 40.0 * s, t, WHITE);
     }
+    if u.rain > 0.02 {
+        draw_rain(h, l, u.rain);
+    }
     if u.survival {
         draw_vitals(h, l, u);
     }
     match u.mode {
+        Mode::Craft => draw_craft(h, l, u),
         Mode::Pause => draw_pause(h, l, u),
         Mode::Inv => draw_inv(h, l, u),
         Mode::Dead => draw_dead(h, l),
@@ -356,6 +465,130 @@ pub fn draw(h: &mut Hud, l: &Layout, u: &UiState) {
         let (bx, by) = ((l.w - bw) * 0.5, l.h * 0.62);
         h.rrect(bx, by, bw, bh, bh * 0.5, rgba(255, 255, 255, 40));
         h.rrect(bx, by, (bw * u.loading.clamp(0.0, 1.0)).max(bh), bh, bh * 0.5, SIG);
+    }
+}
+
+/// Buyum belgisi: blok — kub; asbob va boshqalar — tekis shakllar.
+pub fn item_icon(h: &mut Hud, cx: f32, cy: f32, r: f32, item: Item) {
+    if item == items::NONE {
+        return;
+    }
+    if items::is_block(item) {
+        h.cube_icon(cx, cy, r, item as u8);
+        return;
+    }
+    let c = items::color(item);
+    let col = rgba((c[0] * 255.0) as u8, (c[1] * 255.0) as u8, (c[2] * 255.0) as u8, 255);
+    let wood = rgba(150, 105, 70, 255);
+    let k = r * 1.5;
+    if items::is_tool(item) {
+        use crate::blocks::Tool;
+        match items::tool_kind(item) {
+            Tool::Sword => {
+                h.quad([(cx - k * 0.12, cy + k * 0.15), (cx + k * 0.55, cy - k * 0.55), (cx + k * 0.7, cy - k * 0.4), (cx + k * 0.0, cy + k * 0.3)], col);
+                h.quad([(cx - k * 0.45, cy + k * 0.35), (cx - k * 0.15, cy + k * 0.05), (cx - k * 0.05, cy + k * 0.15), (cx - k * 0.35, cy + k * 0.45)], wood);
+                h.quad([(cx - k * 0.7, cy + k * 0.7), (cx - k * 0.4, cy + k * 0.4), (cx - k * 0.3, cy + k * 0.5), (cx - k * 0.6, cy + k * 0.8)], wood);
+            }
+            kind => {
+                h.quad([(cx - k * 0.7, cy + k * 0.6), (cx - k * 0.6, cy + k * 0.7), (cx + k * 0.5, cy - k * 0.4), (cx + k * 0.4, cy - k * 0.5)], wood);
+                match kind {
+                    Tool::Pick => {
+                        h.quad([(cx + k * 0.0, cy - k * 0.8), (cx + k * 0.8, cy - k * 0.0), (cx + k * 0.65, cy + k * 0.05), (cx - k * 0.05, cy - k * 0.6)], col);
+                        h.quad([(cx + k * 0.1, cy - k * 0.55), (cx + k * 0.55, cy - k * 0.1), (cx + k * 0.3, cy - k * 0.0), (cx + k * 0.0, cy - k * 0.3)], col);
+                    }
+                    Tool::Axe => {
+                        h.quad([(cx + k * 0.15, cy - k * 0.75), (cx + k * 0.7, cy - k * 0.2), (cx + k * 0.3, cy + k * 0.05), (cx - k * 0.05, cy - k * 0.35)], col);
+                    }
+                    _ => {
+                        h.circle(cx + k * 0.45, cy - k * 0.45, k * 0.28, col);
+                    }
+                }
+            }
+        }
+    } else {
+        h.rrect(cx - k * 0.5, cy - k * 0.5, k, k, k * 0.28, col);
+        h.rrect_line(cx - k * 0.5, cy - k * 0.5, k, k, k * 0.28, 3.0, rgba(0, 0, 0, 90));
+    }
+}
+
+fn slot_box(h: &mut Hud, s: f32, x: f32, y: f32, w: f32, st: &Stack, hot: bool) {
+    h.rrect(x, y, w, w, w * 0.2, if hot { rgba(70, 66, 100, 255) } else { rgba(40, 38, 58, 255) });
+    if !st.is_empty() {
+        item_icon(h, x + w * 0.5, y + w * 0.54, w * 0.30, st.item);
+        if st.n > 1 {
+            h.text_c(x + w * 0.74, y + w * 0.82, 30.0 * s, &format!("{}", st.n), WHITE);
+        }
+        if items::is_tool(st.item) && st.used > 0 {
+            let f = 1.0 - st.used as f32 / items::max_durability(st.item).max(1) as f32;
+            h.rect(x + w * 0.12, y + w * 0.9, w * 0.76, 6.0 * s, rgba(0, 0, 0, 200));
+            h.rect(x + w * 0.12, y + w * 0.9, w * 0.76 * f.clamp(0.0, 1.0), 6.0 * s, rgba((255.0 * (1.0 - f)) as u8, (230.0 * f) as u8, 60, 255));
+        }
+    }
+}
+
+fn draw_craft(h: &mut Hud, l: &Layout, u: &UiState) {
+    let Some(c) = &u.craft else { return };
+    let s = l.s;
+    h.rect(0.0, 0.0, l.w, l.h, rgba(0, 0, 0, 150));
+    let (px, py, pw, ph) = l.craft_panel();
+    h.rrect(px, py, pw, ph, 56.0 * s, rgba(18, 16, 28, 245));
+    h.rrect_line(px, py, pw, ph, 56.0 * s, 4.0, rgba(255, 255, 255, 60));
+    let title = match c.station {
+        Station::Hand => "INVENTAR",
+        Station::Table => "USTAXONA",
+        Station::Furnace => "PECH",
+    };
+    h.text(px + 50.0 * s, py + 36.0 * s, 60.0 * s, title, WHITE);
+    let cl = l.craft_close();
+    h.rrect(cl.cx - cl.r, cl.cy - cl.r, cl.r * 2.0, cl.r * 2.0, cl.r * 0.45, rgba(40, 38, 58, 255));
+    h.text_c(cl.cx, cl.cy, 56.0 * s, "X", WHITE);
+    let (sz, _) = l.craft_slot_size();
+    let g = c.station.grid();
+    for i in 0..g * g {
+        let (x, y) = l.craft_grid_slot(c.station, i);
+        slot_box(h, s, x, y, sz, &c.grid[i], false);
+    }
+    let (rx, ry) = l.craft_result_slot();
+    let (_, step) = l.craft_slot_size();
+    // O'q
+    let ax = rx - 120.0 * s;
+    h.tri([(ax, ry + sz * 0.5 - 34.0 * s), (ax + 70.0 * s, ry + sz * 0.5), (ax, ry + sz * 0.5 + 34.0 * s)], rgba(200, 200, 220, 255));
+    slot_box(h, s, rx, ry, sz, &c.result, !c.result.is_empty());
+    if !c.result.is_empty() {
+        h.text_c(rx + sz * 0.5, ry + sz + 34.0 * s, 32.0 * s, items::name(c.result.item), WHITE);
+    }
+    if c.station == Station::Furnace {
+        let t = format!("YOQILG'I: {}", c.fuel);
+        h.text(px + 150.0 * s, py + 140.0 * s + step + 10.0 * s, 34.0 * s, &t, rgba(255, 190, 90, 255));
+        h.text(px + 150.0 * s, py + 140.0 * s + step + 56.0 * s, 28.0 * s, "KO'MIR, TANA YOKI TAXTA KERAK", rgba(200, 200, 215, 255));
+    }
+    for i in 0..items::SLOTS {
+        let (x, y) = l.craft_inv_slot(i);
+        slot_box(h, s, x, y, sz, &c.inv[i], i == u.sel);
+    }
+    if !c.cursor.is_empty() {
+        let (x, y) = u.cursor_pos;
+        item_icon(h, x, y, sz * 0.34, c.cursor.item);
+        if c.cursor.n > 1 {
+            h.text_c(x + sz * 0.3, y + sz * 0.32, 32.0 * s, &format!("{}", c.cursor.n), WHITE);
+        }
+    }
+}
+
+/// Yomg'ir: qiya chiziqlar va xira parda.
+fn draw_rain(h: &mut Hud, l: &Layout, k: f32) {
+    let s = l.s;
+    h.rect(0.0, 0.0, l.w, l.h, rgba(30, 40, 60, (k * 55.0) as u8));
+    let n = (k * 120.0) as usize;
+    let mut z = 0x1234_5678u32;
+    for i in 0..n {
+        z ^= z << 13;
+        z ^= z >> 17;
+        z ^= z << 5;
+        let x = (z & 0xFFFF) as f32 / 65535.0 * l.w;
+        let y = ((z >> 16) & 0xFFFF) as f32 / 65535.0 * l.h;
+        let len = (30.0 + (i % 5) as f32 * 8.0) * s;
+        h.quad([(x, y), (x + 3.0 * s, y), (x - 6.0 * s, y + len), (x - 9.0 * s, y + len)], rgba(190, 210, 240, 110));
     }
 }
 
@@ -460,7 +693,7 @@ fn draw_inv(h: &mut Hud, l: &Layout, u: &UiState) {
     h.text_c(c.cx, c.cy, 56.0 * s, "X", WHITE);
     for (i, &b) in PLACEABLE.iter().enumerate() {
         let (x, y, w, ch) = l.inv_card(i);
-        let cur = u.hotbar[u.sel] == b;
+        let cur = u.held == b as Item;
         h.rrect(x, y, w, ch, 30.0 * s, if cur { WHITE } else { rgba(40, 38, 58, 255) });
         h.cube_icon(x + w * 0.5, y + ch * 0.42, w * 0.26, b);
         h.text_c(x + w * 0.5, y + ch * 0.84, 34.0 * s, blocks::name(b), if cur { BLACK } else { WHITE });
@@ -520,6 +753,22 @@ mod tests {
                 let (px, py, pw, ph) = l.panel();
                 assert!(x >= px && x + bw <= px + pw && y + bh <= py + ph, "{a:?} panelga sig'maydi");
             }
+            let c = l.craft_panel();
+            assert!(c.0 >= 0.0 && c.1 >= 0.0 && c.0 + c.2 <= w && c.1 + c.3 <= h, "yasash oynasi ekranga sig'maydi");
+            for st in [Station::Hand, Station::Table, Station::Furnace] {
+                for i in 0..st.grid() * st.grid() {
+                    let (x, y) = l.craft_grid_slot(st, i);
+                    assert_eq!(l.craft_at(x + 5.0, y + 5.0, st), Some(CraftHit::Grid(i)));
+                }
+            }
+            for i in 0..items::SLOTS {
+                let (x, y) = l.craft_inv_slot(i);
+                assert_eq!(l.craft_at(x + 5.0, y + 5.0, Station::Table), Some(CraftHit::Inv(i)));
+                assert!(x + 104.0 * l.s <= c.0 + c.2 && y + 104.0 * l.s <= c.1 + c.3);
+            }
+            let (rx, ry) = l.craft_result_slot();
+            assert_eq!(l.craft_at(rx + 5.0, ry + 5.0, Station::Hand), Some(CraftHit::Result));
+            assert_eq!(l.craft_at(l.craft_close().cx, l.craft_close().cy, Station::Hand), Some(CraftHit::Close));
             for i in 0..PLACEABLE.len() {
                 let (x, y, cw, ch) = l.inv_card(i);
                 assert_eq!(l.inv_at(x + cw * 0.5, y + ch * 0.5), Some(i));

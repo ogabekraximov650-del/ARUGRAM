@@ -9,7 +9,7 @@ use crate::sky;
 use crate::stream::{Built, Key, Streamer};
 
 /// Dunyo yaratish yoki plita kodi o'zgarsa oshiriladi (diskdagi eski kesh avtomatik o'chadi).
-pub const CACHE_VERSION: u32 = 4;
+pub const CACHE_VERSION: u32 = 5;
 /// GPU dagi keshning eng ko'p to'rtburchak soni (sifat bo'yicha).
 const GPU_QUADS: [usize; 3] = [150_000, 300_000, 500_000];
 use crate::text::Atlas;
@@ -70,6 +70,7 @@ impl App {
                 }
             }
         }
+        crate::audio::start();
         let atlas = Atlas::build(FONT, 48.0).ok_or("shrift atlasi qurilmadi")?;
         let renderer = Renderer::new(&atlas)?;
         let mut game = Game::new(world.clone(), saved);
@@ -125,6 +126,10 @@ impl App {
 
     /// Orqaga tugmasi: pauza/blok oynasini ochadi yoki yopadi. Har doim ishlatiladi (`true`).
     pub fn back(&mut self) -> bool {
+        if self.game.mode == Mode::Craft {
+            self.game.close_craft();
+            return true;
+        }
         self.game.mode = match self.game.mode {
             Mode::Play => Mode::Pause,
             Mode::Dead => Mode::Dead,
@@ -330,6 +335,11 @@ impl App {
         }
         let ready = self.game.loading >= 1.0;
         self.game.update(dt, ready);
+        for s in self.game.sfx.drain(..) {
+            crate::audio::play(s);
+        }
+        crate::audio::set_rain(self.game.rain);
+        crate::audio::set_music(self.game.mode == Mode::Play);
         self.since_save += dt;
         if self.since_save > 30.0 {
             self.save();
@@ -371,6 +381,7 @@ impl App {
             .map(|(_, m)| m)
             .collect();
         let hl: Option<(D3, Vec<Vertex>)> = if self.game.mode == Mode::Play && ready { self.game.target.map(|t| cell_box(&t.cell)) } else { None };
+        let dynm = if ready { self.game.dynamic() } else { None };
         let shadows_on = self.game.quality >= 1 && ready;
         let shadow_meshes: Vec<&GpuMesh> = if shadows_on {
             self.scene
@@ -381,7 +392,7 @@ impl App {
         } else {
             Vec::new()
         };
-        self.stats = self.renderer.draw_scene(&view, &sky_state, horizon.max(6000.0) as f32, &meshes, hl.as_ref(), &shadow_meshes, &stale_list);
+        self.stats = self.renderer.draw_scene(&view, &sky_state, horizon.max(6000.0) as f32, &meshes, hl.as_ref(), dynm.as_ref(), &shadow_meshes, &stale_list);
         let layout = Layout::new(w as f32, h as f32);
         let state = self.game.ui_state();
         let mut hud = Hud::new(&self.atlas);

@@ -4,14 +4,17 @@
 //! `stream` (fonda yuklash) -> `render` (OpenGL) ; `player`, `ray`, `game`, `ui` — o'yin mantig'i; `app` hammasini birlashtiradi;
 //! `android` — NativeActivity qobig'i.
 pub mod app;
+pub mod audio;
 pub mod blocks;
 pub mod earth;
+pub mod entity;
 pub mod egl;
 pub mod font;
 pub mod game;
 pub mod gen;
 pub mod gl;
 pub mod hud;
+pub mod items;
 pub mod lod;
 pub mod math;
 pub mod mesh;

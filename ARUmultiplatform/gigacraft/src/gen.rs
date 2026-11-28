@@ -11,8 +11,10 @@ pub const CV: usize = 4096;
 const R: f64 = SEA_R as f64;
 pub const TREE_CELL: i64 = 14;
 pub const CRYS_CELL: i64 = 80;
+pub const HOUSE_CELL: i64 = 160;
+pub const DUNGEON_CELL: i64 = 128;
 /// Yuz chetidan shuncha blok ichkarida daraxt/kristall qo'yilmaydi (yuz tutashuvi murakkab).
-const EDGE_MARGIN: i64 = 40;
+pub const EDGE_MARGIN: i64 = 40;
 
 #[derive(Clone, Copy)]
 pub struct Gen {
@@ -57,6 +59,26 @@ pub struct Tree {
     pub th: i32,
     pub rx: f32,
     pub ry: f32,
+    pub hash: u32,
+}
+
+/// Qishloq uyi: 17x17 asos, `base` — sirt qatlami.
+#[derive(Clone, Copy, Debug)]
+pub struct House {
+    pub f: u8,
+    pub x: i64,
+    pub z: i64,
+    pub base: i64,
+    pub hash: u32,
+}
+
+/// Yer osti xonasi: 13x13 asos, 7 qavat balandlik.
+#[derive(Clone, Copy, Debug)]
+pub struct Dungeon {
+    pub f: u8,
+    pub x: i64,
+    pub z: i64,
+    pub base: i64,
     pub hash: u32,
 }
 
@@ -292,7 +314,7 @@ impl Gen {
                     } else if layer > s - 1 - depth {
                         sub
                     } else {
-                        STONE
+                        self.underground(f_of(cp), iu0 + lu as i64, iv0 + lv as i64, layer, s - layer)
                     };
                     b[lu + lv * 16 + lr * 256] = v;
                 }
@@ -300,6 +322,85 @@ impl Gen {
         }
         self.decorate(&mut b, cp.f, iu0, iv0, r0);
         b
+    }
+
+    /// Yer osti bloki: g'or (havo), ruda yoki oddiy tosh. `depth` — sirtdan chuqurlik (blok).
+    pub fn underground(&self, f: u8, u: i64, v: i64, layer: i64, depth: i64) -> u8 {
+        if depth < 9 {
+            return STONE;
+        }
+        let d = dir(f, u as f64 + 0.5, v as f64 + 0.5);
+        let (x, y, z) = (d[0] * layer as f64, d[1] * layer as f64, d[2] * layer as f64);
+        // G'orlar: ikki shovqin maydonining "nol" chizig'i kesishgan joyda ilonizi tunnel
+        let k = 1.0 / 70.0;
+        let a = vnoise3(self.seed.wrapping_add(101), x * k, y * k, z * k);
+        if (a - 0.5).abs() < 0.04 {
+            let b2 = vnoise3(self.seed.wrapping_add(202), x * k, y * k, z * k);
+            if (b2 - 0.5).abs() < 0.04 {
+                return AIR;
+            }
+        }
+        let ore = |salt: u32, thr: f32| vnoise3(self.seed.wrapping_add(salt), x / 7.0, y / 7.0, z / 7.0) > thr;
+        if depth > 110 && ore(401, 0.84) {
+            DIAMOND_ORE
+        } else if depth > 70 && ore(331, 0.82) {
+            GOLD_ORE
+        } else if depth > 28 && ore(271, 0.79) {
+            IRON_ORE
+        } else if ore(211, 0.77) {
+            COAL_ORE
+        } else {
+            STONE
+        }
+    }
+
+    /// Uy (qishloq) joylashuvi: katak ichida ehtimol bilan, tekis quruqlikda.
+    pub fn house_in_cell(&self, f: u8, cx: i64, cz: i64) -> Option<House> {
+        let salt = self.seed.wrapping_add(31 + f as u32 * 977);
+        let hh = hash2(salt, cx, cz);
+        if hh % 9 != 0 {
+            return None;
+        }
+        let x = cx * HOUSE_CELL + 24 + ((hh >> 4) % (HOUSE_CELL as u32 - 48)) as i64;
+        let z = cz * HOUSE_CELL + 24 + ((hh >> 12) % (HOUSE_CELL as u32 - 48)) as i64;
+        if x < EDGE_MARGIN + 40 || z < EDGE_MARGIN + 40 || x >= N - EDGE_MARGIN - 40 || z >= N - EDGE_MARGIN - 40 {
+            return None;
+        }
+        let mut lo = i64::MAX;
+        let mut hi = i64::MIN;
+        for (dx, dz) in [(0, 0), (16, 0), (0, 16), (16, 16), (8, 8)] {
+            let d = dir(f, (x + dx) as f64 + 0.5, (z + dz) as f64 + 0.5);
+            let t = self.terrain(d);
+            if t.wl > t.h || t.kind == SNOW {
+                return None;
+            }
+            lo = lo.min(t.h);
+            hi = hi.max(t.h);
+        }
+        if hi - lo > 4 {
+            return None;
+        }
+        Some(House { f, x, z, base: SEA_R + hi, hash: hh })
+    }
+
+    /// Yer osti xonasi (qal'a): sirtdan 25..45 blok pastda.
+    pub fn dungeon_in_cell(&self, f: u8, cx: i64, cz: i64) -> Option<Dungeon> {
+        let salt = self.seed.wrapping_add(41 + f as u32 * 977);
+        let hh = hash2(salt, cx, cz);
+        if hh % 5 != 0 {
+            return None;
+        }
+        let x = cx * DUNGEON_CELL + 16 + ((hh >> 4) % (DUNGEON_CELL as u32 - 40)) as i64;
+        let z = cz * DUNGEON_CELL + 16 + ((hh >> 12) % (DUNGEON_CELL as u32 - 40)) as i64;
+        if x < EDGE_MARGIN + 40 || z < EDGE_MARGIN + 40 || x >= N - EDGE_MARGIN - 40 || z >= N - EDGE_MARGIN - 40 {
+            return None;
+        }
+        let (s, _) = self.surf_at(f, x + 6, z + 6);
+        let t = self.terrain(dir(f, (x + 6) as f64 + 0.5, (z + 6) as f64 + 0.5));
+        if t.wl > t.h {
+            return None;
+        }
+        Some(Dungeon { f, x, z, base: s - 26 - ((hh >> 20) % 20) as i64, hash: hh })
     }
 
     fn decorate(&self, b: &mut [u8], f: u8, iu0: i64, iv0: i64, r0: i64) {
@@ -315,6 +416,24 @@ impl Gen {
                     continue;
                 }
                 put_tree(b, &t, iu0, iv0, r0);
+            }
+        }
+        for cz in fl(iv0 - 20, HOUSE_CELL)..=fl(iv0 + 15, HOUSE_CELL) {
+            for cx in fl(iu0 - 20, HOUSE_CELL)..=fl(iu0 + 15, HOUSE_CELL) {
+                if let Some(h) = self.house_in_cell(f, cx, cz) {
+                    if h.base + 12 >= r0 && h.base - 8 <= r0 + 15 {
+                        put_house(b, &h, iu0, iv0, r0);
+                    }
+                }
+            }
+        }
+        for cz in fl(iv0 - 14, DUNGEON_CELL)..=fl(iv0 + 15, DUNGEON_CELL) {
+            for cx in fl(iu0 - 14, DUNGEON_CELL)..=fl(iu0 + 15, DUNGEON_CELL) {
+                if let Some(d) = self.dungeon_in_cell(f, cx, cz) {
+                    if d.base + 8 >= r0 && d.base <= r0 + 15 {
+                        put_dungeon(b, &d, iu0, iv0, r0);
+                    }
+                }
             }
         }
         for cz in fl(iv0 - 12, CRYS_CELL)..=fl(iv0 + 15 + 12, CRYS_CELL) {
@@ -355,6 +474,83 @@ fn put_tree(b: &mut [u8], t: &Tree, iu0: i64, iv0: i64, r0: i64) {
             }
         }
     }
+}
+
+fn put_at(b: &mut [u8], iu0: i64, iv0: i64, r0: i64, u: i64, v: i64, layer: i64, val: u8) {
+    let (lu, lv, lr) = (u - iu0, v - iv0, layer - r0);
+    if (0..16).contains(&lu) && (0..16).contains(&lv) && (0..16).contains(&lr) {
+        b[(lu + lv * 16 + lr * 256) as usize] = val;
+    }
+}
+
+fn put_house(b: &mut [u8], h: &House, iu0: i64, iv0: i64, r0: i64) {
+    for dz in 0..17i64 {
+        for dx in 0..17i64 {
+            let (u, v) = (h.x + dx, h.z + dz);
+            let edge = dx == 0 || dx == 16 || dz == 0 || dz == 16;
+            // Poydevor va pol
+            for k in 1..=6 {
+                put_at(b, iu0, iv0, r0, u, v, h.base - k, COBBLE);
+            }
+            put_at(b, iu0, iv0, r0, u, v, h.base, PLANK);
+            for k in 1..=8i64 {
+                let val = if k == 8 {
+                    PLANK
+                } else if edge {
+                    let door = dz == 0 && (7..=9).contains(&dx) && k <= 5;
+                    let window = k >= 3 && k <= 5 && ((dx % 4 == 2 && (dz == 0 || dz == 16)) || (dz % 4 == 2 && (dx == 0 || dx == 16)));
+                    if door {
+                        AIR
+                    } else if window {
+                        GLASS
+                    } else if k == 1 || k == 7 {
+                        COBBLE
+                    } else {
+                        BRICK
+                    }
+                } else {
+                    AIR
+                };
+                put_at(b, iu0, iv0, r0, u, v, h.base + k, val);
+            }
+        }
+    }
+    // Ichki jihozlar
+    let (cx, cz) = (h.x + 8, h.z + 8);
+    put_at(b, iu0, iv0, r0, cx, cz, h.base + 7, LAMP);
+    put_at(b, iu0, iv0, r0, h.x + 2, h.z + 14, h.base + 1, CRAFTING);
+    put_at(b, iu0, iv0, r0, h.x + 14, h.z + 14, h.base + 1, FURNACE);
+    put_at(b, iu0, iv0, r0, h.x + 14, h.z + 2, h.base + 1, CHEST);
+    // Bog'da ekin: uy yonida bug'doy
+    for dz in 0..4i64 {
+        for dx in 0..6i64 {
+            let (u, v) = (h.x + 20 + dx, h.z + 4 + dz);
+            put_at(b, iu0, iv0, r0, u, v, h.base, DIRT);
+            put_at(b, iu0, iv0, r0, u, v, h.base + 1, CROP0 + (hash3(h.hash, u, 0, v) % 4) as u8);
+        }
+    }
+}
+
+fn put_dungeon(b: &mut [u8], d: &Dungeon, iu0: i64, iv0: i64, r0: i64) {
+    for dz in -1..=13i64 {
+        for dx in -1..=13i64 {
+            let shell = dx == -1 || dx == 13 || dz == -1 || dz == 13;
+            for k in -1..=7i64 {
+                let val = if shell || k == -1 || k == 7 { COBBLE } else { AIR };
+                put_at(b, iu0, iv0, r0, d.x + dx, d.z + dz, d.base + k, val);
+            }
+        }
+    }
+    for (dx, dz) in [(1, 1), (11, 1), (1, 11), (11, 11)] {
+        put_at(b, iu0, iv0, r0, d.x + dx, d.z + dz, d.base + 4, LAMP);
+    }
+    put_at(b, iu0, iv0, r0, d.x + 6, d.z + 6, d.base, CHEST);
+    put_at(b, iu0, iv0, r0, d.x + 3, d.z + 6, d.base, COBBLE);
+    put_at(b, iu0, iv0, r0, d.x + 9, d.z + 6, d.base, GOLD_ORE);
+}
+
+fn f_of(cp: CP) -> u8 {
+    cp.f
 }
 
 fn put_spire(b: &mut [u8], s: &Spire, iu0: i64, iv0: i64, r0: i64) {
@@ -573,5 +769,78 @@ mod tests {
             }
         }
         assert!(river > 0, "Amudaryo kanali topilmadi");
+    }
+
+    #[test]
+    fn yer_osti_ruda_va_gor_bor() {
+        let g = Gen::new(1);
+        let (f, u0, v0) = (1u8, 20_000_000i64, 20_000_000i64);
+        let (mut air, mut coal, mut iron, mut stone, mut gold) = (0, 0, 0, 0, 0);
+        for k in 0..200_000i64 {
+            let (u, v) = (u0 + (k * 7919) % 4000, v0 + (k * 104729) % 4000);
+            let depth = 12 + (k * 31) % 150;
+            match g.underground(f, u, v, SEA_R - depth, depth) {
+                AIR => air += 1,
+                COAL_ORE => coal += 1,
+                IRON_ORE => iron += 1,
+                GOLD_ORE => gold += 1,
+                STONE => stone += 1,
+                _ => {}
+            }
+        }
+        assert!(air > 1500 && air < 40_000, "g'or ulushi g'alati: {air}");
+        assert!(coal > 400 && iron > 100, "ruda kam: ko'mir {coal}, temir {iron}");
+        assert!(stone > 100_000);
+        eprintln!("havo {air}, ko'mir {coal}, temir {iron}, oltin {gold}");
+        // sirtga yaqin g'or va ruda yo'q
+        for k in 0..2000i64 {
+            assert_eq!(g.underground(f, u0 + k, v0 + k * 3, SEA_R - 4, 4), STONE);
+        }
+    }
+
+    #[test]
+    fn uy_va_qal_a_uchraydi_va_bolakda_turadi() {
+        let g = Gen::new(1);
+        let mut house = None;
+        let mut dung = None;
+        'a: for f in 0..6u8 {
+            for cz in (EDGE_MARGIN / HOUSE_CELL + 2)..40 {
+                for cx in (EDGE_MARGIN / HOUSE_CELL + 2)..40 {
+                    if house.is_none() {
+                        house = g.house_in_cell(f, cx * 5, cz * 5);
+                    }
+                    if dung.is_none() {
+                        dung = g.dungeon_in_cell(f, cx * 5, cz * 5);
+                    }
+                    if house.is_some() && dung.is_some() {
+                        break 'a;
+                    }
+                }
+            }
+        }
+        let h = house.expect("uy topilmadi");
+        let d = dung.expect("qal'a topilmadi");
+        // uy joylashgan bo'lakni to'ldirib, ichida g'isht, oyna va chiroq borligini tekshiramiz
+        let mut seen = std::collections::HashSet::new();
+        for dz in (0..17).step_by(8) {
+            for dx in (0..17).step_by(8) {
+                let (u, v) = (h.x + dx, h.z + dz);
+                for rr in (h.base - 8..h.base + 16).step_by(16) {
+                    let cp = CP { f: h.f, u: (u.div_euclid(16)) as i32, v: (v.div_euclid(16)) as i32, r: rr.div_euclid(16) as i32 };
+                    let col = g.column(cp.f, cp.u, cp.v);
+                    let b = g.fill_chunk(cp, &col);
+                    for x in b {
+                        seen.insert(x);
+                    }
+                }
+            }
+        }
+        for need in [BRICK, PLANK, COBBLE] {
+            assert!(seen.contains(&need), "uyda {} yo'q", need);
+        }
+        let cp = CP { f: d.f, u: (d.x + 6).div_euclid(16) as i32, v: (d.z + 6).div_euclid(16) as i32, r: (d.base + 1).div_euclid(16) as i32 };
+        let col = g.column(cp.f, cp.u, cp.v);
+        let b = g.fill_chunk(cp, &col);
+        assert!(b.contains(&COBBLE) && b.contains(&AIR));
     }
 }

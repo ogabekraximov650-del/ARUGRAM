@@ -7863,3 +7863,11 @@ Talab (foydalanuvchi): Anibla orqali qo'shilganda fayllar R2'ga emas, **Bot API 
 - `botparts.iter_parts` qismlarni bittadan yaratadi (disk 2 baravar band bo'lmaydi); fayl bitta qismga sig'sa yarmidan 2 qism. `fetch_origin` qismlarni bayt bo'yicha ulaydi (har biri mp4 bo'lgan eski qismlar bo'lsa ffmpeg concat). Sinov: 45 MB fayl -> [20 MiB, 20 MiB, 5 MB] -> yuborish -> getFile -> ulash: sha256 mos.
 - Izoh (har qism ostida): Anibla anime/qism/sifat, Ilovada anime/bo'lim/qism (worker `claim` da `app_label`/`app_n` beradi, `done` shu raqamni ishlatadi), bo'lak raqami.
 - TOPILGAN XATO (qism ilovaga qo'shilmasdi): `done` har qism uchun alohida so'rov yozardi (23 qism + 23 file_id ...) — Cloudflare ~50 tashqi so'rov chegarasidan oshib asl video yozuvi va qism yaratilmay qolardi, xato e'tiborsiz edi. Endi hammasi BITTA `turso_batch` da; yiqilsa ish `error` holida navbatga qaytadi va kanal qismlari o'chadi. `bot_parts` jadvali `ensure` DDL ro'yxatida. Qismlarni o'chirish — `deleteMessages` (bitta so'rovda 100 tagacha).
+
+## GigaCraft: omon qolish kengaytmasi (2026-11)
+
+`ARUmultiplatform/gigacraft/` (Rust + OpenGL ES, tashqi crate'siz). CI: `.github/workflows/gigacraft.yml` — testlar, APK, Release `gigacraft-latest` va Telegram "Saqlangan xabarlar".
+
+Qo'shilgan: `items.rs` (buyumlar, 36 katakli inventar, asboblar va chidamlilik, yasash/pishirish retseptlari), yangi bloklar (bruschatka, 4 xil ruda, oyna, g'isht, ustaxona, pech, sandiq, chiroq, bug'doy 4 bosqich), `gen.rs` (g'orlar, rudalar chuqurlik bo'yicha, qishloq uylari, yer osti qal'alari), `mesh.rs` (oyna shaffofligi, past ekin, yer osti qorong'iligi — chuqurlikka qarab), `entity.rs` (sigir/qo'y/tovuq/zombi, zarrachalar, quti-modellar), `audio.rs` (kodning o'zida sintez; Android'da AAudio `dlopen` orqali), ob-havo (yomg'ir), saqlash `GCS5` (inventar bilan; eski `GCS4` o'qiladi).
+
+Qilinmagan: redstone, sehr/iksirlar, boshqa o'lchamlar, ko'p o'yinchi, bir nechta saqlash o'rni; sandiq — saqlash joyi emas, ochilganda o'lja beradi; chiroq atrofni yoritmaydi (faqat o'zi yonadi).

@@ -99,6 +99,19 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
     let tu = d_norm(d_sub(dir(cp.f, ca + 1.0, cb), dir(cp.f, ca - 1.0, cb)));
     let tv = d_norm(d_sub(dir(cp.f, ca, cb + 1.0), dir(cp.f, ca, cb - 1.0)));
     let basis = [tu, up, tv];
+    // Yer osti qorong'iligi: har ustun uchun o'zi va qo'shnilarining eng past sirti (jarlik yuzlari qorayib ketmasin)
+    let colinfo = world.col(cp.f, cp.u, cp.v);
+    let mut smin = [0i64; 256];
+    for z in 0..16i32 {
+        for x in 0..16i32 {
+            let mut m = i64::MAX;
+            for (dx, dz) in [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let (qx, qz) = ((x + dx).clamp(0, 15), (z + dz).clamp(0, 15));
+                m = m.min(colinfo.s[(qx + qz * 16) as usize]);
+            }
+            smin[(x + z * 16) as usize] = m;
+        }
+    }
     for y in 0..16i32 {
         for z in 0..16i32 {
             for x in 0..16i32 {
@@ -113,7 +126,15 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                     let mut d = [0i32; 3];
                     d[axis] = sign;
                     let nb = at(x + d[0], y + d[1], z + d[2]);
-                    let visible = if b == WATER { nb == AIR } else { nb == AIR || nb == WATER };
+                    let visible = if b == WATER {
+                        nb == AIR
+                    } else if b == GLASS {
+                        nb == AIR || nb == WATER || is_crop(nb)
+                    } else if is_crop(b) {
+                        nb == AIR || nb == WATER || nb == GLASS
+                    } else {
+                        see_through(nb)
+                    };
                     if !visible {
                         continue;
                     }
@@ -141,7 +162,7 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                     };
                     let a = [x + d[0], y + d[1], z + d[2]];
                     let mut ao = [3usize; 4];
-                    if b != WATER && !emis {
+                    if b != WATER && b != GLASS && !is_crop(b) && !emis {
                         for (ci, (cu, cv)) in [(0, 0), (1, 0), (1, 1), (0, 1)].iter().enumerate() {
                             let du = *cu * 2 - 1;
                             let dv = *cv * 2 - 1;
@@ -158,6 +179,8 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                             ao[ci] = if s1 == 1 && s2 == 1 { 0 } else { 3 - (s1 + s2 + c) };
                         }
                     }
+                    let depth = smin[(x + z * 16) as usize] - (r0 + y as i64);
+                    let shade = if depth <= 2 { 1.0 } else { (1.0 - (depth - 2) as f32 / 36.0 * 0.72).max(0.28) };
                     let mut vs = [Vertex::default(); 4];
                     for (ci, (cu, cv)) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)].iter().enumerate() {
                         let mut pp = [pos[0], pos[1], pos[2]];
@@ -168,12 +191,15 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                         if b == WATER && axis == 1 && sign > 0 {
                             ry -= 0.1;
                         }
-                        let br = if emis { 1.0 } else { AO_LEVEL[ao[ci]] };
+                        if is_crop(b) && pp[1] == y + 1 {
+                            ry = y as f64 + crop_height(b) as f64;
+                        }
+                        let br = if emis { 1.0 } else { AO_LEVEL[ao[ci]] * shade };
                         vs[ci] = vtx(world_pos(pp[0], ry, pp[2]), col, br, nrm, emis);
                     }
                     let flip = ao[0] + ao[2] < ao[1] + ao[3];
                     let q = if flip { [vs[1], vs[2], vs[3], vs[0]] } else { vs };
-                    if b == WATER {
+                    if b == WATER || b == GLASS {
                         push_quad(&mut out.water, q);
                     } else {
                         push_quad(&mut out.opaque, q);
@@ -342,6 +368,48 @@ mod tests {
         for v in &m.opaque[0] {
             assert_eq!(v.c[3], 255, "yolg'iz blok to'liq yorug'");
         }
+    }
+
+    #[test]
+    fn oyna_shaffof_ekin_past_va_yer_osti_qorongi() {
+        // oyna: o'zi shaffof ro'yxatda, yonidagi tosh yuzi chiziladi
+        let (w, cp) = cube_chunk(0, 30_000_000, 30_000_000);
+        w.set_block(&cell(0, 30_000_005, 30_000_005, 5), GLASS);
+        let m = mesh_chunk(&w, cp);
+        assert_eq!((m.opaque.len(), m.quads()), (0, 6));
+        assert!(!m.water.is_empty());
+        w.set_block(&cell(0, 30_000_006, 30_000_005, 5), STONE);
+        let m = mesh_chunk(&w, cp);
+        let tot = m.quads();
+        assert_eq!(tot, 5 + 6, "tosh to'liq (6) va oyna tosh tomonsiz (5): {tot}");
+        // ekin: pastroq balandlik
+        let (w, cp) = cube_chunk(1, 20_000_000, 20_000_000);
+        w.set_block(&cell(1, 20_000_005, 20_000_005, 5), CROP0);
+        let m = mesh_chunk(&w, cp);
+        assert_eq!(m.quads(), 6);
+        let (lo, hi) = bounds(&m);
+        let hgt = ((hi[0] - lo[0]).powi(2) + (hi[1] - lo[1]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
+        assert!(hgt < 1.9, "ekin to'liq kub emas: {hgt}");
+        // yer osti: tosh ichidagi g'orning devori yorug' sirtdagidan qorong'i
+        let w = World::new(1);
+        let cp0 = land_chunk(&w);
+        let col = w.col(cp0.f, cp0.u, cp0.v);
+        let surf = col.span().1;
+        let deep_r = surf - 80;
+        let dcp = CP { f: cp0.f, u: cp0.u, v: cp0.v, r: (deep_r / 16) as i32 };
+        // chuqurda qo'lda bo'shliq ochamiz
+        let (iu0, iv0, r0) = chunk_origin(dcp);
+        for dr in 4..9 {
+            for du in 4..9 {
+                for dv in 4..9 {
+                    w.set_block(&Cell { f: dcp.f, u: iu0 + du, v: iv0 + dv, r: r0 + dr }, AIR);
+                }
+            }
+        }
+        let m = mesh_chunk(&w, dcp);
+        assert!(!m.is_empty());
+        let dark = m.opaque.iter().flatten().map(|v| v.c[3]).min().unwrap();
+        assert!(dark < 110, "yer osti qorong'i emas: {dark}");
     }
 
     #[test]

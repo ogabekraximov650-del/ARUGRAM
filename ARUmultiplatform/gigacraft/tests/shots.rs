@@ -158,6 +158,63 @@ fn ekran_rasmlari() {
     app.draw(W, H);
     save("12-nil", &app.read_pixels(W, H));
 
+    // 7d. Qishloq uyi (g'isht, oyna, tom, bug'doy), jonzotlar, yomg'ir va omon qolish inventari
+    {
+        use gigacraft::gen::{Gen, EDGE_MARGIN, HOUSE_CELL};
+        use gigacraft::{items, math::*, planet::*};
+        let g = Gen::new(1);
+        let mut found = None;
+        'a: for f in 0..6u8 {
+            for cz in (EDGE_MARGIN / HOUSE_CELL + 2)..40 {
+                for cx in (EDGE_MARGIN / HOUSE_CELL + 2)..40 {
+                    if let Some(h) = g.house_in_cell(f, cx * 5, cz * 5) {
+                        found = Some(h);
+                        break 'a;
+                    }
+                }
+            }
+        }
+        let h = found.expect("uy topilmadi");
+        let c = dir(h.f, (h.x + 8) as f64 + 0.5, (h.z + 8) as f64 + 0.5);
+        // uydan 45 blok narida, ustida 14 blok balandlikda, uyga qarab
+        let side = d_norm(d_cross(c, [0.0, 0.0, 1.0]));
+        let p = d_add(d_mul(c, (h.base + 15) as f64), d_mul(side, 45.0));
+        app.game.player.pos = p;
+        app.game.player.flying = true;
+        let to = d_norm(d_sub(d_mul(c, (h.base + 3) as f64), p));
+        app.game.player.heading = d_norm(d_sub(to, d_mul(d_norm(p), d_dot(to, d_norm(p)))));
+        app.game.player.pitch = -0.3;
+        app.game.time = sky::PHASE_DAY;
+        app.game.survival = false;
+        wait_loaded(&mut app, 200);
+        app.game.player.flying = false;
+        let fwd = app.game.player.camera_basis_flat().2;
+        for k in 0..3 {
+            let kind = [gigacraft::entity::COW, gigacraft::entity::SHEEP, gigacraft::entity::ZOMBIE][k];
+            let at = d_add(app.game.player.pos, d_mul(fwd, 22.0 + k as f64 * 5.0));
+            let at = d_mul(d_norm(at), d_len(app.game.player.pos) - 12.0);
+            app.game.mobs.push(gigacraft::entity::Mob::new(kind, at, fwd));
+        }
+        app.game.rain = 0.8;
+        app.draw(W, H);
+        save("13-qishloq", &app.read_pixels(W, H));
+        app.game.survival = true;
+        app.game.inv.add(items::tool(0, 1) as u16, 1);
+        app.game.inv.add(gigacraft::blocks::LOG as u16, 12);
+        app.game.inv.add(items::COAL, 5);
+        app.game.inv.add(items::BREAD, 3);
+        app.game.inv.add(gigacraft::blocks::IRON_ORE as u16, 4);
+        app.game.open_inv();
+        app.game.grid[0] = items::Stack::new(gigacraft::blocks::LOG as u16, 1);
+        app.draw(W, H);
+        let inv = app.read_pixels(W, H);
+        save("14-inventar", &inv);
+        app.game.close_craft();
+        app.game.survival = false;
+        app.game.rain = 0.0;
+        app.game.mobs.clear();
+    }
+
     // 8. Yuqori atmosfera (20 km) va 9. kosmosdan sayyora (10 000 km)
     app.game.quality = 0;
     app.game.player.fly_level = 7;
