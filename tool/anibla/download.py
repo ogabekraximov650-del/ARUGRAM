@@ -656,28 +656,30 @@ def part_caption(job, i, n):
 
 
 async def upload_via_bot(job, out, size, w, h, dur, live, bot):
-    """"Ilova uchun": video R2'SIZ va worker orqali o'tmasdan, Bot API bilan ALOHIDA kanalga ~18 MiB li OCHILADIGAN mp4 qismlarda (vaqt bo'yicha) yuklanadi.
-    Qismlar Bot API `getFile` (<= 20 MB) bilan qaytarib olinadi — kodlovchiga akkaunt/FloodWait kerak emas. `done` da `bot_parts` va `fids` yuboriladi."""
+    """\"Ilova uchun\": video R2'SIZ va worker orqali o'tmasdan, Bot API bilan ALOHIDA kanalga BAYT bo'yicha aniq 20 MiB li FAYL qismlarida yuklanadi.
+    Qismlar Bot API `getFile` (aynan 20 MiB gacha) bilan qaytarib olinadi — kodlovchiga akkaunt/FloodWait kerak emas. `done` da `bot_parts` va `fids` yuboriladi."""
     token, chat = bot
-    live.send(f"✂️ {size / 1048576:.0f} MB — vaqt bo'yicha ~18 MB li qismlarga bo'linmoqda", force=True)
-    parts = await asyncio.to_thread(botparts.split, out, WORK / "segs", float(dur or 0), size)
+    n_total = max(2, -(-size // botparts.PART))
+    live.send(f"✂️ {size / 1048576:.0f} MB — bayt bo'yicha 20 MiB li qismlarga bo'linadi (~{n_total} qism)", force=True)
     ids, fids = [], []
     t_up = time.time()
     done_sent = False
+    base = re.sub(r"\s+", " ", job.file_name).strip() or f"video_{job.id}"
     try:
-        for i, part in enumerate(parts):
-            live.send(f"⬆️ Telegram'ga (Bot API) yuklanmoqda: qism {i + 1}/{len(parts)} ({part.stat().st_size / 1048576:.1f} MB)")
-            pd, pw, ph = ffprobe(part, "duration"), ffprobe(part, "width", "v:0"), ffprobe(part, "height", "v:0")
-            th = await asyncio.to_thread(botparts.make_thumb, part)
-            cap = part_caption(job, i + 1, len(parts))
+        gen = botparts.iter_parts(out, WORK / "bparts")
+        while True:
+            nxt = await asyncio.to_thread(next, gen, None)
+            if nxt is None:
+                break
+            i, n, part = nxt
+            live.send(f"⬆️ Telegram'ga (Bot API) yuklanmoqda: qism {i + 1}/{n} ({part.stat().st_size / 1048576:.1f} MB)")
+            cap = part_caption(job, i + 1, n)
             try:
-                mid, fid = await asyncio.to_thread(botparts.send_video, token, chat, part, pd or 0, pw or 0, ph or 0, cap, th)
+                mid, fid = await asyncio.to_thread(botparts.send_document, token, chat, part, f"{base}.part{i + 1:03d}", cap)
             finally:
-                if th:
-                    th.unlink(missing_ok=True)
+                part.unlink(missing_ok=True)
             ids.append(mid)
             fids.append(fid)
-            part.unlink(missing_ok=True)
         live.done(f"Telegram'ga {len(ids)} qismda yuklandi (Bot API) · {hms(time.time() - t_up)}")
         live.close()
         done_sent = True

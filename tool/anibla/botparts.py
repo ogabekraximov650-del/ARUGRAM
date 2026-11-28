@@ -1,13 +1,13 @@
-"""Anibla videosini BOT API orqali kanalga ~18 MiB li OCHILADIGAN mp4 qismlarga (vaqt bo'yicha) bo'lib yuklash va qaytarib olish.
+"""Anibla videosini BOT API orqali kanalga BAYT bo'yicha ANIQ 20 MiB li FAYL qismlarida yuklash va qaytarib olish.
 
-UZ: Actions ishchisi worker'siz, o'zi (polling: navbatdan `claim`) videoni yuklab, `ffmpeg -c copy` bilan vaqt bo'yicha ~18 MiB li mp4 qismlarga bo'ladi va
-    har birini Bot API `sendVideo` (supports_streaming) bilan kanalga yuboradi. Bot `getFile` 20 MB gacha beradi, shuning uchun qism <= 19 MiB —
-    kodlovchi ularni yana Bot API bilan (akkaunt/FloodWait'siz) olib `concat` qiladi. Bot tokeni va kanal — `botup.enc` (kalit — ENCODE_TOKEN).
-EN: the Actions runner (polling the queue itself, no worker in the data path) splits the video by TIME into ~18 MiB playable mp4 parts (`-c copy`) and sends each
-    via Bot API `sendVideo`; the encoder later fetches them with `getFile` (<= 20 MB) and concatenates. Bot token + channel live in `botup.enc` (key: ENCODE_TOKEN).
-RU: ranner Actions sam (polling) rezhet video po VREMENI na ~18 MiB mp4-chasti i shlet kazhduyu cherez Bot API sendVideo; kodirovshchik skachivaet ikh getFile i skleivaet.
+UZ: Actions ishchisi worker'siz, o'zi (polling: navbatdan `claim`) videoni yuklab, bayt bo'yicha 20 MiB (20 971 520 bayt) li qismlarga bo'ladi (oxirgisi qisqaroq)
+    va har birini Bot API `sendDocument` bilan kanalga fayl qilib yuboradi. Bot `getFile` aynan 20 MiB gacha beradi (20 971 521 bayt — "file is too big"; sinalgan),
+    shuning uchun qism 20 MiB dan kam ham, ko'p ham emas. Kodlovchi qismlarni Bot API bilan (akkaunt/FloodWait'siz) olib bayt bo'yicha ulaydi.
+    Bot tokeni va kanal — `botup.enc` (kalit — ENCODE_TOKEN).
+EN: the Actions runner (polling the queue itself) splits the video by BYTES into exact 20 MiB file parts and sends each via Bot API `sendDocument`;
+    the encoder fetches them with `getFile` (limit is exactly 20 MiB) and joins them byte-wise. Bot token + channel live in `botup.enc`.
+RU: ranner Actions rezhet video po BAJTAM rovno na 20 MiB i shlet kazhduyu chast cherez sendDocument; kodirovshchik skachivaet getFile i skleivaet po bajtam.
 """
-import bisect
 import json
 import os
 import shutil
@@ -22,10 +22,8 @@ from pathlib import Path
 import stage
 
 HERE = Path(__file__).resolve().parent
-# Bot `getFile` 20 MB (20 000 000 bayt) gacha beradi: qism 20 MB ga IMKON QADAR yaqin, lekin undan oshmaydi.
-# Kesish kalit-kadr chegaralarida paketlar hajmidan hisoblanadi (taxmin `EST`), keyin haqiqiy hajm `MAX_REAL` dan oshmasligi tekshiriladi.
-EST = 19_600_000
-MAX_REAL = 19_950_000
+# Bot `getFile` AYNAN 20 MiB (20 971 520 bayt) gacha beradi (sinalgan: 20 971 521 -> "file is too big"). Qism shu hajmda, oxirgisi qisqaroq.
+PART = 20 * 1048576
 # `tg_files` da bot qismlarining xabar raqami shu qadar siljitiladi: asosiy kanal xabarlari bilan to'qnashmasin (worker `BOT_OFFSET` bilan bir xil).
 OFFSET = 10_000_000_000
 API = "https://api.telegram.org"
@@ -46,103 +44,30 @@ def creds(key: str, path=None):
     return (tok, int(ch)) if tok and ch.lstrip("-").isdigit() else None
 
 
-def _packets(src):
-    """Hamma oqim paketlari: [(vaqt, hajm)] va video kalit-kadr vaqtlari (ffprobe, qayta kodlamasdan)."""
-    st = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type", "-of", "csv=p=0", str(src)]).decode()
-    kinds = {}
-    for line in st.strip().splitlines():
-        a = line.split(",")
-        if len(a) >= 2 and a[0].isdigit():
-            kinds[int(a[0])] = a[1].strip()
-    vid = next((i for i, k in sorted(kinds.items()) if k == "video"), None)
-    if vid is None:
-        raise RuntimeError("videoda tasvir oqimi yo'q")
-    out = subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "packet=stream_index,pts_time,dts_time,size,flags", "-of", "csv=p=0", str(src)]).decode()
-    pk, keys = [], []
-    for line in out.splitlines():
-        a = line.split(",")
-        if len(a) < 5 or not a[0].isdigit() or kinds.get(int(a[0])) not in ("video", "audio"):
-            continue
-        try:
-            t = float(a[1]) if a[1] not in ("", "N/A") else float(a[2])
-            n = int(a[3])
-        except ValueError:
-            continue
-        pk.append((t, n))
-        if int(a[0]) == vid and "K" in a[4]:
-            keys.append(t)
-    pk.sort()
-    return pk, sorted(set(keys))
-
-
-def plan_cuts(pk, keys, est: int):
-    """Kalit-kadr chegaralarida kesish vaqtlari: har qism taxminiy hajmi `est` dan oshmaydigan eng uzun oraliq. Bitta qism chiqsa — o'rtadan ikkiga bo'linadi."""
-    if not keys:
-        raise RuntimeError("kalit kadr topilmadi")
-    times = [p[0] for p in pk]
-    cum = [0]
-    for _, n in pk:
-        cum.append(cum[-1] + n)
-
-    def before(t):
-        return cum[bisect.bisect_left(times, t)]
-
-    cuts, start, i = [], keys[0], 1
-    while i < len(keys):
-        k = keys[i]
-        if before(k) - before(start) <= est:
-            i += 1
-            continue
-        prev = keys[i - 1]
-        cut = prev if prev > start else k  # bitta kalit-kadr oralig'i o'zi katta bo'lsa ham kesamiz
-        cuts.append(cut)
-        start = cut
-        if cut == k:
-            i += 1
-    if not cuts and len(keys) > 2:
-        total = cum[-1]
-        mid = min(keys[1:], key=lambda k: abs(before(k) - total / 2))
-        cuts.append(mid)
-    return cuts
-
-
-def split(src, outdir, duration: float = 0, size: int = 0, est: int = EST, max_real: int = MAX_REAL):
-    """Videoni vaqt bo'yicha (kalit-kadrda, `-c copy`) >=2 ta OCHILADIGAN mp4 qismga bo'ladi; har biri 20 MB ga yaqin va `max_real` dan oshmaydi.
-    Haqiqiy hajm oshib ketsa taxmin kamaytirilib qayta uriniladi."""
-    pk, keys = _packets(src)
+def iter_parts(src, outdir, part: int = PART):
+    """Faylni bayt bo'yicha `part` li qismlarga bo'ladi (bittadan yaratadi: `(raqam, jami, yo'l)`; yuborilgach chaqiruvchi o'chiradi — disk ikki baravar band bo'lmaydi).
+    Fayl bitta qismga sig'sa ham worker >=2 qism kutadi — yarmidan bo'linadi."""
+    src = Path(src)
+    size = src.stat().st_size
+    if size <= 0:
+        raise RuntimeError("fayl bo'sh")
+    if size <= part:
+        part = (size + 1) // 2
+    n = -(-size // part)
     outdir = Path(outdir)
-    for _ in range(6):
-        cuts = plan_cuts(pk, keys, est)
-        if not cuts:
-            raise RuntimeError("video qismlarga bo'linmadi (kalit kadr kam)")
-        shutil.rmtree(outdir, ignore_errors=True)
-        outdir.mkdir(parents=True)
-        times = ",".join(f"{max(c - 0.0005, 0):.6f}" for c in cuts)
-        r = subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-f", "segment",
-                            "-segment_times", times, "-reset_timestamps", "1", "-segment_format", "mp4",
-                            "-segment_format_options", "movflags=+faststart", str(outdir / "part%03d.mp4")], capture_output=True, text=True)
-        parts = sorted(outdir.glob("part*.mp4"))
-        if r.returncode == 0 and len(parts) > 1:
-            big = max(p.stat().st_size for p in parts)
-            if all(0 < p.stat().st_size <= max_real for p in parts):
-                return parts
-            est = int(est * min(0.97, max_real / big * 0.99))
-        else:
-            est = int(est * 0.9)
-    raise RuntimeError("video ochiladigan qismlarga bo'linmadi")
-
-
-def make_thumb(part):
-    """Qism uchun kichik muqova (JPEG, <= 200 KB, eni <= 320). Bo'lmasa `None`."""
-    part = Path(part)
-    th = Path(str(part) + ".jpg")
-    for ss, q in (("1", "5"), ("0", "5"), ("0", "12")):
-        subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-ss", ss, "-i", str(part), "-frames:v", "1", "-vf", "scale='min(320,iw)':-2", "-q:v", q, str(th)],
-                       capture_output=True)
-        if th.exists() and 0 < th.stat().st_size <= 200_000:
-            return th
-    th.unlink(missing_ok=True)
-    return None
+    outdir.mkdir(parents=True, exist_ok=True)
+    with open(src, "rb") as f:
+        for i in range(n):
+            p = outdir / f"part{i:04d}.bin"
+            left = min(part, size - i * part)
+            with open(p, "wb") as o:
+                while left > 0:
+                    chunk = f.read(min(8 * 1048576, left))
+                    if not chunk:
+                        raise RuntimeError("fayl o'qishda uzildi")
+                    o.write(chunk)
+                    left -= len(chunk)
+            yield i, n, p
 
 
 def _multipart(fields: dict, files):
@@ -188,25 +113,17 @@ def _call(token: str, method: str, data: bytes, ctype: str, tries: int = 8, time
     raise RuntimeError(f"Telegram: {err}")
 
 
-def send_video(token: str, chat: int, path, duration=0, width=0, height=0, caption="", thumb=None):
-    """Qismni kanalga OCHILADIGAN video qilib (muqova bilan) yuboradi. Qaytadi: (xabar raqami, file_id)."""
-    path = Path(path)
-    f = {"chat_id": chat, "supports_streaming": "true", "disable_notification": "true"}
-    if duration:
-        f["duration"] = int(duration)
-    if width and height:
-        f["width"], f["height"] = int(width), int(height)
+def send_document(token: str, chat: int, path, filename: str, caption: str = ""):
+    """Qismni kanalga FAYL qilib yuboradi. Qaytadi: (xabar raqami, file_id)."""
+    f = {"chat_id": chat, "disable_notification": "true", "disable_content_type_detection": "true"}
     if caption:
         f["caption"] = caption[:1024]
-    files = [("video", path, path.name)]
-    if thumb and Path(thumb).exists():
-        files.append(("thumbnail", thumb, "thumb.jpg"))
-    body, ctype = _multipart(f, files)
-    m = _call(token, "sendVideo", body, ctype)
-    media = m.get("video") or m.get("document") or {}
-    if not media.get("file_id"):
+    body, ctype = _multipart(f, [("document", path, filename)])
+    m = _call(token, "sendDocument", body, ctype)
+    doc = m.get("document") or {}
+    if not doc.get("file_id"):
         raise RuntimeError("Telegram file_id bermadi")
-    return int(m["message_id"]), str(media["file_id"])
+    return int(m["message_id"]), str(doc["file_id"])
 
 
 def delete_message(token: str, chat: int, msg: int):
@@ -235,8 +152,14 @@ def get_file(token: str, fid: str, dst) -> int:
     raise RuntimeError(f"Telegram fayl yuklanmadi: {err}")
 
 
+def _is_mp4(p) -> bool:
+    with open(p, "rb") as f:
+        return f.read(12)[4:8] == b"ftyp"
+
+
 def fetch_origin(key: str, fids, dst, workdir, log=print):
-    """Qismlarni (`file_id` lar tartib bilan) Bot API bilan olib, `-c copy` bilan bitta mp4 (`dst`) ga ulaydi."""
+    """Qismlarni (`file_id` lar tartib bilan) Bot API bilan olib bitta fayl (`dst`) ga ulaydi: bayt bo'yicha qismlar — to'g'ridan-to'g'ri ulanadi;
+    har biri mustaqil mp4 bo'lgan eski qismlar (oldingi usul) — ffmpeg `concat -c copy` bilan."""
     c = creds(key)
     if not c:
         raise RuntimeError("botup.enc ochilmadi (ENCODE_TOKEN noto'g'ri yoki fayl yo'q)")
@@ -245,10 +168,16 @@ def fetch_origin(key: str, fids, dst, workdir, log=print):
     wd.mkdir(parents=True, exist_ok=True)
     paths = []
     for i, fid in enumerate(fids):
-        p = wd / f"bpart{i:03d}.mp4"
+        p = wd / f"bpart{i:04d}.bin"
         n = get_file(token, fid, p)
         log(f"  asl video qismi {i + 1}/{len(fids)} yuklandi ({n / 1048576:.1f} MB)")
         paths.append(p)
-    stage.concat_parts(paths, dst)
+    if len(paths) > 1 and all(_is_mp4(p) for p in paths):
+        stage.concat_parts(paths, dst)
+    else:
+        with open(dst, "wb") as out:
+            for p in paths:
+                with open(p, "rb") as f:
+                    shutil.copyfileobj(f, out, 8 * 1048576)
     for p in paths:
         p.unlink(missing_ok=True)
