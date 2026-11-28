@@ -1,0 +1,119 @@
+name: GigaCraft — testlar, APK va Telegram
+
+# `main` ga push bo'lganda: testlar (Mesa llvmpipe bilan haqiqiy OpenGL kadrlari), APK (arm64 + armeabi-v7a) va GitHub Release "gigacraft-latest" va Telegram (Saqlangan xabarlar).
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ARUmultiplatform/gigacraft/**'
+      - '.github/workflows/gigacraft.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: gigacraft
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ARUmultiplatform/gigacraft
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: armv7-linux-androideabi,aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "ARUmultiplatform/gigacraft -> target"
+
+      - name: Mesa (ko'rinmas OpenGL ES uchun)
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q libegl-dev libgles-dev libegl-mesa0 libgl1-mesa-dri libgbm1
+
+      - name: Testlar va ekran rasmlari
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          GIGA_SNAP_DIR: ${{ github.workspace }}/ARUmultiplatform/gigacraft/snaps
+          GIGA_REQUIRE_GL: "1"
+          RUST_BACKTRACE: "1"
+        run: cargo test --release -- --nocapture --test-threads=2
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: giga-ekranlar-${{ github.run_number }}
+          path: ARUmultiplatform/gigacraft/snaps
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Android uchun yig'ish
+        run: |
+          cargo ndk -t arm64-v8a -t armeabi-v7a --platform 24 -o jniLibs build --release
+          ls -la jniLibs/*/
+
+      - name: APK yig'ish va imzolash
+        id: apk
+        run: |
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          PLAT=$(ls -d "$ANDROID_HOME"/platforms/android-* | sort -V | tail -1)
+          "$BT/aapt2" compile --dir res -o res.zip
+          "$BT/aapt2" link -o base.apk -I "$PLAT/android.jar" --manifest AndroidManifest.xml \
+            --min-sdk-version 24 --target-sdk-version 34 --version-code ${{ github.run_number }} res.zip
+          mkdir -p apk/lib && cp -r jniLibs/* apk/lib/
+          (cd apk && zip -q -r -0 ../base.apk lib)
+          "$BT/zipalign" -p -f 4 base.apk aligned.apk
+          OUT="$RUNNER_TEMP/apks"; mkdir -p "$OUT"
+          "$BT/apksigner" sign --ks release.keystore --ks-key-alias arumedia \
+            --ks-pass pass:arumedia --key-pass pass:arumedia \
+            --out "$OUT/gigacraft-${{ github.run_number }}.apk" aligned.apk
+          "$BT/apksigner" verify --print-certs "$OUT"/*.apk | head -3
+          ls -la "$OUT"
+          unzip -l "$OUT"/*.apk | grep -E "libgigacraft|AndroidManifest"
+          echo "dir=$OUT" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: gigacraft-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.dir }}
+          retention-days: 30
+
+      - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
+        working-directory: .
+        continue-on-error: true
+        env:
+          ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
+          TG_API_ID: ${{ secrets.TG_API_ID }}
+          TG_API_HASH: ${{ secrets.TG_API_HASH }}
+        run: |
+          K=$(printf '%s' "$ENCODE_TOKEN" | tr -d '[:space:]')
+          pip install --no-cache-dir -q pyrogram==2.0.106 tgcrypto==1.2.5
+          for APK in "${{ steps.apk.outputs.dir }}"/*.apk; do
+            S="$RUNNER_TEMP/notify_session"
+            K="$K" openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -pass env:K \
+              -in tool/encode/session.enc -out "$S.session"
+            head -c 16 "$S.session" | grep -q "SQLite format 3"
+            python tool/notify/send_apk.py "$S" "$APK" "GigaCraft build ${{ github.run_number }}"
+            rm -f "$S.session"
+          done
+
+      # GitHub ilovasidan (Releases) osongina yuklab olish uchun.
+      - name: Release "latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete gigacraft-latest --yes --cleanup-tag || true
+          gh release create gigacraft-latest "${{ steps.apk.outputs.dir }}"/*.apk \
+            --title "GigaCraft ${{ github.run_number }}" \
+            --notes "Avtomatik yig'ilgan APK (build ${{ github.run_number }}, commit ${GITHUB_SHA::7})." \
+            --latest

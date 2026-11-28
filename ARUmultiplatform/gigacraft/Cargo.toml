@@ -1,0 +1,19 @@
+[package]
+name = "gigacraft"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "GigaCraft — noldan yozilgan, tashqi kutubxonasiz voxel o'yin (Rust + OpenGL ES)"
+
+[lib]
+name = "gigacraft"
+crate-type = ["cdylib", "rlib"]
+
+# Tashqi kutubxona YO'Q: dunyo, mesh, grafika, boshqaruv — hammasi shu repoda.
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "unwind"
+strip = true
