@@ -22,6 +22,7 @@ jobs:
       run:
         working-directory: ARUmultiplatform/gigacraft
     timeout-minutes: 70
+    environment: secret
     steps:
       - uses: actions/checkout@v7
 
@@ -88,9 +89,24 @@ jobs:
           path: ${{ steps.apk.outputs.dir }}
           retention-days: 30
 
+      # GitHub ilovasidan (Releases) osongina yuklab olish uchun.
+      - name: Release "latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete gigacraft-latest --yes --cleanup-tag || true
+          gh release create gigacraft-latest "${{ steps.apk.outputs.dir }}"/*.apk \
+            --title "GigaCraft ${{ github.run_number }}" \
+            --notes "Avtomatik yig'ilgan APK (build ${{ github.run_number }}, commit ${GITHUB_SHA::7})." \
+            --latest
+
+      # pyrogram yangi Python (3.14) da ishlamaydi: 3.11 kerak
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+
       - name: APK'ni Telegram "Saqlangan xabarlar"ga yuborish
         working-directory: .
-        continue-on-error: true
         env:
           ENCODE_TOKEN: ${{ secrets.ENCODE_TOKEN }}
           TG_API_ID: ${{ secrets.TG_API_ID }}
@@ -106,14 +122,3 @@ jobs:
             python tool/notify/send_apk.py "$S" "$APK" "GigaCraft build ${{ github.run_number }}"
             rm -f "$S.session"
           done
-
-      # GitHub ilovasidan (Releases) osongina yuklab olish uchun.
-      - name: Release "latest"
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release delete gigacraft-latest --yes --cleanup-tag || true
-          gh release create gigacraft-latest "${{ steps.apk.outputs.dir }}"/*.apk \
-            --title "GigaCraft ${{ github.run_number }}" \
-            --notes "Avtomatik yig'ilgan APK (build ${{ github.run_number }}, commit ${GITHUB_SHA::7})." \
-            --latest
