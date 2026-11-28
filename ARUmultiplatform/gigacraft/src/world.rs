@@ -9,11 +9,14 @@ use std::sync::{Arc, Mutex, RwLock};
 pub struct Chunk {
     pub b: Vec<u8>,
     used: AtomicU64,
+    /// Yorug'lik manbalari (chiroq) indekslari: x + z*16 + y*256.
+    pub lamps: Vec<u16>,
 }
 
 impl Chunk {
     fn new(b: Vec<u8>, tick: u64) -> Chunk {
-        Chunk { b, used: AtomicU64::new(tick) }
+        let lamps = b.iter().enumerate().filter(|(_, &v)| light_source(v)).map(|(i, _)| i as u16).collect();
+        Chunk { b, used: AtomicU64::new(tick), lamps }
     }
     pub fn is_air(&self) -> bool {
         self.b.iter().all(|&v| v == AIR)
@@ -85,7 +88,12 @@ impl World {
         let mut nb = old.b.clone();
         nb[i] = v;
         let t = self.now();
-        self.chunks.write().unwrap().insert(cp, Arc::new(Chunk::new(nb, t)));
+        let mut lamps: Vec<u16> = old.lamps.iter().copied().filter(|&l| l as usize != i).collect();
+        if light_source(v) {
+            lamps.push(i as u16);
+        }
+        let nc = Chunk { b: nb, used: AtomicU64::new(t), lamps };
+        self.chunks.write().unwrap().insert(cp, Arc::new(nc));
         self.dirty.lock().unwrap().insert(cp);
         let mut cols: Vec<(u8, i32, i32)> = vec![(cp.f, cp.u, cp.v)];
         let (lu, lv) = (c.u.rem_euclid(16), c.v.rem_euclid(16));
@@ -127,6 +135,30 @@ impl World {
             }
         }
         p
+    }
+
+    /// `cp` bo'lagi va uning qo'shnilaridagi chiroqlar: `cp` boshiga nisbatan (u, r, v) blok markazlari.
+    pub fn lamps_near(&self, cp: CP) -> Vec<[f32; 3]> {
+        let (iu0, iv0, r0) = chunk_origin(cp);
+        let mut out = Vec::new();
+        for dr in -1..=1i64 {
+            for dv in -1..=1i64 {
+                for du in -1..=1i64 {
+                    let (u, v) = (iu0 + du * 16 + 8, iv0 + dv * 16 + 8);
+                    if u < 0 || v < 0 || u >= N || v >= N {
+                        continue;
+                    }
+                    let c = Cell { f: cp.f, u, v, r: r0 + dr * 16 + 8 };
+                    let (ncp, _) = chunk_of(&c);
+                    let ch = self.chunk(ncp);
+                    for &i in &ch.lamps {
+                        let i = i as i64;
+                        out.push([(du * 16 + i % 16) as f32 + 0.5, (dr * 16 + i / 256) as f32 + 0.5, (dv * 16 + (i / 16) % 16) as f32 + 0.5]);
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Eng kam ishlatilgan, tahrirlanmagan bo'laklar va ustunlarni xotiradan chiqaradi.

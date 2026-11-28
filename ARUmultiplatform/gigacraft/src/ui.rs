@@ -49,15 +49,33 @@ pub enum Station {
     Table,
     /// Pech: bitta kirish katagi.
     Furnace,
+    /// Sehr stoli: bitta asbob katagi.
+    Enchant,
+    /// Sandiq: 9x3 katak.
+    Chest,
 }
 
 impl Station {
+    /// Qator/ustun soni (kvadrat to'rlar uchun).
     pub fn grid(self) -> usize {
         match self {
             Station::Hand => 2,
             Station::Table => 3,
-            Station::Furnace => 1,
+            _ => 1,
         }
+    }
+
+    /// Yuqoridagi to'rdagi kataklar soni.
+    pub fn count(self) -> usize {
+        match self {
+            Station::Chest => 27,
+            s => s.grid() * s.grid(),
+        }
+    }
+
+    /// Natija katagi bormi.
+    pub fn has_result(self) -> bool {
+        self != Station::Chest
     }
 }
 
@@ -76,9 +94,12 @@ pub struct CraftView {
     pub station: Station,
     pub inv: [Stack; items::SLOTS],
     pub grid: [Stack; 9],
+    pub chest: [Stack; 27],
     pub result: Stack,
     pub cursor: Stack,
     pub fuel: u32,
+    /// Sehrlash narxi (oltin quyma), bo'lmasa 0.
+    pub cost: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -232,9 +253,9 @@ impl Layout {
         let (px, py, pw, _) = self.inv_panel();
         let s = self.s;
         let cols = 6usize;
-        let gap = 20.0 * s;
+        let gap = 14.0 * s;
         let cw = (pw - 2.0 * 50.0 * s - gap * (cols as f32 - 1.0)) / cols as f32;
-        let ch = 170.0 * s;
+        let ch = 130.0 * s;
         let (c, r) = (i % cols, i / cols);
         (px + 50.0 * s + c as f32 * (cw + gap), py + 150.0 * s + r as f32 * (ch + gap), cw, ch)
     }
@@ -259,8 +280,11 @@ impl Layout {
     }
 
     pub fn craft_grid_slot(&self, st: Station, i: usize) -> (f32, f32) {
-        let (px, py, _, _) = self.craft_panel();
+        let (px, py, pw, _) = self.craft_panel();
         let (_, step) = self.craft_slot_size();
+        if st == Station::Chest {
+            return (px + (pw - 9.0 * step) * 0.5 + (i % 9) as f32 * step, py + 140.0 * self.s + (i / 9) as f32 * step);
+        }
         let g = st.grid();
         (px + 150.0 * self.s + (i % g) as f32 * step, py + 140.0 * self.s + (i / g) as f32 * step)
     }
@@ -282,10 +306,10 @@ impl Layout {
         }
         let (sz, _) = self.craft_slot_size();
         let inside = |p: (f32, f32)| x >= p.0 && x <= p.0 + sz && y >= p.1 && y <= p.1 + sz;
-        if inside(self.craft_result_slot()) {
+        if st.has_result() && inside(self.craft_result_slot()) {
             return Some(CraftHit::Result);
         }
-        for i in 0..st.grid() * st.grid() {
+        for i in 0..st.count() {
             if inside(self.craft_grid_slot(st, i)) {
                 return Some(CraftHit::Grid(i));
             }
@@ -318,6 +342,8 @@ pub struct UiState {
     pub craft: Option<CraftView>,
     pub cursor_pos: (f32, f32),
     pub rain: f32,
+    /// Faol iksir ta'sirlari (matn).
+    pub status: String,
     pub sel: usize,
     pub flying: bool,
     pub fly_level: usize,
@@ -365,6 +391,11 @@ pub fn draw(h: &mut Hud, l: &Layout, u: &UiState) {
     h.text_c(89.0 * s, 86.0 * s, 40.0 * s, "GC", BLACK);
     h.text(156.0 * s, 40.0 * s, 46.0 * s, "GIGACRAFT", WHITE);
     h.text(158.0 * s, 96.0 * s, 30.0 * s, &u.info, rgba(235, 235, 235, 255));
+    if !u.status.is_empty() {
+        let tw = h.text_width(&u.status, 30.0 * s);
+        h.rrect(30.0 * s, 160.0 * s, tw + 40.0 * s, 52.0 * s, 20.0 * s, rgba(60, 20, 90, 190));
+        h.text(50.0 * s, 170.0 * s, 30.0 * s, &u.status, rgba(240, 210, 255, 255));
+    }
     // Yuqori o'ng: tugmalar
     plate(h, Sq { ..l.inv }, rgba(0, 0, 0, 150), rgba(255, 255, 255, 70), is_down(Btn::Inv));
     for i in 0..2 {
@@ -518,6 +549,9 @@ fn slot_box(h: &mut Hud, s: f32, x: f32, y: f32, w: f32, st: &Stack, hot: bool) 
         if st.n > 1 {
             h.text_c(x + w * 0.74, y + w * 0.82, 30.0 * s, &format!("{}", st.n), WHITE);
         }
+        if st.ench > 0 {
+            h.text(x + w * 0.08, y + w * 0.02, 30.0 * s, &"*".repeat(st.ench as usize), rgba(210, 150, 255, 255));
+        }
         if items::is_tool(st.item) && st.used > 0 {
             let f = 1.0 - st.used as f32 / items::max_durability(st.item).max(1) as f32;
             h.rect(x + w * 0.12, y + w * 0.9, w * 0.76, 6.0 * s, rgba(0, 0, 0, 200));
@@ -537,25 +571,34 @@ fn draw_craft(h: &mut Hud, l: &Layout, u: &UiState) {
         Station::Hand => "INVENTAR",
         Station::Table => "USTAXONA",
         Station::Furnace => "PECH",
+        Station::Enchant => "SEHR STOLI",
+        Station::Chest => "SANDIQ",
     };
     h.text(px + 50.0 * s, py + 36.0 * s, 60.0 * s, title, WHITE);
     let cl = l.craft_close();
     h.rrect(cl.cx - cl.r, cl.cy - cl.r, cl.r * 2.0, cl.r * 2.0, cl.r * 0.45, rgba(40, 38, 58, 255));
     h.text_c(cl.cx, cl.cy, 56.0 * s, "X", WHITE);
     let (sz, _) = l.craft_slot_size();
-    let g = c.station.grid();
-    for i in 0..g * g {
+    for i in 0..c.station.count() {
         let (x, y) = l.craft_grid_slot(c.station, i);
-        slot_box(h, s, x, y, sz, &c.grid[i], false);
+        let st = if c.station == Station::Chest { c.chest[i] } else { c.grid[i] };
+        slot_box(h, s, x, y, sz, &st, false);
     }
     let (rx, ry) = l.craft_result_slot();
     let (_, step) = l.craft_slot_size();
-    // O'q
-    let ax = rx - 120.0 * s;
-    h.tri([(ax, ry + sz * 0.5 - 34.0 * s), (ax + 70.0 * s, ry + sz * 0.5), (ax, ry + sz * 0.5 + 34.0 * s)], rgba(200, 200, 220, 255));
-    slot_box(h, s, rx, ry, sz, &c.result, !c.result.is_empty());
-    if !c.result.is_empty() {
-        h.text_c(rx + sz * 0.5, ry + sz + 34.0 * s, 32.0 * s, items::name(c.result.item), WHITE);
+    if c.station.has_result() {
+        // O'q
+        let ax = rx - 120.0 * s;
+        h.tri([(ax, ry + sz * 0.5 - 34.0 * s), (ax + 70.0 * s, ry + sz * 0.5), (ax, ry + sz * 0.5 + 34.0 * s)], rgba(200, 200, 220, 255));
+        slot_box(h, s, rx, ry, sz, &c.result, !c.result.is_empty());
+        if !c.result.is_empty() {
+            h.text_c(rx + sz * 0.5, ry + sz + 34.0 * s, 32.0 * s, items::name(c.result.item), WHITE);
+        }
+    }
+    if c.station == Station::Enchant {
+        let t = if c.cost > 0 { format!("NARX: {} OLTIN QUYMA", c.cost) } else { "ASBOBNI QO'YING".to_string() };
+        h.text(px + 150.0 * s, py + 140.0 * s + step + 10.0 * s, 34.0 * s, &t, rgba(210, 160, 255, 255));
+        h.text(px + 150.0 * s, py + 140.0 * s + step + 56.0 * s, 28.0 * s, "KURAK/BOLTA: TEZLIK, QILICH: ZARBA", rgba(200, 200, 215, 255));
     }
     if c.station == Station::Furnace {
         let t = format!("YOQILG'I: {}", c.fuel);
@@ -695,8 +738,8 @@ fn draw_inv(h: &mut Hud, l: &Layout, u: &UiState) {
         let (x, y, w, ch) = l.inv_card(i);
         let cur = u.held == b as Item;
         h.rrect(x, y, w, ch, 30.0 * s, if cur { WHITE } else { rgba(40, 38, 58, 255) });
-        h.cube_icon(x + w * 0.5, y + ch * 0.42, w * 0.26, b);
-        h.text_c(x + w * 0.5, y + ch * 0.84, 34.0 * s, blocks::name(b), if cur { BLACK } else { WHITE });
+        h.cube_icon(x + w * 0.5, y + ch * 0.38, ch * 0.2, b);
+        h.text_c(x + w * 0.5, y + ch * 0.84, 26.0 * s, blocks::name(b), if cur { BLACK } else { WHITE });
     }
 }
 
@@ -755,8 +798,8 @@ mod tests {
             }
             let c = l.craft_panel();
             assert!(c.0 >= 0.0 && c.1 >= 0.0 && c.0 + c.2 <= w && c.1 + c.3 <= h, "yasash oynasi ekranga sig'maydi");
-            for st in [Station::Hand, Station::Table, Station::Furnace] {
-                for i in 0..st.grid() * st.grid() {
+            for st in [Station::Hand, Station::Table, Station::Furnace, Station::Enchant, Station::Chest] {
+                for i in 0..st.count() {
                     let (x, y) = l.craft_grid_slot(st, i);
                     assert_eq!(l.craft_at(x + 5.0, y + 5.0, st), Some(CraftHit::Grid(i)));
                 }

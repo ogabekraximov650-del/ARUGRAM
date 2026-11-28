@@ -28,20 +28,46 @@ pub const LAMP: u8 = 24;
 /// Bug'doy o'sish bosqichlari (0..3); 3 — pishgan.
 pub const CROP0: u8 = 25;
 pub const CROP3: u8 = 28;
-pub const COUNT: u8 = 29;
+pub const ENCHANT: u8 = 29;
+pub const REDSTONE_ORE: u8 = 30;
+pub const WIRE_OFF: u8 = 31;
+pub const WIRE_ON: u8 = 32;
+pub const LEVER_OFF: u8 = 33;
+pub const LEVER_ON: u8 = 34;
+pub const RLAMP_OFF: u8 = 35;
+pub const RLAMP_ON: u8 = 36;
+/// Hali ochilmagan o'ljali sandiq (uylar va qal'alarda): birinchi ochilganda oddiy sandiqqa aylanadi.
+pub const LOOTCHEST: u8 = 37;
+pub const COUNT: u8 = 38;
 
 /// Qo'yish mumkin bo'lgan bloklar (havo va suvdan tashqari), tanlash oynasida shu tartibda.
-pub const PLACEABLE: [u8; 18] = [
-    GRASS, DIRT, STONE, SAND, SNOW, LOG, LEAF, PLANK, WHITE, PINK, CRYSTAL, COBBLE, GLASS, BRICK, CRAFTING, FURNACE, CHEST, LAMP,
+pub const PLACEABLE: [u8; 22] = [
+    GRASS, DIRT, STONE, SAND, SNOW, LOG, LEAF, PLANK, WHITE, PINK, CRYSTAL, COBBLE, GLASS, BRICK, CRAFTING, FURNACE, CHEST, LAMP, ENCHANT, WIRE_OFF,
+    LEVER_OFF, RLAMP_OFF,
 ];
 
 pub fn is_crop(b: u8) -> bool {
     (CROP0..=CROP3).contains(&b)
 }
 
-/// To'siq (o'yinchi o'tolmaydi va ko'rinishni to'sadi). Ekin to'siq emas.
+/// Past (to'liq kub bo'lmagan) bloklar: ekin, sim, tutqich. Ular to'siq emas.
+pub fn is_thin(b: u8) -> bool {
+    is_crop(b) || block_height(b) < 1.0
+}
+
+/// Past blokning balandligi (blok ulushi); oddiylari uchun 1.
+pub fn block_height(b: u8) -> f32 {
+    match b {
+        CROP0..=CROP3 => 0.25 + 0.2 * (b - CROP0) as f32,
+        WIRE_OFF | WIRE_ON => 0.1,
+        LEVER_OFF | LEVER_ON => 0.6,
+        _ => 1.0,
+    }
+}
+
+/// To'siq (o'yinchi o'tolmaydi va ko'rinishni to'sadi). Past bloklar to'siq emas.
 pub fn solid(b: u8) -> bool {
-    b != AIR && b != WATER && !is_crop(b)
+    b != AIR && b != WATER && !is_thin(b)
 }
 
 /// Nishonga olish va buzish mumkin (suv va havodan boshqa hammasi).
@@ -51,17 +77,17 @@ pub fn targetable(b: u8) -> bool {
 
 /// Orqasi ko'rinadigan blok (qo'shni yuzlar chiziladi).
 pub fn see_through(b: u8) -> bool {
-    b == AIR || b == WATER || b == GLASS || is_crop(b)
+    b == AIR || b == WATER || b == GLASS || is_thin(b)
 }
 
 /// Yorug'lik chiqaradi (soyalanmaydi).
 pub fn emissive(b: u8) -> bool {
-    b == CRYSTAL || b == LAMP
+    b == CRYSTAL || b == LAMP || b == RLAMP_ON || b == WIRE_ON
 }
 
-/// Ekin balandligi (blokning ulushi).
-pub fn crop_height(b: u8) -> f32 {
-    0.25 + 0.2 * (b.saturating_sub(CROP0)) as f32
+/// Atrofni yoritadigan blok.
+pub fn light_source(b: u8) -> bool {
+    b == LAMP || b == RLAMP_ON
 }
 
 pub fn name(b: u8) -> &'static str {
@@ -91,6 +117,12 @@ pub fn name(b: u8) -> &'static str {
         CHEST => "SANDIQ",
         LAMP => "CHIROQ",
         CROP0..=CROP3 => "BUG'DOY",
+        ENCHANT => "SEHR STOLI",
+        REDSTONE_ORE => "REDSTONE RUDASI",
+        WIRE_OFF | WIRE_ON => "SIM",
+        LEVER_OFF | LEVER_ON => "TUTQICH",
+        RLAMP_OFF | RLAMP_ON => "REDSTONE CHIROQ",
+        LOOTCHEST => "SANDIQ",
         _ => "HAVO",
     }
 }
@@ -111,7 +143,11 @@ pub fn hardness(b: u8) -> f32 {
         GLASS => 0.4,
         CRAFTING | CHEST => 2.2,
         FURNACE => 3.5,
-        LAMP => 0.5,
+        LAMP | RLAMP_OFF | RLAMP_ON => 0.5,
+        ENCHANT => 5.0,
+        REDSTONE_ORE => 4.5,
+        WIRE_OFF | WIRE_ON | LEVER_OFF | LEVER_ON => 0.1,
+        LOOTCHEST => 2.2,
         CROP0..=CROP3 => 0.05,
         CRYSTAL => 2.0,
         WHITE | PINK => 1.5,
@@ -169,6 +205,21 @@ pub fn color(b: u8, face: u8) -> [f32; 3] {
             _ => [0.70, 0.46, 0.20],
         },
         LAMP => [1.00, 0.92, 0.55],
+        ENCHANT => match face {
+            0 => [0.55, 0.15, 0.30],
+            _ => [0.22, 0.10, 0.36],
+        },
+        REDSTONE_ORE => [0.78, 0.22, 0.22],
+        WIRE_OFF => [0.42, 0.08, 0.08],
+        WIRE_ON => [1.00, 0.16, 0.10],
+        LEVER_OFF => [0.55, 0.50, 0.45],
+        LEVER_ON => [0.95, 0.72, 0.30],
+        RLAMP_OFF => [0.50, 0.36, 0.28],
+        RLAMP_ON => [1.00, 0.86, 0.52],
+        LOOTCHEST => match face {
+            0 => [0.86, 0.62, 0.28],
+            _ => [0.70, 0.46, 0.20],
+        },
         CROP0 => [0.45, 0.78, 0.35],
         b if is_crop(b) => lerp_col([0.45, 0.78, 0.35], [0.92, 0.80, 0.30], (b - CROP0) as f32 / 3.0),
         _ => [1.0, 0.0, 1.0],
@@ -192,8 +243,8 @@ pub enum Tool {
 /// Blokni qaysi asbob tez buzadi.
 pub fn best_tool(b: u8) -> Tool {
     match b {
-        STONE | COBBLE | COAL_ORE | IRON_ORE | GOLD_ORE | DIAMOND_ORE | BRICK | FURNACE | CRYSTAL => Tool::Pick,
-        LOG | PLANK | CRAFTING | CHEST => Tool::Axe,
+        STONE | COBBLE | COAL_ORE | IRON_ORE | GOLD_ORE | DIAMOND_ORE | REDSTONE_ORE | ENCHANT | BRICK | FURNACE | CRYSTAL => Tool::Pick,
+        LOG | PLANK | CRAFTING | CHEST | LOOTCHEST => Tool::Axe,
         GRASS | DIRT | SAND | SNOW | DRYGRASS => Tool::Shovel,
         _ => Tool::Hand,
     }
@@ -204,7 +255,8 @@ pub fn min_tier(b: u8) -> u8 {
     match b {
         STONE | COBBLE | COAL_ORE | BRICK | FURNACE | CRYSTAL => 1,
         IRON_ORE => 2,
-        GOLD_ORE | DIAMOND_ORE => 3,
+        GOLD_ORE | DIAMOND_ORE | REDSTONE_ORE => 3,
+        ENCHANT => 2,
         _ => 0,
     }
 }
@@ -230,10 +282,11 @@ mod tests {
         assert!(!solid(AIR) && !solid(WATER) && solid(STONE) && solid(LEAF));
         assert!(emissive(CRYSTAL) && !emissive(STONE));
         for b in PLACEABLE {
-            assert!(solid(b) || b == GLASS);
+            assert!(solid(b) || is_thin(b) || b == GLASS);
         }
         assert!(!solid(CROP0) && targetable(CROP3) && see_through(GLASS) && emissive(LAMP));
-        assert!(crop_height(CROP3) < 1.0 && crop_height(CROP0) > 0.0);
+        assert!(block_height(CROP3) < 1.0 && block_height(CROP0) > 0.0 && is_thin(WIRE_ON) && is_thin(LEVER_OFF) && !is_thin(STONE));
+        assert!(light_source(RLAMP_ON) && !light_source(RLAMP_OFF) && emissive(WIRE_ON));
         assert_eq!(best_tool(STONE), Tool::Pick);
         assert!(min_tier(DIAMOND_ORE) > min_tier(IRON_ORE));
     }

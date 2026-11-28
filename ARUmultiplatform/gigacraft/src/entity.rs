@@ -66,17 +66,30 @@ pub struct Mob {
     pub hurt: f32,
     pub cd: f32,
     pub phase: f32,
+    /// Juftlashishga tayyor (soniya qoldi).
+    pub love: f32,
+    /// Bola: katta bo'lishigacha soniya (0 — katta).
+    pub baby: f32,
 }
 
 impl Mob {
     pub fn new(kind: u8, pos: D3, fwd: D3) -> Mob {
-        let mut m = Mob { kind, pos, fwd, hp: max_hp(kind), t: 1.0, walking: false, hurt: 0.0, cd: 0.0, phase: 0.0 };
+        let mut m = Mob { kind, pos, fwd, hp: max_hp(kind), t: 1.0, walking: false, hurt: 0.0, cd: 0.0, phase: 0.0, love: 0.0, baby: 0.0 };
         m.fix_fwd();
         m
     }
 
     pub fn up(&self) -> D3 {
         d_norm(self.pos)
+    }
+
+    /// Bola kichik.
+    pub fn scale(&self) -> f64 {
+        if self.baby > 0.0 {
+            0.55
+        } else {
+            1.0
+        }
     }
 
     fn fix_fwd(&mut self) {
@@ -87,7 +100,7 @@ impl Mob {
 
     /// Markaz (zarba/qarash uchun).
     pub fn center(&self) -> D3 {
-        d_add(self.pos, d_mul(self.up(), size(self.kind).1 * 0.5))
+        d_add(self.pos, d_mul(self.up(), size(self.kind).1 * 0.5 * self.scale()))
     }
 }
 
@@ -129,6 +142,8 @@ pub fn ground(w: &World, p: D3, land_only: bool) -> Option<D3> {
 pub fn step(m: &mut Mob, w: &World, dt: f32, target: Option<D3>, seed: &mut u32) -> bool {
     m.hurt = (m.hurt - dt).max(0.0);
     m.cd = (m.cd - dt).max(0.0);
+    m.love = (m.love - dt).max(0.0);
+    m.baby = (m.baby - dt).max(0.0);
     let up = m.up();
     let mut hit = false;
     if let (true, Some(t)) = (hostile(m.kind), target) {
@@ -186,6 +201,7 @@ fn wander(m: &mut Mob, dt: f32, seed: &mut u32) {
 /// Nur (nuqta `o`, yo'nalish `d` birlik) jonzotga urildimi: masofa.
 pub fn ray_hit(m: &Mob, o: D3, d: D3, reach: f64) -> Option<f64> {
     let (rad, h) = size(m.kind);
+    let (rad, h) = (rad * m.scale(), h * m.scale());
     let up = m.up();
     // Tik silindr: eng yaqin nuqtani topamiz
     let mut best: Option<f64> = None;
@@ -288,10 +304,14 @@ pub fn mob_vertices(m: &Mob, anchor: D3, out: &mut Vec<Vertex>) {
     let right = d_norm(d_cross(up, m.fwd));
     let ax = (right, up, m.fwd);
     let flash = if m.hurt > 0.0 { 0.55 } else { 0.0 };
+    let sc = m.scale() as f32;
     for (i, (off, half, col, leg)) in parts(m.kind).into_iter().enumerate() {
+        let off = [off[0] * sc, off[1] * sc, off[2] * sc];
+        let half = [half[0] * sc, half[1] * sc, half[2] * sc];
         let swing = if leg && m.walking { (m.phase + i as f32 * 1.7).sin() * 0.7 } else { 0.0 };
         let c = d_add(m.pos, d_add(d_mul(right, off[0] as f64), d_add(d_mul(up, off[1] as f64), d_mul(m.fwd, (off[2] + swing) as f64))));
-        let col = [col[0] + (1.0 - col[0]) * flash * 0.7, col[1] * (1.0 - flash), col[2] * (1.0 - flash)];
+        let lv = if m.love > 0.0 { 0.35 } else { 0.0 };
+        let col = [col[0] + (1.0 - col[0]) * (flash * 0.7 + lv), col[1] * (1.0 - flash) * (1.0 - lv * 0.4), col[2] * (1.0 - flash) * (1.0 - lv * 0.2)];
         push_box(out, anchor, c, ax, [half[0] as f64, half[1] as f64, half[2] as f64], col);
     }
 }

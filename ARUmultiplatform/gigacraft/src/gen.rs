@@ -345,6 +345,8 @@ impl Gen {
             DIAMOND_ORE
         } else if depth > 70 && ore(331, 0.82) {
             GOLD_ORE
+        } else if depth > 45 && ore(501, 0.80) {
+            REDSTONE_ORE
         } else if depth > 28 && ore(271, 0.79) {
             IRON_ORE
         } else if ore(211, 0.77) {
@@ -520,7 +522,7 @@ fn put_house(b: &mut [u8], h: &House, iu0: i64, iv0: i64, r0: i64) {
     put_at(b, iu0, iv0, r0, cx, cz, h.base + 7, LAMP);
     put_at(b, iu0, iv0, r0, h.x + 2, h.z + 14, h.base + 1, CRAFTING);
     put_at(b, iu0, iv0, r0, h.x + 14, h.z + 14, h.base + 1, FURNACE);
-    put_at(b, iu0, iv0, r0, h.x + 14, h.z + 2, h.base + 1, CHEST);
+    put_at(b, iu0, iv0, r0, h.x + 14, h.z + 2, h.base + 1, LOOTCHEST);
     // Bog'da ekin: uy yonida bug'doy
     for dz in 0..4i64 {
         for dx in 0..6i64 {
@@ -544,8 +546,9 @@ fn put_dungeon(b: &mut [u8], d: &Dungeon, iu0: i64, iv0: i64, r0: i64) {
     for (dx, dz) in [(1, 1), (11, 1), (1, 11), (11, 11)] {
         put_at(b, iu0, iv0, r0, d.x + dx, d.z + dz, d.base + 4, LAMP);
     }
-    put_at(b, iu0, iv0, r0, d.x + 6, d.z + 6, d.base, CHEST);
-    put_at(b, iu0, iv0, r0, d.x + 3, d.z + 6, d.base, COBBLE);
+    put_at(b, iu0, iv0, r0, d.x + 6, d.z + 6, d.base, LOOTCHEST);
+    put_at(b, iu0, iv0, r0, d.x + 3, d.z + 6, d.base, ENCHANT);
+    put_at(b, iu0, iv0, r0, d.x + 6, d.z + 3, d.base, LOOTCHEST);
     put_at(b, iu0, iv0, r0, d.x + 9, d.z + 6, d.base, GOLD_ORE);
 }
 

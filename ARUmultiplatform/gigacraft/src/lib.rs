@@ -23,6 +23,7 @@ pub mod planet;
 pub mod player;
 pub mod png;
 pub mod ray;
+pub mod redstone;
 pub mod rivers;
 pub mod render;
 pub mod sky;

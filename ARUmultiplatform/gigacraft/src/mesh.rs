@@ -64,6 +64,9 @@ pub fn quad_normal(q: [D3; 4], inside: D3) -> [f32; 3] {
     [n[0] as f32, n[1] as f32, n[2] as f32]
 }
 
+/// Chiroq yorug'ligi radiusi (blok).
+pub const LAMP_R: f32 = 14.0;
+
 const AO_LEVEL: [f32; 4] = [0.50, 0.68, 0.84, 1.0];
 
 /// Bo'lakni `out` ga mesh qiladi (cho'qqilar `anchor` ga nisbatan). Qo'shni bo'laklar kerak bo'lsa avtomatik hosil qilinadi.
@@ -112,6 +115,9 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
             smin[(x + z * 16) as usize] = m;
         }
     }
+    // Chiroqlar faqat yer ostida (soya joyda) kerak: yer usti bo'laklari uchun qo'shnilarni hosil qilmaymiz
+    let deep = smin.iter().any(|&m| m - r0 > 2);
+    let lamps = if deep { world.lamps_near(cp) } else { Vec::new() };
     for y in 0..16i32 {
         for z in 0..16i32 {
             for x in 0..16i32 {
@@ -129,8 +135,8 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                     let visible = if b == WATER {
                         nb == AIR
                     } else if b == GLASS {
-                        nb == AIR || nb == WATER || is_crop(nb)
-                    } else if is_crop(b) {
+                        nb == AIR || nb == WATER || is_thin(nb)
+                    } else if is_thin(b) {
                         nb == AIR || nb == WATER || nb == GLASS
                     } else {
                         see_through(nb)
@@ -162,7 +168,7 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                     };
                     let a = [x + d[0], y + d[1], z + d[2]];
                     let mut ao = [3usize; 4];
-                    if b != WATER && b != GLASS && !is_crop(b) && !emis {
+                    if b != WATER && b != GLASS && !is_thin(b) && !emis {
                         for (ci, (cu, cv)) in [(0, 0), (1, 0), (1, 1), (0, 1)].iter().enumerate() {
                             let du = *cu * 2 - 1;
                             let dv = *cv * 2 - 1;
@@ -180,7 +186,18 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                         }
                     }
                     let depth = smin[(x + z * 16) as usize] - (r0 + y as i64);
-                    let shade = if depth <= 2 { 1.0 } else { (1.0 - (depth - 2) as f32 / 36.0 * 0.72).max(0.28) };
+                    let mut shade = if depth <= 2 { 1.0 } else { (1.0 - (depth - 2) as f32 / 36.0 * 0.72).max(0.28) };
+                    if !lamps.is_empty() && shade < 1.0 {
+                        let fc = [x as f32 + 0.5 + d[0] as f32 * 0.5, y as f32 + 0.5 + d[1] as f32 * 0.5, z as f32 + 0.5 + d[2] as f32 * 0.5];
+                        let mut l = 0.0f32;
+                        for q in &lamps {
+                            let dd = ((fc[0] - q[0]).powi(2) + (fc[1] - q[1]).powi(2) + (fc[2] - q[2]).powi(2)).sqrt();
+                            if dd < LAMP_R {
+                                l = l.max((1.0 - dd / LAMP_R).powf(1.2));
+                            }
+                        }
+                        shade += l * (1.0 - shade);
+                    }
                     let mut vs = [Vertex::default(); 4];
                     for (ci, (cu, cv)) in [(0usize, 0usize), (1, 0), (1, 1), (0, 1)].iter().enumerate() {
                         let mut pp = [pos[0], pos[1], pos[2]];
@@ -191,8 +208,8 @@ pub fn mesh_chunk_into(world: &World, cp: CP, anchor: D3, out: &mut MeshData) {
                         if b == WATER && axis == 1 && sign > 0 {
                             ry -= 0.1;
                         }
-                        if is_crop(b) && pp[1] == y + 1 {
-                            ry = y as f64 + crop_height(b) as f64;
+                        if is_thin(b) && pp[1] == y + 1 {
+                            ry = y as f64 + block_height(b) as f64;
                         }
                         let br = if emis { 1.0 } else { AO_LEVEL[ao[ci]] * shade };
                         vs[ci] = vtx(world_pos(pp[0], ry, pp[2]), col, br, nrm, emis);
@@ -410,6 +427,28 @@ mod tests {
         assert!(!m.is_empty());
         let dark = m.opaque.iter().flatten().map(|v| v.c[3]).min().unwrap();
         assert!(dark < 110, "yer osti qorong'i emas: {dark}");
+    }
+
+    #[test]
+    fn chiroq_yer_ostini_yoritadi() {
+        let w = World::new(1);
+        let cp0 = land_chunk(&w);
+        let col = w.col(cp0.f, cp0.u, cp0.v);
+        let deep_r = col.span().1 - 80;
+        let dcp = CP { f: cp0.f, u: cp0.u, v: cp0.v, r: (deep_r / 16) as i32 };
+        let (iu0, iv0, r0) = chunk_origin(dcp);
+        for dr in 4..9 {
+            for du in 4..9 {
+                for dv in 4..9 {
+                    w.set_block(&Cell { f: dcp.f, u: iu0 + du, v: iv0 + dv, r: r0 + dr }, AIR);
+                }
+            }
+        }
+        let dark = mesh_chunk(&w, dcp).opaque.iter().flatten().map(|v| v.c[3] as u32).sum::<u32>();
+        w.set_block(&Cell { f: dcp.f, u: iu0 + 6, v: iv0 + 6, r: r0 + 6 }, LAMP);
+        let m = mesh_chunk(&w, dcp);
+        let lit = m.opaque.iter().flatten().map(|v| v.c[3] as u32).sum::<u32>();
+        assert!(lit > dark, "chiroq yoritmadi: {lit} <= {dark}");
     }
 
     #[test]

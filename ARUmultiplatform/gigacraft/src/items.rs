@@ -16,6 +16,10 @@ pub const SEEDS: Item = 71;
 pub const RAW_MEAT: Item = 72;
 pub const COOKED_MEAT: Item = 73;
 pub const APPLE: Item = 74;
+pub const REDSTONE: Item = 75;
+pub const POTION_HEAL: Item = 76;
+pub const POTION_SPEED: Item = 77;
+pub const POTION_JUMP: Item = 78;
 /// Asboblar: TOOL0 + tur*4 + daraja (tur: 0 kurak, 1 bolta, 2 belkurak, 3 qilich; daraja: 0 yog'och .. 3 olmos).
 pub const TOOL0: Item = 80;
 pub const TOOL_END: Item = 96;
@@ -66,6 +70,10 @@ pub fn is_block(i: Item) -> bool {
     i > 0 && i < COUNT as Item
 }
 
+pub fn is_potion(i: Item) -> bool {
+    matches!(i, POTION_HEAL | POTION_SPEED | POTION_JUMP)
+}
+
 pub fn is_food(i: Item) -> bool {
     matches!(i, BREAD | COOKED_MEAT | APPLE | RAW_MEAT)
 }
@@ -96,6 +104,10 @@ pub fn name(i: Item) -> &'static str {
         RAW_MEAT => "XOM GO'SHT",
         COOKED_MEAT => "PISHGAN GO'SHT",
         APPLE => "OLMA",
+        REDSTONE => "REDSTONE CHANG",
+        POTION_HEAL => "SHIFO IKSIRI",
+        POTION_SPEED => "TEZLIK IKSIRI",
+        POTION_JUMP => "SAKRASH IKSIRI",
         _ if is_tool(i) => {
             const N: [[&str; 4]; 4] = [
                 ["YOG'OCH KURAK", "TOSH KURAK", "TEMIR KURAK", "ALMOS KURAK"],
@@ -126,6 +138,10 @@ pub fn color(i: Item) -> [f32; 3] {
         RAW_MEAT => [0.90, 0.40, 0.45],
         COOKED_MEAT => [0.62, 0.34, 0.20],
         APPLE => [0.90, 0.15, 0.20],
+        REDSTONE => [0.90, 0.12, 0.12],
+        POTION_HEAL => [0.95, 0.25, 0.45],
+        POTION_SPEED => [0.30, 0.75, 0.95],
+        POTION_JUMP => [0.55, 0.95, 0.35],
         _ if is_tool(i) => match (i - TOOL0) % 4 {
             0 => [0.72, 0.52, 0.34],
             1 => [0.60, 0.60, 0.66],
@@ -134,6 +150,36 @@ pub fn color(i: Item) -> [f32; 3] {
         },
         _ => [1.0, 0.0, 1.0],
     }
+}
+
+/// Sehrli asbob uchun tezlik (samaradorlik har darajada +50%).
+pub fn speed_st(st: &Stack, b: u8) -> f32 {
+    let base = speed(st.item, b);
+    if st.ench > 0 && base > 1.0 {
+        base * (1.0 + 0.5 * st.ench as f32)
+    } else {
+        base
+    }
+}
+
+/// Qilichning zarbasi (o'tkirlik har darajada +1.5).
+pub fn damage(st: &Stack) -> f32 {
+    let base = if tool_kind(st.item) == Tool::Sword {
+        3.0 + tool_tier(st.item) as f32
+    } else if is_tool(st.item) {
+        2.0
+    } else {
+        1.0
+    };
+    base + if tool_kind(st.item) == Tool::Sword { 1.5 * st.ench as f32 } else { 0.0 }
+}
+
+/// Sehrlash narxi (oltin quyma) va keyingi daraja mumkinmi.
+pub fn enchant_cost(st: &Stack) -> Option<u32> {
+    if !is_tool(st.item) || st.ench >= 3 {
+        return None;
+    }
+    Some(2 * (st.ench as u32 + 1))
 }
 
 /// Asbob bilan blokni buzish tezligi ko'paytiruvchisi.
@@ -182,6 +228,11 @@ pub fn drop(held: Item, b: u8, roll: f32) -> Option<(Item, u8)> {
         GLASS => return None,
         b if b == CROP3 => (WHEAT, 1 + (roll * 2.0) as u8),
         b if is_crop(b) => (SEEDS, 1),
+        REDSTONE_ORE => (REDSTONE, 2 + (roll * 3.0) as u8),
+        WIRE_OFF | WIRE_ON => (REDSTONE, 1),
+        LEVER_ON => (LEVER_OFF as Item, 1),
+        RLAMP_ON => (RLAMP_OFF as Item, 1),
+        LOOTCHEST => (CHEST as Item, 1),
         WATER | AIR => return None,
         _ => (b as Item, 1),
     })
@@ -193,13 +244,15 @@ pub struct Stack {
     pub n: u8,
     /// Asbobning ishlatilgan marta soni.
     pub used: u16,
+    /// Sehr darajasi (0..3).
+    pub ench: u8,
 }
 
 impl Stack {
-    pub const EMPTY: Stack = Stack { item: NONE, n: 0, used: 0 };
+    pub const EMPTY: Stack = Stack { item: NONE, n: 0, used: 0, ench: 0 };
 
     pub fn new(item: Item, n: u8) -> Stack {
-        Stack { item, n, used: 0 }
+        Stack { item, n, used: 0, ench: 0 }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -363,6 +416,12 @@ pub fn recipes() -> Vec<Recipe> {
         r!(3, 1, [WHEAT, WHEAT, WHEAT], BREAD, 1),
         r!(2, 2, [C, C, C, C], BRICK as Item, 4),
         r!(2, 2, [SAND as Item, SAND as Item, SAND as Item, SAND as Item], G, 4),
+        r!(3, 3, [__, D, __, D, BRICK as Item, D, BRICK as Item, BRICK as Item, BRICK as Item], ENCHANT as Item, 1),
+        r!(1, 2, [S, C], LEVER_OFF as Item, 1),
+        r!(3, 3, [__, REDSTONE, __, REDSTONE, G, REDSTONE, __, REDSTONE, __], RLAMP_OFF as Item, 1),
+        r!(1, 2, [APPLE, G], POTION_HEAL, 1),
+        r!(1, 2, [WHEAT, G], POTION_SPEED, 1),
+        r!(1, 2, [GOLD_INGOT, G], POTION_JUMP, 1),
     ];
     // Eslatma: bu yerda bloklar `as Item`; asboblar:
     for (m, t) in [(P, 0u16), (C, 1), (I, 2), (D, 3)] {

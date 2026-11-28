@@ -12,6 +12,7 @@ use crate::sky::{self, DAY_SECS};
 use crate::ui::*;
 use crate::vitals::Vitals;
 use crate::world::World;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Blok qo'yish/buzish masofasi (blok): 28 blok = 7 m.
@@ -82,6 +83,14 @@ pub struct Game {
     spawn_t: f32,
     cursor_pos: (f32, f32),
     recipes: Vec<items::Recipe>,
+    /// Atrofdagi blok ustunlari tayyormi (yo'q bo'lsa yurish to'xtaydi: o'yinchi hali chizilmagan yerga kirib ketmasin).
+    pub ground_ready: bool,
+    wait_t: f32,
+    pub chests: HashMap<ChestKey, [Stack; 27]>,
+    chest_cell: Option<Cell>,
+    speed_t: f32,
+    jump_t: f32,
+    pub dim: u8,
 }
 
 /// O'yin sessiyalari orasida saqlanadigan holat.
@@ -99,6 +108,16 @@ pub struct Saved {
     pub health: f32,
     pub hunger: f32,
     pub inv: Inventory,
+    pub chests: Vec<(ChestKey, [Stack; 27])>,
+    /// O'lcham: 0 — Yer, 1 — Oy.
+    pub dim: u8,
+}
+
+/// Sandiq kaliti: (yuz, u, v, r).
+pub type ChestKey = (u8, i64, i64, i64);
+
+pub fn chest_key(c: &Cell) -> ChestKey {
+    (c.f, c.u, c.v, c.r)
 }
 
 /// Boshlanish joyi: Toshkent (41.3° sh.k., 69.28° sh.u.) yoki eng yaqin quruqlik.
@@ -176,6 +195,13 @@ impl Game {
             spawn_t: 1.0,
             cursor_pos: (0.0, 0.0),
             recipes: items::recipes(),
+            ground_ready: true,
+            wait_t: 0.0,
+            chests: HashMap::new(),
+            chest_cell: None,
+            speed_t: 0.0,
+            jump_t: 0.0,
+            dim: 0,
         };
         if let Some(s) = saved {
             g.player.pos = s.pos;
@@ -193,6 +219,8 @@ impl Game {
             g.prev_pos = g.player.pos;
             g.step_pos = g.player.pos;
             g.inv = s.inv;
+            g.chests = s.chests.into_iter().collect();
+            g.dim = s.dim;
             if g.survival {
                 g.player.flying = false;
             }
@@ -248,7 +276,15 @@ impl Game {
                 match l.craft_at(x, y, self.station) {
                     Some(CraftHit::Close) => self.close_craft(),
                     Some(CraftHit::Inv(i)) => items::click_slot(&mut self.inv.s[i], &mut self.cursor),
-                    Some(CraftHit::Grid(i)) => items::click_slot(&mut self.grid[i], &mut self.cursor),
+                    Some(CraftHit::Grid(i)) => {
+                        if self.station == Station::Chest {
+                            if let Some(ch) = self.chest_cell.and_then(|c| self.chests.get_mut(&chest_key(&c))) {
+                                items::click_slot(&mut ch[i], &mut self.cursor);
+                            }
+                        } else {
+                            items::click_slot(&mut self.grid[i], &mut self.cursor);
+                        }
+                    }
                     Some(CraftHit::Result) => self.take_result(),
                     None => {
                         if self.cursor.is_empty() && (x < px || x > px + pw || y < py || y > py + ph) {
@@ -378,6 +414,7 @@ impl Game {
             self.sfx.push(Sfx::Break);
             let d = self.world.set_block(&h.cell, AIR);
             self.dirty.extend(d);
+            self.after_edit(&h.cell, b, AIR);
             self.aim();
         }
     }
@@ -450,6 +487,14 @@ impl Game {
                     _ => Stack::EMPTY,
                 }
             }
+            Station::Enchant => {
+                let t = self.grid[0];
+                match items::enchant_cost(&t) {
+                    Some(cost) if !t.is_empty() && self.inv.count(items::GOLD_INGOT) >= cost => Stack { ench: t.ench + 1, ..t },
+                    _ => Stack::EMPTY,
+                }
+            }
+            Station::Chest => Stack::EMPTY,
             st => {
                 let g = st.grid();
                 let arr: Vec<Item> = (0..g * g).map(|k| if self.grid[k].is_empty() { items::NONE } else { self.grid[k].item }).collect();
@@ -467,6 +512,16 @@ impl Game {
             return;
         }
         if !self.cursor.is_empty() && (self.cursor.item != r.item || self.cursor.n as u32 + r.n as u32 > self.cursor.max() as u32) {
+            return;
+        }
+        if self.station == Station::Enchant {
+            let cost = items::enchant_cost(&self.grid[0]).unwrap_or(0);
+            for _ in 0..cost {
+                self.inv.take_one(items::GOLD_INGOT);
+            }
+            self.grid[0] = Stack::EMPTY;
+            self.cursor = r;
+            self.sfx.push(Sfx::Craft);
             return;
         }
         if self.station == Station::Furnace {
@@ -499,35 +554,66 @@ impl Game {
         self.sfx.push(Sfx::Craft);
     }
 
-    /// Sandiq: ichidagi o'lja inventarga tushadi, sandiq yo'qoladi.
+    /// Sandiqni ochadi. Hali ochilmagan o'ljali sandiq birinchi marta ochilganda oddiy sandiqqa aylanadi va o'lja bilan to'ladi.
     fn open_chest(&mut self, cell: Cell) {
-        let h = crate::noise::hash3(77, cell.u, cell.r, cell.v);
-        let mut loot: Vec<(Item, u32)> = vec![
-            (items::COAL, 3 + h % 6),
-            (items::IRON_INGOT, 1 + (h >> 4) % 4),
-            (items::BREAD, 1 + (h >> 8) % 3),
-            (items::SEEDS, 2 + (h >> 10) % 5),
-        ];
-        if (h >> 13) % 4 == 0 {
-            loot.push((items::GOLD_INGOT, 1 + (h >> 15) % 3));
+        let key = chest_key(&cell);
+        if self.world.block(&cell) == LOOTCHEST {
+            let h = crate::noise::hash3(77, cell.u, cell.r, cell.v);
+            let mut loot: Vec<Stack> = vec![
+                Stack::new(items::COAL, (3 + h % 6) as u8),
+                Stack::new(items::IRON_INGOT, (1 + (h >> 4) % 4) as u8),
+                Stack::new(items::BREAD, (1 + (h >> 8) % 3) as u8),
+                Stack::new(items::SEEDS, (2 + (h >> 10) % 5) as u8),
+                Stack::new(items::REDSTONE, (2 + (h >> 12) % 6) as u8),
+            ];
+            if (h >> 13) % 4 == 0 {
+                loot.push(Stack::new(items::GOLD_INGOT, (1 + (h >> 15) % 3) as u8));
+            }
+            if (h >> 17) % 8 == 0 {
+                loot.push(Stack::new(items::DIAMOND, (1 + (h >> 20) % 2) as u8));
+            }
+            if (h >> 22) % 5 == 0 {
+                loot.push(Stack::new(items::tool(0, 0), 1));
+            }
+            let mut slots = [Stack::EMPTY; 27];
+            for (k, st) in loot.into_iter().enumerate() {
+                let at = ((h >> (k % 6)) as usize + k * 5) % 27;
+                let mut i = at;
+                while !slots[i].is_empty() {
+                    i = (i + 1) % 27;
+                }
+                slots[i] = st;
+            }
+            self.chests.insert(key, slots);
+            let d = self.world.set_block(&cell, CHEST);
+            self.dirty.extend(d);
         }
-        if (h >> 17) % 8 == 0 {
-            loot.push((items::DIAMOND, 1 + (h >> 20) % 2));
-        }
-        if (h >> 22) % 5 == 0 {
-            loot.push((items::tool(0, 0), 1));
-        }
-        for (it, n) in loot {
-            if items::is_tool(it) {
-                self.give_stack(Stack::new(it, 1));
-            } else {
-                self.inv.add(it, n);
+        self.chests.entry(key).or_insert([Stack::EMPTY; 27]);
+        self.chest_cell = Some(cell);
+        self.open_craft(Station::Chest);
+    }
+
+    /// Sandiq buzilganda ichidagi buyumlar inventarga tushadi.
+    fn spill_chest(&mut self, cell: &Cell) {
+        if let Some(arr) = self.chests.remove(&chest_key(cell)) {
+            if self.survival {
+                for st in arr {
+                    self.give_stack(st);
+                }
             }
         }
-        let d = self.world.set_block(&cell, AIR);
-        self.dirty.extend(d);
-        self.sfx.push(Sfx::Pickup);
-        self.say("SANDIQ OCHILDI");
+    }
+
+    /// Buzish/qo'yishdan keyingi qo'shimcha ishlar: sandiq, redstone.
+    fn after_edit(&mut self, cell: &Cell, old: u8, new: u8) {
+        if matches!(old, CHEST | LOOTCHEST) && !matches!(new, CHEST | LOOTCHEST) {
+            self.spill_chest(cell);
+        }
+        if crate::redstone::related(old) || crate::redstone::related(new) {
+            let ch = crate::redstone::settle(&self.world, cell);
+            let d = crate::redstone::apply(&self.world, &ch);
+            self.dirty.extend(d);
+        }
     }
 
     /// Nishondagi jonzot (blokdan yaqin bo'lsa).
@@ -548,13 +634,7 @@ impl Game {
 
     fn hit_mob(&mut self, i: usize) {
         let held = self.held_stack();
-        let dmg = if items::tool_kind(held.item) == Tool::Sword {
-            3.0 + items::tool_tier(held.item) as f32
-        } else if items::is_tool(held.item) {
-            2.0
-        } else {
-            1.0
-        };
+        let dmg = items::damage(&held);
         if self.survival && items::is_tool(held.item) && self.inv.wear(self.sel) {
             self.say("ASBOB SINDI");
         }
@@ -607,13 +687,47 @@ impl Game {
             }
             return;
         }
+        if self.survival && items::is_potion(held.item) {
+            match held.item {
+                items::POTION_HEAL => self.vitals.health = (self.vitals.health + 10.0).min(crate::vitals::MAX_HP),
+                items::POTION_SPEED => self.speed_t = 45.0,
+                _ => self.jump_t = 45.0,
+            }
+            self.inv.use_one(self.sel);
+            self.sfx.push(Sfx::Eat);
+            return;
+        }
         self.aim();
+        // Hayvonni bug'doy bilan boqish: ikkita tayyor hayvon bola tug'adi
+        if held.item == items::WHEAT {
+            if let Some(i) = self.mob_hit() {
+                let m = &mut self.mobs[i];
+                if !entity::hostile(m.kind) && m.love <= 0.0 && m.baby <= 0.0 {
+                    m.love = 20.0;
+                    let at = m.center();
+                    entity::burst(&mut self.parts, at, [1.0, 0.45, 0.65], 8, &mut self.rng);
+                    if self.survival {
+                        self.inv.use_one(self.sel);
+                    }
+                    self.sfx.push(Sfx::Eat);
+                }
+            }
+            return;
+        }
         let Some(h) = self.target else { return };
-        if self.survival {
+        if self.survival || true {
             match self.world.block(&h.cell) {
-                CRAFTING => return self.open_craft(Station::Table),
-                FURNACE => return self.open_craft(Station::Furnace),
-                CHEST => return self.open_chest(h.cell),
+                CRAFTING if self.survival => return self.open_craft(Station::Table),
+                FURNACE if self.survival => return self.open_craft(Station::Furnace),
+                ENCHANT if self.survival => return self.open_craft(Station::Enchant),
+                CHEST | LOOTCHEST if self.survival => return self.open_chest(h.cell),
+                LEVER_OFF | LEVER_ON => {
+                    let d = crate::redstone::toggle_lever(&self.world, &h.cell);
+                    self.dirty.extend(d);
+                    self.sfx.push(Sfx::Place);
+                    self.aim();
+                    return;
+                }
                 _ => {}
             }
         }
@@ -630,10 +744,10 @@ impl Game {
             }
             return;
         }
-        if !items::is_block(held.item) {
+        if !items::is_block(held.item) && held.item != items::REDSTONE {
             return;
         }
-        let b = held.item as u8;
+        let b = if held.item == items::REDSTONE { WIRE_OFF } else { held.item as u8 };
         // O'yinchi ichiga blok qo'ymaymiz
         let (right, up, fwd) = self.player.camera_basis_flat();
         let rel = d_sub(center(&h.place), self.player.pos);
@@ -644,6 +758,7 @@ impl Game {
         }
         let d = self.world.set_block(&h.place, b);
         self.dirty.extend(d);
+        self.after_edit(&h.place, AIR, b);
         if self.survival {
             self.inv.use_one(self.sel);
         }
@@ -683,11 +798,22 @@ impl Game {
                 }
             }
         }
-        let inp = Input {
+        let mut inp = Input {
             mv,
             jump: self.held(Btn::Jump),
             down: self.held(Btn::Down),
         };
+        // Yer hali yuklanmagan bo'lsa joyida turamiz (5 soniyadan ortiq kutmaymiz)
+        if self.ground_ready || self.player.flying {
+            self.wait_t = 0.0;
+        } else if self.wait_t < 5.0 {
+            self.wait_t += dt;
+            inp.mv = [0.0, 0.0];
+            inp.jump = false;
+            if self.toast.is_none() {
+                self.say("YER YUKLANMOQDA");
+            }
+        }
         let w = self.world.clone();
         if self.survival {
             self.player.flying = false;
@@ -749,9 +875,9 @@ impl Game {
 
     /// Blokni buzish uchun kerak bo'ladigan vaqt (soniya): asbob tezlatadi, mos asbobsiz sekinroq.
     fn break_need(&self, b: u8) -> f32 {
-        let held = self.inv.s[self.sel].item;
-        let mut need = hardness(b) / items::speed(held, b);
-        if !items::can_harvest(held, b) {
+        let held = self.inv.s[self.sel];
+        let mut need = hardness(b) / items::speed_st(&held, b);
+        if !items::can_harvest(held.item, b) {
             need *= 3.3;
         }
         need
@@ -813,6 +939,7 @@ impl Game {
         self.crops.retain(|(c, _)| *c != cell);
         let d = self.world.set_block(&cell, AIR);
         self.dirty.extend(d);
+        self.after_edit(&cell, b, AIR);
         self.aim();
     }
 
@@ -865,6 +992,34 @@ impl Game {
             }
         }
         entity::step_particles(&mut self.parts, dt);
+        self.speed_t = (self.speed_t - dt).max(0.0);
+        self.jump_t = (self.jump_t - dt).max(0.0);
+        self.player.speed_mult = if self.speed_t > 0.0 { 1.4 } else { 1.0 };
+        self.player.jump_mult = if self.jump_t > 0.0 { 1.35 } else { 1.0 };
+        // Ko'payish: yaqin turgan ikkita tayyor hayvon
+        let n = self.mobs.len();
+        'pair: for i in 0..n {
+            if self.mobs[i].love <= 0.0 {
+                continue;
+            }
+            for j in (i + 1)..n {
+                if self.mobs[j].love > 0.0 && self.mobs[j].kind == self.mobs[i].kind && d_len(d_sub(self.mobs[i].pos, self.mobs[j].pos)) < 14.0 {
+                    let (a, b) = (self.mobs[i].pos, self.mobs[j].pos);
+                    let mid = d_mul(d_add(a, b), 0.5);
+                    let kind = self.mobs[i].kind;
+                    let fwd = self.mobs[i].fwd;
+                    self.mobs[i].love = 0.0;
+                    self.mobs[j].love = 0.0;
+                    let mut baby = Mob::new(kind, mid, fwd);
+                    baby.baby = 90.0;
+                    baby.hp = entity::max_hp(kind) * 0.5;
+                    self.mobs.push(baby);
+                    entity::burst(&mut self.parts, mid, [1.0, 0.4, 0.6], 14, &mut self.rng);
+                    self.sfx.push(Sfx::Pickup);
+                    break 'pair;
+                }
+            }
+        }
         // Ekinlar o'sadi: har 25 soniyada bir bosqich
         let mut upd: Vec<(Cell, u8)> = Vec::new();
         for (c, age) in self.crops.iter_mut() {
@@ -968,12 +1123,31 @@ impl Game {
             slots: self.ui_slots(),
             held: self.held_stack().item,
             craft: if self.mode == Mode::Craft {
-                Some(CraftView { station: self.station, inv: self.inv.s, grid: self.grid, result: self.craft_result(), cursor: self.cursor, fuel: self.fuel_left })
+                Some(CraftView {
+                    station: self.station,
+                    inv: self.inv.s,
+                    grid: self.grid,
+                    chest: self.chest_cell.and_then(|c| self.chests.get(&chest_key(&c)).copied()).unwrap_or([Stack::EMPTY; 27]),
+                    result: self.craft_result(),
+                    cursor: self.cursor,
+                    fuel: self.fuel_left,
+                    cost: if self.station == Station::Enchant { items::enchant_cost(&self.grid[0]).unwrap_or(0) } else { 0 },
+                })
             } else {
                 None
             },
             cursor_pos: self.cursor_pos,
             rain: self.rain,
+            status: {
+                let mut v = Vec::new();
+                if self.speed_t > 0.0 {
+                    v.push(format!("TEZLIK {:.0}", self.speed_t));
+                }
+                if self.jump_t > 0.0 {
+                    v.push(format!("SAKRASH {:.0}", self.jump_t));
+                }
+                v.join("  ")
+            },
             sel: self.sel,
             flying: self.player.flying,
             fly_level: self.player.fly_level,
@@ -1017,13 +1191,36 @@ impl Game {
             health: self.vitals.health,
             hunger: self.vitals.hunger,
             inv: self.inv.clone(),
+            chests: self.chests.iter().map(|(k, v)| (*k, *v)).collect(),
+            dim: self.dim,
         }
     }
 }
 
-/// Saqlash fayli: sarlavha + o'yinchi holati + tahrirlar.
+fn put_stack(o: &mut Vec<u8>, st: &Stack) {
+    o.extend_from_slice(&st.item.to_le_bytes());
+    o.push(st.n);
+    o.extend_from_slice(&st.used.to_le_bytes());
+    o.push(st.ench);
+}
+
+fn get_stack(d: &[u8], o: &mut usize, ver: u8) -> Option<Stack> {
+    let len = if ver >= 6 { 6 } else { 5 };
+    let b = d.get(*o..*o + len)?;
+    *o += len;
+    let item = u16::from_le_bytes([b[0], b[1]]);
+    let (n, used) = (b[2], u16::from_le_bytes([b[3], b[4]]));
+    let ench = if ver >= 6 { b[5].min(3) } else { 0 };
+    if item != 0 && n > 0 && (item as usize) < 256 && n <= items::MAX_STACK {
+        Some(Stack { item, n, used, ench })
+    } else {
+        Some(Stack::EMPTY)
+    }
+}
+
+/// Saqlash fayli: sarlavha + o'yinchi holati + inventar + sandiqlar + tahrirlar.
 pub fn encode_save(s: &Saved, edits: &[u8]) -> Vec<u8> {
-    let mut o = b"GCS5".to_vec();
+    let mut o = b"GCS6".to_vec();
     for v in s.pos.iter().chain(s.heading.iter()) {
         o.extend_from_slice(&v.to_le_bytes());
     }
@@ -1037,10 +1234,19 @@ pub fn encode_save(s: &Saved, edits: &[u8]) -> Vec<u8> {
     o.push(s.survival as u8);
     o.extend_from_slice(&s.health.to_le_bytes());
     o.extend_from_slice(&s.hunger.to_le_bytes());
+    o.push(s.dim);
     for st in &s.inv.s {
-        o.extend_from_slice(&st.item.to_le_bytes());
-        o.push(st.n);
-        o.extend_from_slice(&st.used.to_le_bytes());
+        put_stack(&mut o, st);
+    }
+    o.extend_from_slice(&(s.chests.len() as u32).to_le_bytes());
+    for ((f, u, v, r), arr) in &s.chests {
+        o.push(*f);
+        for x in [u, v, r] {
+            o.extend_from_slice(&x.to_le_bytes());
+        }
+        for st in arr {
+            put_stack(&mut o, st);
+        }
     }
     o.extend_from_slice(&(edits.len() as u32).to_le_bytes());
     o.extend_from_slice(edits);
@@ -1048,10 +1254,15 @@ pub fn encode_save(s: &Saved, edits: &[u8]) -> Vec<u8> {
 }
 
 pub fn decode_save(d: &[u8]) -> Option<(Saved, &[u8])> {
-    if d.len() < 4 + 48 + 4 + 1 + 9 + 1 + 4 + 1 + 4 + 1 + 8 + 4 || (&d[0..4] != b"GCS5" && &d[0..4] != b"GCS4") {
+    if d.len() < 4 + 48 + 4 + 1 + 9 + 1 + 4 + 1 + 4 + 1 + 8 + 4 {
         return None;
     }
-    let v5 = &d[0..4] == b"GCS5";
+    let ver = match &d[0..4] {
+        b"GCS6" => 6,
+        b"GCS5" => 5,
+        b"GCS4" => 4,
+        _ => return None,
+    };
     let f64_at = |o: usize| f64::from_le_bytes(d[o..o + 8].try_into().unwrap());
     let f32_at = |o: usize| f32::from_le_bytes(d[o..o + 4].try_into().unwrap());
     let mut o = 4;
@@ -1077,16 +1288,34 @@ pub fn decode_save(d: &[u8]) -> Option<(Saved, &[u8])> {
     o += 1;
     let (health, hunger) = (f32_at(o), f32_at(o + 4));
     o += 8;
+    let mut dim = 0u8;
+    if ver >= 6 {
+        dim = (*d.get(o)?).min(1);
+        o += 1;
+    }
     let mut inv = Inventory::default();
-    if v5 {
+    let mut chests = Vec::new();
+    if ver >= 5 {
         for st in inv.s.iter_mut() {
-            let b = d.get(o..o + 5)?;
-            let item = u16::from_le_bytes([b[0], b[1]]);
-            let (n, used) = (b[2], u16::from_le_bytes([b[3], b[4]]));
-            o += 5;
-            if item != 0 && n > 0 && (item as usize) < 256 && n <= items::MAX_STACK {
-                *st = Stack { item, n, used };
+            *st = get_stack(d, &mut o, ver)?;
+        }
+    }
+    if ver >= 6 {
+        let n = u32::from_le_bytes(d.get(o..o + 4)?.try_into().ok()?) as usize;
+        o += 4;
+        if n > 100_000 {
+            return None;
+        }
+        for _ in 0..n {
+            let f = *d.get(o)?;
+            let rd = |k: usize| -> Option<i64> { Some(i64::from_le_bytes(d.get(o + 1 + k * 8..o + 9 + k * 8)?.try_into().ok()?)) };
+            let key = (f, rd(0)?, rd(1)?, rd(2)?);
+            o += 25;
+            let mut arr = [Stack::EMPTY; 27];
+            for st in arr.iter_mut() {
+                *st = get_stack(d, &mut o, ver)?;
             }
+            chests.push((key, arr));
         }
     }
     if d.len() < o + 4 {
@@ -1101,7 +1330,7 @@ pub fn decode_save(d: &[u8]) -> Option<(Saved, &[u8])> {
     if d_len(pos) < 1000.0 || hotbar.iter().any(|&b| b >= COUNT) {
         return None;
     }
-    Some((Saved { pos, heading, pitch, flying, hotbar, sel, time, quality, sens, survival, health, hunger, inv }, edits))
+    Some((Saved { pos, heading, pitch, flying, hotbar, sel, time, quality, sens, survival, health, hunger, inv, chests, dim }, edits))
 }
 
 #[cfg(test)]
@@ -1438,7 +1667,7 @@ mod tests {
     }
 
     #[test]
-    fn ovqat_va_sandiq() {
+    fn ovqat_va_sandiq_ombori() {
         let mut g = game_on_floor();
         g.survival = true;
         g.vitals.hunger = 5.0;
@@ -1447,16 +1676,125 @@ mod tests {
         g.place_block();
         assert_eq!(g.inv.s[0].n, 1);
         assert!(g.vitals.hunger >= 9.9);
-        // sandiq
+        // o'ljali sandiq: birinchi ochilganda oddiy sandiqqa aylanadi, ichida o'lja
         g.update(0.016, true);
         let t = g.target.expect("pol");
-        g.world.set_block(&t.cell, CHEST);
+        g.world.set_block(&t.cell, LOOTCHEST);
         g.update(0.016, true);
         g.inv.s[0] = Stack::new(STONE as Item, 5);
         g.place_block();
-        assert_eq!(g.world.block(&t.cell), AIR, "sandiq ochilgach yo'qoladi");
-        assert!(g.inv.count(items::COAL) >= 3 && g.inv.count(items::IRON_INGOT) >= 1);
+        assert_eq!(g.mode, Mode::Craft);
+        assert_eq!(g.station, Station::Chest);
+        assert_eq!(g.world.block(&t.cell), CHEST);
+        let arr = g.chests[&chest_key(&t.cell)];
+        assert!(arr.iter().any(|s| s.item == items::COAL) && arr.iter().any(|s| s.item == items::IRON_INGOT));
         assert_eq!(g.inv.s[0].n, 5, "sandiq ochish blok sarflamaydi");
+        // sandiqdan buyumni inventarga ko'chiramiz
+        let l = Layout::new(2400.0, 1080.0);
+        let i = arr.iter().position(|s| s.item == items::COAL).unwrap();
+        let (x, y) = l.craft_grid_slot(Station::Chest, i);
+        g.touch_down(1, x + 5.0, y + 5.0);
+        assert_eq!(g.cursor.item, items::COAL);
+        let (x, y) = l.craft_inv_slot(20);
+        g.touch_down(1, x + 5.0, y + 5.0);
+        assert!(g.cursor.is_empty());
+        assert_eq!(g.inv.s[20].item, items::COAL);
+        // saqlanadi va qayta o'qiladi
+        let bytes = encode_save(&g.saved(), &[]);
+        let (s2, _) = decode_save(&bytes).unwrap();
+        assert_eq!(s2.chests.len(), 1);
+        let g2 = s2.chests[0].1.iter().filter(|s| s.item == items::COAL).count();
+        assert_eq!(g2, 0, "ko'mir olib qo'yilgan");
+        // buzilganda ichidagisi inventarga tushadi
+        g.close_craft();
+        let before = g.inv.count(items::IRON_INGOT);
+        g.finish_break(t.cell, CHEST);
+        assert!(g.inv.count(items::IRON_INGOT) > before);
+        assert!(g.chests.is_empty());
+    }
+
+    #[test]
+    fn sehr_va_iksir() {
+        let mut g = game_on_floor();
+        g.survival = true;
+        g.inv.add(items::GOLD_INGOT, 10);
+        g.open_craft(Station::Enchant);
+        g.grid[0] = Stack::new(items::tool(3, 3), 1);
+        let r = g.craft_result();
+        assert_eq!(r.ench, 1);
+        g.take_result();
+        assert_eq!(g.cursor.ench, 1);
+        assert_eq!(g.inv.count(items::GOLD_INGOT), 8, "1-daraja narxi 2 oltin");
+        // o'tkirlik zarbani oshiradi
+        assert!(items::damage(&g.cursor) > items::damage(&Stack::new(items::tool(3, 3), 1)));
+        // yetarli oltin bo'lmasa sehrlanmaydi
+        g.inv = Inventory::default();
+        g.grid[0] = g.cursor;
+        g.cursor = Stack::EMPTY;
+        assert_eq!(g.craft_result(), Stack::EMPTY);
+        g.close_craft();
+        // iksirlar
+        g.vitals.health = 4.0;
+        g.inv.s[1] = Stack::new(items::POTION_HEAL, 1);
+        g.inv.s[2] = Stack::new(items::POTION_SPEED, 1);
+        g.sel = 1;
+        g.place_block();
+        assert!(g.vitals.health >= 14.0);
+        g.sel = 2;
+        g.place_block();
+        g.update(0.016, true);
+        assert!(g.player.speed_mult > 1.3 && g.ui_state().status.contains("TEZLIK"));
+    }
+
+    #[test]
+    fn redstone_tutqich_o_yinda() {
+        let mut g = game_on_floor();
+        g.survival = false;
+        g.update(0.016, true);
+        let t = g.target.expect("pol");
+        let top = Cell { r: t.cell.r + 1, ..t.cell };
+        let (lv, w1, w2, lamp) = (top, Cell { u: top.u + 1, ..top }, Cell { u: top.u + 2, ..top }, Cell { u: top.u + 3, ..top });
+        g.world.set_block(&lv, LEVER_OFF);
+        for c in [w1, w2] {
+            g.world.set_block(&c, WIRE_OFF);
+        }
+        g.world.set_block(&lamp, RLAMP_OFF);
+        for c in [w1, w2, lamp] {
+            g.after_edit(&c, AIR, g.world.block(&c));
+        }
+        assert_eq!(g.world.block(&lamp), RLAMP_OFF);
+        let d = crate::redstone::toggle_lever(&g.world, &lv);
+        g.dirty.extend(d);
+        assert_eq!(g.world.block(&lamp), RLAMP_ON);
+        assert_eq!(g.world.block(&w2), WIRE_ON);
+        assert!(!g.dirty.is_empty());
+    }
+
+    #[test]
+    fn hayvon_kopayadi() {
+        let mut g = game_on_floor();
+        g.survival = true;
+        g.update(0.016, true);
+        let fwd = g.player.camera_basis_flat().2;
+        for k in 0..2 {
+            let pos = d_add(g.player.pos, d_add(d_mul(fwd, 8.0), d_mul(g.player.camera_basis_flat().0, k as f64 * 3.0)));
+            let mut m = Mob::new(entity::COW, pos, fwd);
+            m.t = 100.0;
+            g.mobs.push(m);
+        }
+        g.inv.s[0] = Stack::new(items::WHEAT, 5);
+        g.sel = 0;
+        // ikkalasini ham boqamiz (to'g'ridan-to'g'ri holat orqali)
+        for m in g.mobs.iter_mut() {
+            m.love = 20.0;
+        }
+        for _ in 0..4 {
+            g.update(0.05, true);
+        }
+        assert_eq!(g.mobs.len(), 3, "bola tug'ilmadi");
+        let baby = g.mobs.iter().find(|m| m.baby > 0.0).expect("bola");
+        assert!(baby.scale() < 1.0 && entity::size(entity::COW).1 * baby.scale() < 5.0);
+        assert!(g.mobs.iter().filter(|m| m.love > 0.0).count() == 0);
     }
 
     #[test]
@@ -1512,16 +1850,19 @@ mod tests {
         let mut g = game_on_floor();
         g.survival = true;
         g.inv.add(items::DIAMOND, 3);
-        g.inv.s[4] = Stack { item: items::tool(0, 2), n: 1, used: 17 };
+        g.inv.s[4] = Stack { item: items::tool(0, 2), n: 1, used: 17, ench: 2 };
         let bytes = encode_save(&g.saved(), &[]);
         let (s2, _) = decode_save(&bytes).expect("o'qish");
         assert_eq!(s2.inv, g.inv);
         assert_eq!(s2.inv.s[4].used, 17);
+        assert_eq!(s2.inv.s[4].ench, 2);
         // eski GCS4 formati ham o'qiladi
         let mut old = bytes.clone();
         old[3] = b'4';
         let n = 4 + 48 + 4 + 1 + 9 + 1 + 4 + 1 + 4 + 1 + 8;
-        let tail = old.split_off(n + items::SLOTS * 5);
+        // GCS6 da: dim(1) + inventar(36*6) + sandiq soni(4) + sandiqlar; eski formatda bular yo'q
+        let chest_bytes = g.chests.len() * (25 + 27 * 6);
+        let tail = old.split_off(n + 1 + items::SLOTS * 6 + 4 + chest_bytes);
         old.truncate(n);
         old.extend_from_slice(&tail);
         let (s3, _) = decode_save(&old).expect("eski format");

@@ -172,6 +172,23 @@ impl App {
         self.scene.len()
     }
 
+    /// O'yinchi turgan va qo'shni blok ustunlari chizilganmi.
+    fn ground_loaded(&self) -> bool {
+        let c = cell_at(self.game.player.pos);
+        let (cu, cv) = ((c.u / 16) as i32, (c.v / 16) as i32);
+        let max = (N / 16) as i32;
+        for (du, dv) in [(0, 0), (1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (u, v) = (cu + du, cv + dv);
+            if u < 0 || v < 0 || u >= max || v >= max {
+                continue;
+            }
+            if !self.scene.contains_key(&Key::Col(c.f, u, v)) {
+                return false;
+            }
+        }
+        true
+    }
+
     /// Ufqqacha masofa (blok): tuman va uzoq kesim tekisligi shunga bog'liq.
     pub fn horizon(&self) -> f64 {
         let alt = self.game.player.altitude().max(0.0) + EYE_PAD;
@@ -334,6 +351,7 @@ impl App {
             self.game.loading = if p > 0.95 || self.started.elapsed().as_secs() > 25 { 1.0 } else { p.min(0.99) };
         }
         let ready = self.game.loading >= 1.0;
+        self.game.ground_ready = self.ground_loaded();
         self.game.update(dt, ready);
         for s in self.game.sfx.drain(..) {
             crate::audio::play(s);
@@ -351,7 +369,7 @@ impl App {
         let ready = self.game.loading >= 1.0;
         let pl = &self.game.player;
         let up = d_f32(pl.up());
-        let sky_state = sky::state(self.game.time, up);
+        let sky_state = sky::overcast(sky::state(self.game.time, up), self.game.rain);
         let alt = pl.altitude().max(0.0);
         let horizon = self.horizon();
         let (r, cu, f) = pl.camera_basis();

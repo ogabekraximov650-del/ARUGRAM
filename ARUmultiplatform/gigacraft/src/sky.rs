@@ -19,6 +19,26 @@ pub struct SkyState {
     pub night: f32,
 }
 
+/// Bulutli/yomg'irli osmon: ranglar kulrangga, to'g'ridan-to'g'ri quyosh nuri susayadi. `k` — yomg'ir kuchi [0,1].
+pub fn overcast(mut s: SkyState, k: f32) -> SkyState {
+    let k = k.clamp(0.0, 1.0) * 0.65;
+    if k <= 0.0 {
+        return s;
+    }
+    let gray = |c: [f32; 3]| {
+        let l = (c[0] + c[1] + c[2]) / 3.0 * 0.82;
+        [l, l, l * 1.04]
+    };
+    s.top = lerp3(s.top, gray(s.top), k);
+    s.hor = lerp3(s.hor, gray(s.hor), k);
+    s.fog = lerp3(s.fog, gray(s.fog), k);
+    s.amb = lerp3(s.amb, gray(s.amb), k * 0.8);
+    for c in s.light_col.iter_mut() {
+        *c *= 1.0 - 0.55 * k;
+    }
+    s
+}
+
 /// `t` — kun fazasi [0,1); `up` — o'yinchi turgan joyning "tepa" yo'nalishi (sayyora markazidan tashqariga).
 /// t=0.25 va up=(0,1,0) bo'lsa — tush.
 pub fn state(t: f32, up: V3) -> SkyState {
@@ -100,5 +120,15 @@ mod tests {
             }
             assert!((s.light_dir.len() - 1.0).abs() < 1e-4);
         }
+    }
+
+    #[test]
+    fn yomgirda_osmon_xira() {
+        let d = state(PHASE_DAY, v3(0.0, 1.0, 0.0));
+        let r = overcast(d, 1.0);
+        assert!(r.light_col[0] < d.light_col[0] * 0.8);
+        assert!((r.top[0] - r.top[2]).abs() < (d.top[0] - d.top[2]).abs(), "kulrangga o'tishi kerak");
+        let same = overcast(d, 0.0);
+        assert_eq!(same.top, d.top);
     }
 }

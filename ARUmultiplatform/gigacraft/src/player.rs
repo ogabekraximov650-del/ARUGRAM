@@ -52,6 +52,13 @@ pub struct Player {
     pub land_dip: f64,
     /// Yer (yoki suv) yuzasidan balandlik (blok): uchish tezligi va to'qnashuvsiz rejim shunga bog'liq.
     pub agl: f64,
+    /// Pog'onaga chiqqanda kamera sekin ko'tarilishi uchun (ko'rinish siljishi, blok; manfiy — pastda).
+    pub step_smooth: f64,
+    /// Og'irlik kuchi ko'paytiruvchisi (Yerda 1, Oyda 1/6).
+    pub gravity: f64,
+    /// Iksir ta'siri: yurish tezligi va sakrash kuchi ko'paytiruvchilari.
+    pub speed_mult: f64,
+    pub jump_mult: f64,
 }
 
 /// Joyi `pos` bo'lgan o'yinchi uchun tegma asos: (o'ng, tepa, oldinga).
@@ -67,7 +74,7 @@ impl Player {
         let up = d_norm(pos);
         let r = if up[1].abs() > 0.95 { [1.0, 0.0, 0.0] } else { [0.0, 1.0, 0.0] };
         let heading = d_norm(d_sub(r, d_mul(up, d_dot(r, up))));
-        Player { pos, vel: [0.0; 3], heading, pitch: 0.0, on_ground: false, flying: false, fly_level: 0, in_water: false, running: false, bob_phase: 0.0, bob_amp: 0.0, land_dip: 0.0, agl: 0.0 }
+        Player { pos, vel: [0.0; 3], heading, pitch: 0.0, on_ground: false, flying: false, fly_level: 0, in_water: false, running: false, bob_phase: 0.0, bob_amp: 0.0, land_dip: 0.0, agl: 0.0, step_smooth: 0.0, gravity: 1.0, speed_mult: 1.0, jump_mult: 1.0 }
     }
 
     pub fn up(&self) -> D3 {
@@ -81,7 +88,7 @@ impl Player {
     /// Chizish uchun ko'z nuqtasi: yurganda tebranadi, qattiq tushganda pastga egiladi.
     pub fn eye_render(&self) -> D3 {
         let (right, up, _) = tangent_basis(self.pos, self.heading);
-        let by = self.bob_phase.sin() * 0.16 * self.bob_amp - self.land_dip;
+        let by = self.bob_phase.sin() * 0.16 * self.bob_amp - self.land_dip + self.step_smooth.clamp(-2.5, 0.5);
         let bx = (self.bob_phase * 0.5).cos() * 0.10 * self.bob_amp;
         d_add(self.eye(), d_add(d_mul(up, by), d_mul(right, bx)))
     }
@@ -184,6 +191,8 @@ impl Player {
                     let t = d_add(np, d_mul(up, lift));
                     if !self.collides_at(w, t, basis) {
                         self.pos = t;
+                        // Kamera pog'onaga birdan sakramaydi: siljish sekin so'nadi
+                        self.step_smooth -= lift;
                         break;
                     }
                     lift += 1.0;
@@ -251,15 +260,25 @@ impl Player {
             return;
         }
 
+        // Qattiq blok ichida qolib ketgan bo'lsa (masalan, ostiga blok qo'yildi yoki relyef o'zgardi): yuqoriga chiqariladi
+        if self.collides_at(w, self.pos, basis) {
+            let mut k = 0;
+            while k < 160 && self.collides_at(w, self.pos, basis) {
+                self.pos = d_add(self.pos, d_mul(up, 0.5));
+                k += 1;
+            }
+            self.vel = [0.0; 3];
+        }
         let mag = (sx * sx + sy * sy).sqrt();
         self.running = mag > 0.92 && self.on_ground && !self.in_water;
-        let speed = if self.in_water {
-            WALK * 0.55
-        } else if self.running {
-            WALK * RUN
-        } else {
-            WALK
-        };
+        let speed = self.speed_mult
+            * if self.in_water {
+                WALK * 0.55
+            } else if self.running {
+                WALK * RUN
+            } else {
+                WALK
+            };
         let (mut vr, mut vf, mut vu) = (d_dot(self.vel, right), d_dot(self.vel, fwd), d_dot(self.vel, up));
         // Qor ustida sirpanchiq; daryoda oqim olib ketadi
         let under = w.block(&cell_at(d_sub(self.pos, d_mul(up, 0.2))));
@@ -278,7 +297,7 @@ impl Player {
         vf += (sy * speed + d_dot(flow, fwd) - vf) * a;
         let vu_before = vu;
         if self.in_water {
-            vu -= GRAVITY * 0.8 * dt;
+            vu -= GRAVITY * self.gravity * 0.8 * dt;
             vu *= 1.0 - (2.5 * dt).min(0.5);
             if inp.jump {
                 vu = 22.0;
@@ -286,9 +305,9 @@ impl Player {
                 vu = -22.0;
             }
         } else {
-            vu = (vu - GRAVITY * dt).max(-220.0);
+            vu = (vu - GRAVITY * self.gravity * dt).max(-220.0);
             if inp.jump && self.on_ground {
-                vu = JUMP_V;
+                vu = JUMP_V * self.jump_mult;
             }
         }
         let was_ground = self.on_ground;
@@ -297,7 +316,7 @@ impl Player {
             if vu < 0.0 {
                 self.on_ground = true;
                 if !was_ground && vu_before < -9.0 {
-                    self.land_dip = (self.land_dip + (-vu_before) * 0.012).min(1.2);
+                    self.land_dip = (self.land_dip + (-vu_before) * 0.012).min(0.6);
                 }
             }
             vu = 0.0;
@@ -322,6 +341,7 @@ impl Player {
         self.bob_amp += (target - self.bob_amp) * (8.0 * dt).min(1.0);
         self.bob_phase += vh * dt * 0.17 * std::f64::consts::TAU * if self.on_ground { 1.0 } else { 0.0 };
         self.land_dip *= (1.0 - 6.0 * dt).max(0.0);
+        self.step_smooth *= (1.0 - 9.0 * dt).max(0.0);
         // Ko'p yurgandan keyin asos yangilanadi (egrilik)
         self.heading = tangent_basis(self.pos, self.heading).2;
     }
@@ -514,5 +534,92 @@ mod tests {
             let g = SEA_R as f64 + w.gen.terrain(d_norm(p.pos)).h.max(w.gen.terrain(d_norm(p.pos)).wl) as f64;
             assert!(d_len(p.pos) >= g + 0.4, "yerga kirdi: {} < {}", d_len(p.pos), g);
         }
+    }
+}
+
+#[cfg(test)]
+mod odam_yurishi {
+    use super::*;
+    use crate::blocks::STONE;
+
+    #[test]
+    fn blok_ichida_qolsa_yuqoriga_chiqadi() {
+        let w = World::new(1);
+        let sp = crate::game::find_spawn(&w);
+        let up = d_norm(sp);
+        // 5 blok yerga ko'milgan holat
+        let mut p = Player::new(d_sub(sp, d_mul(up, 5.0)));
+        assert!(p.collides(&w, p.pos), "yer ichida bo'lishi kerak");
+        for _ in 0..10 {
+            p.update(&w, &Input::default(), 0.016);
+        }
+        assert!(!p.collides(&w, p.pos));
+        assert!(d_len(p.pos) > d_len(sp) - 1.0, "yer yuzasiga chiqmadi");
+    }
+
+    #[test]
+    fn haqiqiy_relyefda_yurganda_yerga_kirmaydi() {
+        let w = World::new(3);
+        let sp = crate::game::find_spawn(&w);
+        let mut p = Player::new(sp);
+        p.heading = d_norm(d_cross(d_norm(sp), [0.0, 0.0, 1.0]));
+        for _ in 0..40 {
+            p.update(&w, &Input::default(), 0.016);
+        }
+        let mut worst = 0.0f64;
+        let mut turn = 0.0;
+        for i in 0..2400 {
+            // tabiiy yurish: ba'zan burilib, ba'zan sakrab
+            turn += 0.002;
+            if i % 90 == 0 {
+                p.turn(0.35 * (turn as f64).sin());
+            }
+            let inp = Input { mv: [0.0, 0.91], jump: i % 150 == 0, down: false };
+            p.update(&w, &inp, 0.016);
+            let gr = Player::ground_radius(&w, p.pos);
+            let depth = gr - d_len(p.pos);
+            worst = worst.max(depth);
+            assert!(!p.collides(&w, p.pos), "{i}: blok ichida (chuqurlik {depth})");
+        }
+        assert!(worst < 2.5, "relyefdan {worst} blok pastga kirdi");
+    }
+
+    #[test]
+    fn pogonaga_chiqishda_kamera_silliq() {
+        let (w, floor) = {
+            let w = World::new(1);
+            let (f, u0, v0) = (2u8, 30_000_000i64, 30_000_000i64);
+            let high = SEA_R + 9000;
+            for du in -60..60 {
+                for dv in -60..60 {
+                    w.set_block(&Cell { f, u: u0 + du, v: v0 + dv, r: high - 1 }, STONE);
+                    if du > 4 {
+                        w.set_block(&Cell { f, u: u0 + du, v: v0 + dv, r: high }, STONE);
+                    }
+                }
+            }
+            (w, d_mul(dir(f, u0 as f64 + 0.5, v0 as f64 + 0.5), high as f64))
+        };
+        let mut p = Player::new(floor);
+        for _ in 0..30 {
+            p.update(&w, &Input::default(), 0.016);
+        }
+        assert!(p.on_ground);
+        let mut min_smooth = 0.0f64;
+        let base = d_len(p.pos);
+        let mut jump = 0.0f64;
+        let mut prev_eye = d_len(p.eye_render());
+        for _ in 0..200 {
+            // doim bir tomonga yuramiz (heading ni pog'ona tomonga burib qo'yish uchun sinash)
+            p.update(&w, &Input { mv: [0.0, 0.5], ..Default::default() }, 0.016);
+            min_smooth = min_smooth.min(p.step_smooth);
+            let e = d_len(p.eye_render());
+            jump = jump.max((e - prev_eye).abs());
+            prev_eye = e;
+        }
+        let _ = base;
+        // kamera hech qachon bir kadrda butun blokka sakramaydi
+        assert!(jump < 0.9, "kamera sakradi: {jump}");
+        assert!(min_smooth > -2.6);
     }
 }
